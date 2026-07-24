@@ -72,3 +72,10 @@ export function fmtDir(deg) {
   const i = Math.round(((deg % 360) + 360) % 360 / 22.5) % 16;
   return `${Math.round(deg)}° ${COMPASS[i]}`;
 }
+
+/** Windrichtung als dreistellige Gradzahl ohne Kompass-Buchstabe (ddd°),
+ *  für die kompakte „ddd° ff"-Notation in „Aktuelle Bedingungen". */
+export function fmtDirPadded(deg) {
+  if (deg == null || !Number.isFinite(deg)) return "–––°";
+  return `${String(Math.round(((deg % 360) + 360) % 360)).padStart(3, "0")}°`;
+}

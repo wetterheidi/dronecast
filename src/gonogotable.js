@@ -47,7 +47,7 @@ function dateRow(groups) {
 function hourRow(time) {
   const tr = document.createElement("tr");
   tr.className = "gng-hourrow";
-  tr.append(th("Zeit", "gng-corner"));
+  tr.append(th("Zeit (loc)", "gng-corner"));
   for (const t of time) {
     const h = new Date(t * 1000).getHours();
     tr.append(th(String(h).padStart(2, "0"), "gng-hour"));

@@ -15,6 +15,8 @@ const DEFAULTS = {
   maxHeight: DEFAULT_MAX_HEIGHT, // m AGL
   forecastDays: DEFAULT_FORECAST_DAYS,
   droneProfile: DRONE_PROFILES[0].id,
+  lastPoint: null, // { lat, lon } – zuletzt gewählter Operationspunkt
+  baseLayer: "OpenStreetMap", // Name der aktiven Leaflet-Basiskarte
 };
 
 export const settings = { ...DEFAULTS };

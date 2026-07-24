@@ -10,8 +10,10 @@ import { renderGoNoGoTable } from "./gonogotable.js";
 import { DRONE_PROFILES, getProfile } from "./droneProfiles.js";
 import * as astro from "./astro.js";
 import { settings, loadSettings, updateSetting, OPTIONS } from "./settings.js";
+import { parseCoordInput } from "./coords.js";
+import { initGeoman } from "./geoman.js";
 import {
-  fmtHeight, fmtWind, fmtTemp, fmtDir, heightUnit,
+  fmtHeight, fmtWind, fmtTemp, fmtDirPadded, heightUnit,
 } from "./units.js";
 
 /* global L */
@@ -19,16 +21,48 @@ import {
 const el = (id) => document.getElementById(id);
 const state = { point: null, marker: null, data: null };
 
+// Einstellungen vor Karteninit laden, damit Startposition/Basiskarte bereitstehen.
+loadSettings();
+
 // ---------------------------------------------------------------------------
 // Karte
 // ---------------------------------------------------------------------------
-const map = L.map("map", { zoomControl: true }).setView([48.2, 11.6], 7);
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 19,
-  attribution: "© OpenStreetMap",
-}).addTo(map);
+const initialCenter = settings.lastPoint ? [settings.lastPoint.lat, settings.lastPoint.lon] : [48.2, 11.6];
+const initialZoom = settings.lastPoint ? 11 : 7;
+const map = L.map("map", { zoomControl: true }).setView(initialCenter, initialZoom);
 
-map.on("click", (e) => setPoint(e.latlng.lat, e.latlng.lng));
+// Basiskarten: OSM und Esri-Hybrid (Satellitenbild + Beschriftung), wie in trajectories.
+const baseLayers = {
+  "OpenStreetMap": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "© OpenStreetMap",
+  }),
+  "Esri Satellit (hybrid)": L.layerGroup([
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+      maxZoom: 19,
+    }),
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {
+      maxZoom: 19,
+      pane: "overlayPane",
+      zIndex: 2,
+    }),
+  ], {
+    attribution: "© Esri, USDA, USGS © OpenStreetMap contributors, and the GIS user community",
+  }),
+};
+const initialBase = baseLayers[settings.baseLayer] ? settings.baseLayer : "OpenStreetMap";
+baseLayers[initialBase].addTo(map);
+L.control.layers(baseLayers, null, { position: "topleft" }).addTo(map);
+map.on("baselayerchange", (e) => updateSetting("baseLayer", e.name));
+
+// Geoman-Zeichenwerkzeug (Marker/Linie/Kreis, Peilung/Radius-Labels).
+initGeoman(map);
+
+// Kartenklick setzt den Operationspunkt — außer Geoman zeichnet/editiert gerade.
+map.on("click", (e) => {
+  if (map.pm.globalDrawModeEnabled() || map.pm.globalEditModeEnabled()) return;
+  setPoint(e.latlng.lat, e.latlng.lng);
+});
 
 function setPoint(lat, lon) {
   state.point = { lat, lon };
@@ -42,7 +76,25 @@ function setPoint(lat, lon) {
   state.marker.bindTooltip(label, { className: "point-tip" });
   el("load").disabled = false;
   setStatus("Bereit zum Laden.", "");
+  updateSetting("lastPoint", { lat, lon });
 }
+
+// Zuletzt verwendete Position beim Start wiederherstellen (kein Auto-Laden).
+if (settings.lastPoint) setPoint(settings.lastPoint.lat, settings.lastPoint.lon);
+
+// ---------------------------------------------------------------------------
+// Positions-Eingabe: Dezimalgrad oder MGRS, alternativ zum Kartenklick.
+// ---------------------------------------------------------------------------
+function goToCoordInput() {
+  const parsed = parseCoordInput(el("coordinput").value);
+  if (!parsed) { setStatus("Ungültige Koordinate.", "error"); return; }
+  setPoint(parsed.lat, parsed.lon);
+  map.setView([parsed.lat, parsed.lon], Math.max(map.getZoom(), 11));
+}
+el("coordgo").addEventListener("click", goToCoordInput);
+el("coordinput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); goToCoordInput(); }
+});
 
 // ---------------------------------------------------------------------------
 // Vorhersage laden
@@ -113,21 +165,22 @@ function renderNow() {
     : "–";
 
   const rows = [];
-  rows.push(`<div class="now-time">Gültig: ${time}</div>`);
+  rows.push(`<div class="now-time">Gültig (loc): ${time}</div>`);
 
   // Modell-Level-Wind auf Flughöhe – der Kernvorteil.
   rows.push(`<div class="wx-group">Wind auf Höhe (${heightUnit()} AGL)</div>`);
   for (const w of winds) {
     const val = w.error
       ? `<span class="hint">${w.error}</span>`
-      : `${fmtWind(Math.hypot(w.u, w.v))} · ${fmtDir(windFromDir(w.u, w.v))}`;
+      : `${fmtDirPadded(windFromDir(w.u, w.v))} ${fmtWind(Math.hypot(w.u, w.v))}`;
     rows.push(line(fmtHeight(w.h), val));
   }
 
   // Oberfläche / limitierende Faktoren.
   rows.push(`<div class="wx-group">Oberfläche</div>`);
-  rows.push(line("Wind 10 m", fmtWind(kmhToMs(at("wind_speed_10m")))
-    + (at("wind_direction_10m") != null ? ` · ${fmtDir(at("wind_direction_10m"))}` : "")));
+  rows.push(line("Wind 10 m", at("wind_direction_10m") != null
+    ? `${fmtDirPadded(at("wind_direction_10m"))} ${fmtWind(kmhToMs(at("wind_speed_10m")))}`
+    : fmtWind(kmhToMs(at("wind_speed_10m")))));
   rows.push(line("Böen 10 m", fmtWind(kmhToMs(at("wind_gusts_10m")))));
   rows.push(line("Temperatur", fmtTemp(at("temperature_2m"))));
   rows.push(line("Taupunkt", fmtTemp(at("dew_point_2m"))));
@@ -283,7 +336,6 @@ window.addEventListener("resize", () => {
 // Settings-Panel verdrahten
 // ---------------------------------------------------------------------------
 function initSettings() {
-  loadSettings();
   fillOptions("set-maxheight", OPTIONS.maxHeight, (v) => `${v} m`);
   fillOptions("set-days", OPTIONS.forecastDays, (v) => `${v} ${v === 1 ? "Tag" : "Tage"}`);
   el("gng-profile").innerHTML = DRONE_PROFILES.map((p) => `<option value="${p.id}">${p.label}</option>`).join("");

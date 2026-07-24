@@ -57,6 +57,7 @@ export function renderCrossSection(host, field, opts = {}) {
   const yW = yFor(wTop, wBot), yT = yFor(tTop, tBot), yC = yFor(cTop, cBot);
 
   const svg = mk("svg", { width: W, height: Hpx, viewBox: `0 0 ${W} ${Hpx}`, class: "xs-svg" });
+  svg.append(txt(2, 10, "loc", MUTED, 9, "start")); // Zeitzonen-Hinweis: lokale Zeit
 
   // Panels: Heatmap-Zellen (Färbung nach physikalischem Wert, Skala einheitenfest).
   const gW = mk("g", {}), gT = mk("g", {}), gC = mk("g", {});

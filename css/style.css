@@ -41,12 +41,23 @@ html, body {
 .hint { font-weight: 400; color: #52514e; font-size: 12px; }
 .mono { font-variant-numeric: tabular-nums; }
 
-select, input[type="number"] {
+select, input[type="number"], input[type="text"] {
   font: inherit;
   padding: 3px 6px;
   border: 1px solid #c9c8c2;
   border-radius: 5px;
   background: #fff;
+}
+
+#coordinput { flex: 1; min-width: 0; }
+#coordgo {
+  font: inherit;
+  padding: 3px 10px;
+  border: 1px solid #c9c8c2;
+  border-radius: 5px;
+  background: #fff;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
@@ -191,6 +202,63 @@ select, input[type="number"] {
 .footer { margin-top: 12px; font-size: 11px; color: #52514e; line-height: 1.5; }
 
 .point-tip { font-variant-numeric: tabular-nums; }
+
+/* --- Geoman-Zeichenwerkzeug: Hinweis-Leiste + Mess-Labels ---------------- */
+.geoman-hint-bar {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30, 30, 30, 0.82);
+  color: #fff;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 900;
+  opacity: 1;
+  transition: opacity 0.5s ease;
+  display: none;
+}
+.geoman-hint-bar.fading { opacity: 0; }
+
+.leaflet-measure-label {
+  position: absolute;
+  font: 9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-weight: bold;
+  background: rgba(252, 252, 251, 0.95);
+  color: #0b0b0b;
+  padding: 5px 8px;
+  border-radius: 4px;
+  border: 2px solid #e34948;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+  text-align: left;
+  pointer-events: none;
+  display: none;
+  z-index: 900;
+}
+
+.geoman-permanent-label {
+  background: rgba(252, 252, 251, 0.95);
+  border: 1px solid #c9c8c2;
+  border-radius: 4px;
+  padding: 5px 8px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  min-width: 50px;
+  font-size: 9px;
+  line-height: 1;
+}
+.geoman-permanent-label div {
+  font-size: 9px;
+  font-weight: normal;
+  text-align: left;
+  line-height: 1.4;
+  color: #0b0b0b;
+}
+.geoman-label-container {}
 
 /* --- Mobil: Panel als Bottom-Sheet --------------------------------------- */
 @media (max-width: 700px), (max-height: 500px) {

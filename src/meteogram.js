@@ -72,7 +72,8 @@ export function renderMeteogram(host, model) {
       fill: NIGHT,
     }));
   }
-  // Tagestrenner + Datum, Stundenmarken (06/12/18) oben.
+  // Tagestrenner + Datum, Stundenmarken (06/12/18) oben; Zeitzonen-Hinweis Eck oben links.
+  svg.append(txt(2, 10, "loc", MUTED, 9, "start"));
   drawTimeAxis(svg, time, x, stackTop, stackBot);
 
   let yTop = TOPAXIS;
