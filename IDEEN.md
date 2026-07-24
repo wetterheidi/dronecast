@@ -3,6 +3,10 @@
 Sammlung möglicher Verbesserungen für spätere Ausbaustufen. Kein Zwang zur
 Reihenfolge — hier landet, was uns beim Bauen als „später mal" auffällt.
 
+Wie die bereits gebauten abgeleiteten Größen (LCL, RH-Ceiling, Go/No-Go-
+Schwellenwertlogik, …) genau funktionieren, steht in [METHODIK.md](METHODIK.md)
+— hier geht es nur um das, was noch offen ist.
+
 ---
 
 ## Wolkenbasis: Ceiling-Höhe aus dem Modell-RH-Profil
