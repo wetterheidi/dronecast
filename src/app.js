@@ -12,6 +12,7 @@ import * as astro from "./astro.js";
 import { settings, loadSettings, updateSetting, OPTIONS } from "./settings.js";
 import { parseCoordInput } from "./coords.js";
 import { initGeoman } from "./geoman.js";
+import { initMapLayers } from "./maplayers.js";
 import {
   fmtHeight, fmtWind, fmtTemp, fmtDirPadded, heightUnit, heightToDisplay,
 } from "./units.js";
@@ -57,6 +58,9 @@ map.on("baselayerchange", (e) => updateSetting("baseLayer", e.name));
 
 // Geoman-Zeichenwerkzeug (Marker/Linie/Kreis, Peilung/Radius-Labels).
 initGeoman(map);
+
+// Kartenlayer: Satellit (DWD-WMS) + Niederschlagsradar (RainViewer).
+initMapLayers(map);
 
 // Kartenklick setzt den Operationspunkt — außer Geoman zeichnet/editiert gerade.
 map.on("click", (e) => {

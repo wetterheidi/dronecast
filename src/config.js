@@ -63,3 +63,22 @@ export const DEFAULT_FORECAST_DAYS = 2;
 // Höhen (AGL), für die im Grundgerüst der Modell-Level-Wind gezeigt wird.
 // (Später ersetzt durch frei wählbare Profile.)
 export const PREVIEW_HEIGHTS = [50, 100, 150];
+
+// Kartenlayer: Niederschlagsradar (RainViewer, kein Key nötig, CORS offen)
+// und Satellit (DWD-WMS, CORS offen, kein Proxy nötig).
+export const RAINVIEWER_API = "https://api.rainviewer.com/public/weather-maps.json";
+export const RAINVIEWER_META_TTL_MS = 5 * 60 * 1000;
+export const RAINVIEWER_COLOR_SCHEME = 4; // Free-Tier: Farbschema fix, keine Auswahl möglich
+
+export const DWD_WMS_BASE = "https://maps.dwd.de/geoserver/dwd/wms";
+export const DWD_SAT_PRODUCTS = [
+  { id: "Satellite_meteosat_1km_euat_rgb_day_hrv_and_night_ir108_3h", label: "Europa – HRV/IR (Tag/Nacht)" },
+  { id: "Satellite_worldmosaic_3km_world_ir108_3h", label: "Welt – IR 10,8 µm" },
+];
+// DWD liefert diese Produkte nur zu festen Terminen (00/03/…/21 UTC, laut
+// WMS-Capabilities-Abstract) — keine WMS-Zeitdimension, daher kein Abruf des
+// tatsächlichen Aufnahmezeitpunkts möglich. Für die Anzeige wird der zuletzt
+// planmäßig fällige Termin genähert (siehe maplayers.js).
+export const DWD_SAT_UPDATE_INTERVAL_H = 3;
+
+export const MAPLAYERS_TIME_STEP_MIN = 15;

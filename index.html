@@ -87,6 +87,41 @@
       </div>
     </details>
 
+    <details id="maplayers">
+      <summary>Satellit &amp; Niederschlagsradar</summary>
+
+      <div class="row ml-timenav">
+        <button id="ml-time-back" type="button">−15 min</button>
+        <span id="ml-time-display" class="mono">▶ Aktuell</span>
+        <button id="ml-time-fwd" type="button">+15 min</button>
+      </div>
+      <input id="ml-time-slider" type="range" min="-120" max="30" step="15" value="0" />
+      <div class="hint" id="ml-sat-hint">Zeit gilt für das Radar.</div>
+
+      <div class="ml-section">
+        <label class="row">
+          <span class="label"><input type="checkbox" id="ml-sat-on" /> Satellitenbild anzeigen</span>
+        </label>
+        <div class="radio-row" id="ml-sat-products"><!-- Radios aus DWD_SAT_PRODUCTS --></div>
+        <div class="row opacity-row">
+          <span class="label">Deckkraft Satellit</span>
+          <span id="ml-sat-opacity-val" class="mono">70%</span>
+        </div>
+        <input id="ml-sat-opacity" type="range" min="10" max="100" step="5" value="70" />
+      </div>
+
+      <div class="ml-section">
+        <label class="row">
+          <span class="label"><input type="checkbox" id="ml-radar-on" /> Niederschlagsradar anzeigen</span>
+        </label>
+        <div class="row opacity-row">
+          <span class="label">Deckkraft Radar</span>
+          <span id="ml-radar-opacity-val" class="mono">70%</span>
+        </div>
+        <input id="ml-radar-opacity" type="range" min="10" max="100" step="5" value="70" />
+      </div>
+    </details>
+
     <div class="footer">
       Daten: DWD ICON · Modell-Level-Winde via open-meteo.mah.priv.at,
       Oberflächenfelder via open-meteo.com · bilinear/linear interpoliert.

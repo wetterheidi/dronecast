@@ -1,6 +1,7 @@
 import {
   DEFAULT_MAX_HEIGHT, DEFAULT_FORECAST_DAYS,
   MAX_HEIGHT_OPTIONS, FORECAST_DAYS_OPTIONS,
+  DWD_SAT_PRODUCTS,
 } from "./config.js";
 import { setUnits } from "./units.js";
 import { DRONE_PROFILES } from "./droneProfiles.js";
@@ -17,6 +18,11 @@ const DEFAULTS = {
   droneProfile: DRONE_PROFILES[0].id,
   lastPoint: null, // { lat, lon } – zuletzt gewählter Operationspunkt
   baseLayer: "OpenStreetMap", // Name der aktiven Leaflet-Basiskarte
+  satLayerOn: false,
+  satLayerProduct: DWD_SAT_PRODUCTS[0].id,
+  satLayerOpacity: 0.7,
+  radarLayerOn: false,
+  radarLayerOpacity: 0.7,
 };
 
 export const settings = { ...DEFAULTS };
@@ -43,8 +49,8 @@ export function saveSettings() {
 
 export function updateSetting(key, value) {
   if (!(key in DEFAULTS)) return;
-  // Numerische Felder als Zahl führen.
-  if (key === "maxHeight" || key === "forecastDays") value = Number(value);
+  // Numerische Felder als Zahl führen (z. B. aus <select>/<input type="range">-Strings).
+  if (typeof DEFAULTS[key] === "number") value = Number(value);
   settings[key] = value;
   applyUnits();
   saveSettings();

@@ -179,12 +179,38 @@ Neuladen der App-Logik nötig). Falls das auf Dauer zu umständlich wird: ein
 Formular im Panel, das Profile liest/schreibt (z. B. `localStorage`), statt
 sie im Quellcode zu pflegen.
 
+## Karte: NWP-Modellgitter als Layer (Wind/Temp/Wolken/Ceiling)
+
+**Status:** zurückgestellt (Phase 2) · **Voraussetzung:** [src/maplayers.js](src/maplayers.js)
+(Satellit/Radar, Phase 1) ist gebaut und dient als Andockpunkt.
+
+### Idee
+Weitere Kartenlayer aus den ohnehin vorhandenen Modell-Level-Daten (u/v, T,
+RH, Bewölkung, …) — z. B. Windgeschwindigkeit/-richtung, Temperatur, Wolken
+oder Ceiling auf wählbarer Flughöhe, ggf. für mehrere Modelle (ICON-D2 vs.
+ICON-EU). Anders als Satellit/Radar (extern, fertige Kacheln) müssten diese
+Layer aus den eigenen Open-Meteo-Abfragen gerastert/gezeichnet werden
+(Canvas- oder Vektor-Overlay statt XYZ-Tiles).
+
+### Andockpunkt (aus Phase 1 bewusst so gebaut)
+`initMapLayers(map)` in [src/maplayers.js](src/maplayers.js) legt bereits
+einen eigenen Leaflet-Pane (`wxOverlays`, zIndex 350, zwischen `tilePane`
+und `overlayPane`) für Wetter-Overlays an; Satellit/Radar nutzen darin
+`zIndex: 10`/`20`. Neue NWP-Layer sollten in denselben Pane mit einem dazu
+konsistenten `zIndex` eingehängt werden, statt eine neue Pane-Strategie zu
+erfinden. Persistenz folgt demselben Muster wie `satLayerOn`/`radarLayerOn`
+in [src/settings.js](src/settings.js) (neue `DEFAULTS`-Keys, kein Rewrite
+nötig). Bewusst kein generisches Plugin-System für Phase 1 gebaut — erst
+beim tatsächlichen Bau eines zweiten/dritten NWP-Layer-Typs entscheiden, ob
+sich ein Registrierungsmuster lohnt.
+
+---
+
 ## Weitere Ideen (Kurzliste)
 
 - **Cross-Section (Höhe × Zeit):** eigenes Produkt; hier gehören die
   Höhenwinde aus Michaels Modell-Leveln hin (aus dem Meteogramm bewusst
   herausgehalten).
-- **Karte mit Layern:** auswählbare Vorhersageparameter, Satellit, Radar.
 - **Wind-Höhenwahl im Meteogramm:** optionaler Selektor (z. B. 10 m / 50 /
   100 / 150 m) statt fest 10 m — falls doch gewünscht.
 - **Echte Windbarbs** als Alternative zu den Richtungspfeilen.
