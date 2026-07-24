@@ -9,7 +9,11 @@
  *     vars: { temperature_2m, dew_point_2m, relative_humidity_2m,
  *             precipitation, weather_code, cloud_cover_low/mid/high,
  *             wind_gusts_10m (km/h), visibility (m) },
- *     units: {} }
+ *     units: {},
+ *     rhCeiling?: (number|null)[] }  // Höhe der untersten gesättigten
+ *       Modell-Schicht je Stunde (m AGL, aus column.js), verfeinert die
+ *       LCL-Schätzung der Wolkenbasis — optional, fehlt z. B. wenn die
+ *       Säule (noch) nicht geladen ist (dann reine LCL-Schätzung).
  * Wind wird aus den 10-m-Bodenfeldern gezeichnet (Höhenwinde -> Cross-Section).
  */
 
@@ -17,7 +21,7 @@ import {
   heightToDisplay, heightUnit,
   windToDisplay, windUnit, tempToDisplay, tempUnit,
 } from "./units.js";
-import { cloudBaseAgl } from "./clouds.js";
+import { refineCloudBase } from "./clouds.js";
 
 const NS = "http://www.w3.org/2000/svg";
 const INK = "#0b0b0b";
@@ -209,9 +213,11 @@ function drawCloud(g, m, x, yTop, yBot) {
 function drawBaseVis(g, m, x, yTop, yBot) {
   const T = m.vars.temperature_2m, Td = m.vars.dew_point_2m;
   const lo = m.vars.cloud_cover_low, V = m.vars.visibility;
-  // Wolkenbasis ≈ LCL (Espy), siehe clouds.js. Linienstil kodiert Ceiling:
-  // 25–50 % (SCT) gestrichelt, >50 % (BKN/OVC) durchgezogen, <25 % keine Linie.
-  const base = m.time.map((t, i) => cloudBaseAgl(T[i], Td[i], lo[i]));
+  // Wolkenbasis: LCL (Espy) verfeinert mit dem Modell-Feuchteprofil, falls
+  // vorhanden (siehe clouds.js/column.js). Trigger bleibt cloud_cover_low.
+  const refined = m.time.map((t, i) => refineCloudBase(T[i], Td[i], lo[i], m.rhCeiling ? m.rhCeiling[i] : null));
+  const base = refined.map((r) => (r ? r.baseM : null));
+  const confident = refined.map((r) => (r ? r.confident : false));
   // y-Achse deckt immer die Vorhersagehöhe ab, expandiert bei Bedarf für eine
   // höhere tiefe Basis, gedeckelt auf das tiefe Stockwerk (~2500 m AGL).
   const LOW_TOP_M = 2500;
@@ -227,18 +233,19 @@ function drawBaseVis(g, m, x, yTop, yBot) {
 
   const visKm = V.map((v) => (Number.isFinite(v) ? Math.min(15, v / 1000) : null));
   polyline(g, m.time, visKm, (v) => yR(v), x, COL.vis, 1.6);
-  // Basislinie segmentweise: Ceiling (>50 %) durchgezogen, sonst gestrichelt.
+  // Basislinie segmentweise: durchgezogen, wenn Bedeckung UND Feuchteprofil
+  // übereinstimmen (hohe Konfidenz), sonst gestrichelt (nur ein Signal).
   styledLine(g, m.time, base, (v) => yL(heightToDisplay(v)), x, COL.base, 1.8,
-    (i) => (((lo[i] ?? 0) + (lo[i + 1] ?? 0)) / 2 > 50 ? null : "4 3"));
+    (i) => (confident[i] && confident[i + 1] ? null : "4 3"));
 
-  // Legende mit Linienstilen (durchgezogen = Ceiling, gestrichelt = SCT).
+  // Legende mit Linienstilen (durchgezogen = hohe Konfidenz, gestrichelt = ein Signal).
   const ly = yBot - 6; let lx = M.l + 4;
   const sample = (dash) => {
     g.append(mk("line", { x1: lx, y1: ly - 3, x2: lx + 14, y2: ly - 3, stroke: COL.base, "stroke-width": 1.8, ...(dash ? { "stroke-dasharray": "4 3" } : {}) }));
     lx += 17;
   };
-  sample(false); g.append(txt(lx, ly - 1, "Ceiling", MUTED, 10, "start")); lx += 46;
-  sample(true); g.append(txt(lx, ly - 1, "SCT", MUTED, 10, "start")); lx += 34;
+  sample(false); g.append(txt(lx, ly - 1, "sicher", MUTED, 10, "start")); lx += 40;
+  sample(true); g.append(txt(lx, ly - 1, "unsicher", MUTED, 10, "start")); lx += 50;
   g.append(mk("rect", { x: lx, y: ly - 7, width: 10, height: 4, rx: 1, fill: COL.vis }));
   g.append(txt(lx + 13, ly - 3, "Sicht", MUTED, 10, "start"));
 }

@@ -7,23 +7,44 @@ Reihenfolge — hier landet, was uns beim Bauen als „später mal" auffällt.
 
 ## Wolkenbasis: Ceiling-Höhe aus dem Modell-RH-Profil
 
-**Status:** zurückgestellt · **Motivation:** die aktuell schwächste Größe im
-Meteogramm ist die *Höhe* der Wolkenbasis.
+**Status:** gebaut ([src/column.js](src/column.js) `lowestSaturatedHeight`,
+[src/clouds.js](src/clouds.js) `refineCloudBase`, verdrahtet in
+[src/app.js](src/app.js) `openMeteogram`/[src/meteogram.js](src/meteogram.js)
+`drawBaseVis`) · **Motivation:** die bis dahin schwächste Größe im
+Meteogramm war die *Höhe* der Wolkenbasis.
 
-### Aktueller Stand (Ausgangslage)
-Im Panel „Wolkenbasis tief" ([src/meteogram.js](src/meteogram.js), `drawBaseVis`):
-- Basis = **LCL nach Espy**: `125 · (T₂ₘ − Td₂ₘ)` m AGL.
-- Trigger nur über **tiefe** Bewölkung (`cloud_cover_low`):
-  `< 25 %` keine Linie · `25–50 %` gestrichelt (SCT) · `> 50 %` durchgezogen
-  (BKN/OVC = Ceiling).
-- Schwäche: LCL ist eine **Bodenpaket-Größe** — gut für konvektive/tiefe
-  Wolken, ungenau für Schichtwolken.
+### Umsetzung (abweichend von der ursprünglichen Skizze)
+Statt eine neue `WindField`-`metExtras`-Methode zu bauen (Skizze unten):
+`relative_humidity_level{l}` wird bereits **unconditional** von
+`fetchColumn()` ([src/column.js](src/column.js)) für alle Level geladen —
+dieselbe Säule, die Cross-Section/Briefing ohnehin brauchen
+(`ensureColumn()` in app.js, gecacht in `state.data.col`). Kein neuer
+Request-Pfad nötig, nur eine neue Auswertefunktion auf vorhandenen Daten.
 
-### Idee: RH-Profil als Höhen-Verfeinerung + Konsistenz-Check
-Feuchte **nicht** als Primärquelle (führt allein zu Unsicherheit — Erfahrung
-aus `upper_winds_open_meteo`), sondern als Höhen-Verfeinerung und Konfidenz.
+- `lowestSaturatedHeight(col, i, rhThreshold=85, capM=2500)`: unterste Höhe
+  (m AGL, zwischen Levels linear interpoliert), an der RH die Schwelle
+  erreicht — `null`, wenn nichts Gesättigtes im Low-Band (≤ `capM`) liegt.
+- `refineCloudBase(tC, tdC, ccLowPct, rhCeilingM)`: `cloud_cover_low` bleibt
+  der Trigger; existiert ein RH-Kandidat, ersetzt dessen Höhe die LCL-
+  Schätzung. `confident: true` nur wenn **beide** Signale übereinstimmen
+  (Bedeckung > 50 % **und** RH-Kandidat vorhanden) → Linienstil im
+  Meteogramm: durchgezogen (sicher) vs. gestrichelt (nur ein Signal) statt
+  der bisherigen reinen Bedeckungsgrad-Kodierung.
+- **Kosten:** `openMeteogram()` ist jetzt async und löst beim ersten Öffnen
+  `ensureColumn()` aus, falls noch nicht geschehen (sonst nur beim
+  Cross-Section/Briefing-Öffnen) — ein zusätzlicher, größerer Request beim
+  ersten Meteogramm-Öffnen. Schlägt der Abruf fehl, fällt das Panel sauber
+  auf die reine LCL-Schätzung zurück (kein Hard-Fail).
 
-Drei unabhängige Signale, die wir haben:
+**Noch offen:** ob/wie diese Verfeinerung auch in die Go/No-Go-Tabelle
+(`cloudBase`-Zeile) einfließen soll — bewusst zurückgestellt, siehe
+„Go/No-Go-Tabelle: Ausbaustufe 2" unten. Brainstorming dazu, das dort
+einfließen soll: Bedeckungsgrad nicht vernachlässigen, Verschneidung mit der
+Sicht-Zeile (v. a. Low Stratus/Nebel), eine eigene Gelb-Definition für
+Wolken, möglicherweise auch Verschneidung mit `weather_code` (ww).
+
+### Ursprüngliche Skizze (Referenz)
+Drei unabhängige Signale:
 
 | Signal | sagt uns | Schwäche |
 |---|---|---|
@@ -31,28 +52,11 @@ Drei unabhängige Signale, die wir haben:
 | LCL = 125·Spread | **Höhe** einer Basis | nur Bodenpaket |
 | Modell-RH-Profil (Michael, Level) | Höhe der **gesättigten** Schicht | RH-Schwellen modellabhängig |
 
-### Algorithmus (Skizze)
-1. In der `WindField` `metExtras` einschalten → `relative_humidity_level{l}`
-   pro Level verfügbar.
-2. Neue Methode: RH-Profil einer Säule zu Zeit *t* zurückgeben (analog zu
-   `windAt`, aber ganze Spalte im Low-Band Boden … ~2 km AGL).
-3. Pro Vorhersagestunde die Säule von unten durchgehen und die
-   RH→Wolkenmengen-Heuristik anwenden:
-   - `RH < 65 %` → SKC (frei)
-   - `65–85 %` → FEW/SCT
-   - `≥ 85 %` → BKN (Ceiling-Kandidat) · `≈ 100 %` → OVC
-4. **Kombinieren, nicht ersetzen:**
-   - `cloud_cover_low` bleibt der **Trigger** (Wolkenschema des Modells fängt
-     Subskalen-Effekte ab, die reine RH verpasst).
-   - Wo eine gesättigte Low-Schicht existiert: **deren Höhe statt LCL** plotten.
-   - Beide einig (`low > 50 %` **und** `RH ≥ 85 %`) → hohe Konfidenz →
-     durchgezogen; nur eins → gestrichelt.
-
-### Kosten / Hinweise
-- ~48 Profil-Auswertungen pro Ort und Lauf (Level sind ohnehin geladen, also
-  günstig — wie die frühere Höhen-Windreihe).
-- RH-Schwellen ggf. je Modell (ICON-D2 vs ICON-EU) leicht kalibrieren.
-- METAR-Achtel als Referenz: SKC 0 · FEW 1–2 · SCT 3–4 · BKN 5–7 · OVC 8.
+RH→Wolkenmengen-Heuristik: `RH < 65 %` → SKC (frei) · `65–85 %` → FEW/SCT ·
+`≥ 85 %` → BKN (Ceiling-Kandidat) · `≈ 100 %` → OVC. RH-Schwellen ggf. je
+Modell (ICON-D2 vs ICON-EU) noch kalibrieren — bislang ungeprüfter
+Platzhalter (85 %). METAR-Achtel als Referenz: SKC 0 · FEW 1–2 · SCT 3–4 ·
+BKN 5–7 · OVC 8.
 
 ---
 

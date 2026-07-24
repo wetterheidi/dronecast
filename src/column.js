@@ -106,6 +106,31 @@ export function sampleColumnAtHeight(col, i, ht) {
   return { h: ht, u: val(col.u), v: val(col.v), t: val(col.t), rh: val(col.rh), p };
 }
 
+/**
+ * Höhe (m AGL) des untersten Levels, an dem die relative Feuchte einen
+ * Sättigungs-Schwellwert erreicht (Kandidat für eine reale Wolkenbasis aus
+ * dem Modell-Feuchteprofil statt der reinen LCL-Schätzung) — begrenzt auf das
+ * "Low-Band" bis capM, um nicht versehentlich eine Mittel-/Hochwolke als
+ * tiefe Basis zu melden. null, wenn im Band kein gesättigtes Level existiert.
+ */
+export function lowestSaturatedHeight(col, i, rhThreshold = 85, capM = 2500) {
+  const L = col.nLevels;
+  for (let k = 0; k < L; k++) {
+    const h = col.h[k][i];
+    if (!Number.isFinite(h) || h > capM) return null;
+    const rh = col.rh[k][i];
+    if (!Number.isFinite(rh)) continue;
+    if (rh >= rhThreshold) {
+      if (k === 0) return h;
+      const hPrev = col.h[k - 1][i], rhPrev = col.rh[k - 1][i];
+      if (!Number.isFinite(hPrev) || !Number.isFinite(rhPrev) || rhPrev >= rhThreshold) return h;
+      const f = (rhThreshold - rhPrev) / (rh - rhPrev);
+      return hPrev + f * (h - hPrev);
+    }
+  }
+  return null;
+}
+
 // --- Helfer ----------------------------------------------------------------
 
 function bracket(hi, ht) {

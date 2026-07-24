@@ -10,32 +10,37 @@
  */
 
 import { cloudBaseAgl } from "./clouds.js";
+import { fmtHeight } from "./units.js";
 
 const KMH_TO_MS = 1 / 3.6;
 
 /**
- * @param surface     Rückgabe von fetchSurface() (weather.js)
- * @param windAtHeight Array parallel zu surface.time: {u,v} (m/s) oder null,
- *                     vorab z. B. per WindField.windAt() aufgelöst (app.js)
- * @param profile     Eintrag aus DRONE_PROFILES
- * @param opHeightM   Geplante Flughöhe AGL (i. d. R. settings.maxHeight) —
- *                     Wolkenbasis muss darüber liegen
+ * @param surface      Rückgabe von fetchSurface() (weather.js)
+ * @param windBandMax  Array parallel zu surface.time: Maximum der mittleren
+ *                     Windgeschwindigkeit (m/s) zwischen 10 m und opHeightM,
+ *                     oder null — vorab z. B. per WindField.windAt() über
+ *                     mehrere Höhen aufgelöst (app.js)
+ * @param profile      Eintrag aus DRONE_PROFILES
+ * @param opHeightM    Geplante Flughöhe AGL (i. d. R. settings.maxHeight) —
+ *                     Wolkenbasis muss darüber liegen, Bandmaximum bis dorthin
  * @returns { time, rows: [{id,label,kind,cells:[{status,value|text}]}],
  *            conclusion: [{status, limitingId}] }
  */
-export function evaluate(surface, windAtHeight, profile, opHeightM) {
+export function evaluate(surface, windBandMax, profile, opHeightM) {
   const time = surface.time;
   const v = surface.vars;
   const T = v.temperature_2m, Td = v.dew_point_2m, ccLow = v.cloud_cover_low;
-  const wc = v.weather_code, gustsKmh = v.wind_gusts_10m;
+  const wc = v.weather_code, gustsKmh = v.wind_gusts_10m, windKmh = v.wind_speed_10m;
   const visArr = v.visibility, precipArr = v.precipitation;
   const L = profile.limits;
 
   const rows = [
-    numericRow("windAtHeight", "Wind auf Flughöhe", "wind", L.windAtHeight, profile.marginPct,
-      time.map((_, i) => windSpeedAt(windAtHeight, i))),
+    numericRow("windSurface", "Wind 10 m", "wind", L.windSurface, profile.marginPct,
+      time.map((_, i) => (windKmh?.[i] != null ? windKmh[i] * KMH_TO_MS : null))),
     numericRow("gustSurface", "Böen 10 m", "wind", L.gustSurface, profile.marginPct,
       time.map((_, i) => (gustsKmh?.[i] != null ? gustsKmh[i] * KMH_TO_MS : null))),
+    numericRow("windBandMax", `Wind Maximum (10 m–${fmtHeight(opHeightM)})`, "wind", L.windBandMax, profile.marginPct,
+      time.map((_, i) => windBandMax?.[i] ?? null)),
     numericRow("cloudBase", "Wolkenbasis", "height", scaledMinLimit(L.cloudBase, opHeightM), profile.marginPct,
       time.map((_, i) => cloudBaseAgl(T?.[i], Td?.[i], ccLow?.[i])),
       { nullIsGreen: true }),
@@ -43,9 +48,7 @@ export function evaluate(surface, windAtHeight, profile, opHeightM) {
       time.map((_, i) => (visArr ? visArr[i] ?? null : null))),
     numericRow("precipitation", "Niederschlag", "precip", L.precipitation, profile.marginPct,
       time.map((_, i) => (precipArr ? precipArr[i] ?? null : null))),
-    numericRow("tempMin", "Temperatur (min)", "temp", L.tempMin, profile.marginPct,
-      time.map((_, i) => (T ? T[i] ?? null : null))),
-    numericRow("tempMax", "Temperatur (max)", "temp", L.tempMax, profile.marginPct,
+    rangeRow("temperature", "Temperatur", "temp", L.tempMin, L.tempMax, profile.marginPct,
       time.map((_, i) => (T ? T[i] ?? null : null))),
     hazardRow(time, wc, visArr),
   ];
@@ -64,6 +67,19 @@ function numericRow(id, label, kind, limit, defaultMarginPct, valuesRaw, opts = 
     return { status: evalThreshold(val, limit, defaultMarginPct), value: val };
   });
   return { id, label, kind, limit, cells };
+}
+
+// Ein Wert, zwei Grenzen (min UND max, z. B. Betriebstemperatur nach unten
+// und oben) — als EINE Zeile mit dem jeweils strengeren Status, statt zwei
+// Zeilen für denselben stündlichen Messwert.
+function rangeRow(id, label, kind, minLimit, maxLimit, defaultMarginPct, valuesRaw) {
+  const cells = valuesRaw.map((val) => {
+    if (val == null || !Number.isFinite(val)) return { status: "na", value: null };
+    const sMin = minLimit ? evalThreshold(val, minLimit, defaultMarginPct) : "green";
+    const sMax = maxLimit ? evalThreshold(val, maxLimit, defaultMarginPct) : "green";
+    return { status: worseStatus(sMin, sMax), value: val };
+  });
+  return { id, label, kind, cells };
 }
 
 // Gewitter/gefrierender Niederschlag aus weather_code -> rot. Nebel nur dann
@@ -97,15 +113,15 @@ function evalThreshold(value, limit, defaultMarginPct) {
   return "green";
 }
 
+const STATUS_RANK = { green: 0, yellow: 1, na: 1, red: 2 };
+function worseStatus(a, b) {
+  return STATUS_RANK[a] >= STATUS_RANK[b] ? a : b;
+}
+
 // Wolkenbasis muss über der geplanten Flughöhe UND über dem profilspezifischen
 // VLOS-Minimum liegen -> der strengere (größere) der beiden Werte gilt.
 function scaledMinLimit(limit, floorValue) {
   return { ...limit, value: Math.max(limit.value, floorValue) };
-}
-
-function windSpeedAt(windAtHeight, i) {
-  const w = windAtHeight?.[i];
-  return w && Number.isFinite(w.u) && Number.isFinite(w.v) ? Math.hypot(w.u, w.v) : null;
 }
 
 // Gesamtstatus je Stunde: rot > "keine Daten" > gelb > grün — fehlende Daten

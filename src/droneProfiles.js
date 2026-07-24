@@ -20,7 +20,11 @@ export const DRONE_PROFILES = [
     label: "Platzhalter · Multicopter (Beispielwerte, nicht geprüft)",
     marginPct: 0.2,
     limits: {
-      windAtHeight: { direction: "max", value: 12, unit: "m/s" },
+      // Boden (10 m) — Start/Landung, oft die strengere Grenze wegen Böigkeit/Propwash.
+      windSurface: { direction: "max", value: 10, unit: "m/s" },
+      // Maximum zwischen 10 m und der geplanten Flughöhe — deckt Low-Level-Jets
+      // und Scherschichten ab, die am Boden allein nicht sichtbar sind.
+      windBandMax: { direction: "max", value: 12, unit: "m/s" },
       gustSurface: { direction: "max", value: 15, unit: "m/s" },
       cloudBase: { direction: "min", value: 150, unit: "m" },
       visibility: { direction: "min", value: 5000, unit: "m" },

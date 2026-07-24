@@ -2,7 +2,7 @@ import { MODELS, PREVIEW_HEIGHTS } from "./config.js";
 import { WindField } from "./windfield.js";
 import { fetchSurface, nearestFutureIndex } from "./weather.js";
 import { renderMeteogram } from "./meteogram.js";
-import { fetchColumn, buildField } from "./column.js";
+import { fetchColumn, buildField, lowestSaturatedHeight } from "./column.js";
 import { renderCrossSection } from "./crosssection.js";
 import { buildBriefingHtml } from "./briefing.js";
 import { evaluate as evaluateGoNoGo } from "./gonogo.js";
@@ -210,7 +210,7 @@ document.querySelectorAll(".product").forEach((btn) => {
   });
 });
 
-function openMeteogram() {
+async function openMeteogram() {
   if (!state.data || !state.point) return;
   const { surface } = state.data;
   const { lat, lon } = state.point;
@@ -222,6 +222,18 @@ function openMeteogram() {
   const events = astro.moonRiseSetEvents(t0, t1, lat, lon)
     .map((e) => ({ ...e, ...astro.moonPhase(e.t) }));
 
+  // RH-Profil-Verfeinerung der Wolkenbasis: Säule wird ohnehin für
+  // Cross-Section/Briefing gebraucht und hier mitgenutzt (gecacht in
+  // state.data.col). Schlägt der Abruf fehl, zeichnet drawBaseVis einfach
+  // mit der reinen LCL-Schätzung weiter (kein Hard-Fail fürs Meteogramm).
+  let rhCeiling = null;
+  try {
+    const col = await ensureColumn();
+    if (col.time.length === surface.time.length) {
+      rhCeiling = surface.time.map((_, i) => lowestSaturatedHeight(col, i));
+    }
+  } catch { /* Säule nicht verfügbar -> Meteogramm bleibt bei reiner LCL-Schätzung */ }
+
   renderMeteogram(el("mg-body"), {
     time: surface.time,
     nights: surface.nights,
@@ -229,6 +241,7 @@ function openMeteogram() {
     units: surface.units,
     moon: { events },
     maxHeightM: settings.maxHeight,
+    rhCeiling,
   });
 }
 
@@ -262,31 +275,30 @@ async function openCrossSection() {
 }
 el("xs-close").addEventListener("click", () => { el("crosssection").hidden = true; });
 
-// Go/No-Go-Tabelle: Wind auf Flughöhe pro Stunde aus dem bereits gecachten
-// WindField auflösen (keine neuen Requests, nur Interpolation) und gegen das
-// gewählte Drohnenprofil bewerten.
+// Go/No-Go-Tabelle: Windmaximum zwischen 10 m und Flughöhe pro Stunde aus dem
+// bereits gecachten WindField auflösen (keine neuen Requests, nur
+// Interpolation an ein paar Stützhöhen) und gegen das Drohnenprofil bewerten.
 async function openGoNoGo() {
   if (!state.data || !state.point) return;
   el("gonogo").hidden = false;
   el("gng-sub").textContent = el("pointpos").textContent;
-  if (!state.data.windAtHeight) {
-    el("gng-body").textContent = "Werte Wind auf Flughöhe aus …";
+  if (!state.data.windBandMax) {
+    el("gng-body").textContent = "Werte Wind zwischen 10 m und Flughöhe aus …";
     try {
       const { lat, lon } = state.point;
       const { surface, wf } = state.data;
       const arr = [];
       for (const t of surface.time) {
-        const r = await wf.windAt(lat, lon, { type: "height", mode: "agl", value: settings.maxHeight }, t * 1000);
-        arr.push(r.error ? null : { u: r.u, v: r.v });
+        arr.push(await windBandMaxAt(wf, lat, lon, 10, settings.maxHeight, t * 1000));
       }
-      state.data.windAtHeight = arr;
+      state.data.windBandMax = arr;
     } catch (e) {
       el("gng-body").textContent = "Fehler beim Auswerten des Höhenwinds: " + (e.message || e);
       return;
     }
   }
   renderGoNoGoTable(el("gng-body"), evaluateGoNoGo(
-    state.data.surface, state.data.windAtHeight, getProfile(settings.droneProfile), settings.maxHeight,
+    state.data.surface, state.data.windBandMax, getProfile(settings.droneProfile), settings.maxHeight,
   ));
 }
 el("gng-close").addEventListener("click", () => { el("gonogo").hidden = true; });
@@ -294,6 +306,29 @@ el("gng-profile").addEventListener("change", (e) => {
   updateSetting("droneProfile", e.target.value);
   if (!el("gonogo").hidden) openGoNoGo();
 });
+
+// Maximale mittlere Windgeschwindigkeit (m/s) zwischen hMinM und hMaxM zu
+// einem Zeitpunkt: an ein paar Stützhöhen abgetastet (das WindField ist am
+// Punkt bereits gecacht, also reine Interpolation ohne neue Requests).
+async function windBandMaxAt(wf, lat, lon, hMinM, hMaxM, tMs) {
+  let max = null;
+  for (const h of bandHeights(hMinM, hMaxM)) {
+    const r = await wf.windAt(lat, lon, { type: "height", mode: "agl", value: h }, tMs);
+    if (r.error) continue;
+    const s = Math.hypot(r.u, r.v);
+    if (max == null || s > max) max = s;
+  }
+  return max;
+}
+
+// Stützhöhen fürs Bandmaximum: mind. 3, höchstens 16, grob alle 50 m.
+function bandHeights(hMinM, hMaxM) {
+  if (hMaxM <= hMinM) return [hMinM];
+  const n = Math.min(16, Math.max(3, Math.round((hMaxM - hMinM) / 50) + 1));
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(hMinM + (hMaxM - hMinM) * i / (n - 1));
+  return out;
+}
 
 // Briefing: druckbare HTML-Seite in neuem Tab (Oberfläche + Höhendaten heute).
 async function openBriefing() {
@@ -363,9 +398,9 @@ function refreshViews() {
   if (!el("crosssection").hidden && state.data?.field) {
     renderCrossSection(el("xs-body"), state.data.field, { maxHeightM: settings.maxHeight });
   }
-  if (!el("gonogo").hidden && state.data?.windAtHeight) {
+  if (!el("gonogo").hidden && state.data?.windBandMax) {
     renderGoNoGoTable(el("gng-body"), evaluateGoNoGo(
-      state.data.surface, state.data.windAtHeight, getProfile(settings.droneProfile), settings.maxHeight,
+      state.data.surface, state.data.windBandMax, getProfile(settings.droneProfile), settings.maxHeight,
     ));
   }
 }
