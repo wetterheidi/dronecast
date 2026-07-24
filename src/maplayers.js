@@ -75,13 +75,6 @@ export function initMapLayers(map) {
       Math.abs(f.time - targetSec) < Math.abs(best.time - targetSec) ? f : best);
   }
 
-  function rvFmtTime(unixSec) {
-    const d = new Date(unixSec * 1000);
-    const hh = String(d.getHours()).padStart(2, "0");
-    const mm = String(d.getMinutes()).padStart(2, "0");
-    return `${hh}:${mm}`;
-  }
-
   // -- Radar (RainViewer) ---------------------------------------------------
   async function refreshRadar() {
     if (!settings.radarLayerOn) return;
@@ -120,7 +113,8 @@ export function initMapLayers(map) {
     radarLayer.addTo(map);
 
     const isNowcast = (meta.radar.nowcast || []).some((f) => f.time === frame.time);
-    el("ml-radar-time").textContent = `Angezeigt: ${rvFmtTime(frame.time)}${isNowcast ? " ▶ Nowcast" : ""}`;
+    const frameTxt = fmtLocalTimestamp(new Date(frame.time * 1000));
+    el("ml-radar-time").textContent = `Angezeigt: ${frameTxt}${isNowcast ? " ▶ Nowcast" : ""}`;
   }
 
   function removeRadar() {
