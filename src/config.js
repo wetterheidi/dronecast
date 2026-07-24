@@ -65,20 +65,24 @@ export const DEFAULT_FORECAST_DAYS = 2;
 export const PREVIEW_HEIGHTS = [50, 100, 150];
 
 // Kartenlayer: Niederschlagsradar (RainViewer, kein Key nötig, CORS offen)
-// und Satellit (DWD-WMS, CORS offen, kein Proxy nötig).
+// und Satellit (EUMETSAT/EUMETView-WMS, CORS offen, kein Proxy nötig).
 export const RAINVIEWER_API = "https://api.rainviewer.com/public/weather-maps.json";
 export const RAINVIEWER_META_TTL_MS = 5 * 60 * 1000;
 export const RAINVIEWER_COLOR_SCHEME = 4; // Free-Tier: Farbschema fix, keine Auswahl möglich
 
-export const DWD_WMS_BASE = "https://maps.dwd.de/geoserver/dwd/wms";
-export const DWD_SAT_PRODUCTS = [
-  { id: "Satellite_meteosat_1km_euat_rgb_day_hrv_and_night_ir108_3h", label: "Europa – HRV/IR (Tag/Nacht)" },
-  { id: "Satellite_worldmosaic_3km_world_ir108_3h", label: "Welt – IR 10,8 µm" },
+// EUMETSATs öffentlicher WMS (view.eumetsat.int) hat — anders als DWDs WMS —
+// eine echte Zeitdimension mit 10–15-Minuten-Raster und Verzögerung von nur
+// ca. 20–30 Min. zu "jetzt" (statt DWDs bis zu 3 Std.). GetCapabilities wird
+// gecacht geladen, um daraus je Produkt Start/Ende/Rasterschritt der
+// Zeitdimension zu bestimmen (siehe maplayers.js `getSatExtents`).
+export const EUMETSAT_WMS_BASE = "https://view.eumetsat.int/geoserver/wms";
+export const EUMETSAT_CAPS_URL = `${EUMETSAT_WMS_BASE}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities`;
+export const EUMETSAT_CAPS_TTL_MS = 10 * 60 * 1000;
+export const SAT_PRODUCTS = [
+  { id: "msg_fes:rgb_natural", label: "Natural Color RGB" },
+  { id: "msg_fes:rgb_dust", label: "Dust RGB" },
+  { id: "mtg_fd:ir105_hrfi", label: "IR 10,5 µm (MTG HRFI)" },
+  { id: "msg_fes:vis006", label: "VIS 0,6 µm (nur tagsüber)" },
 ];
-// DWD liefert diese Produkte nur zu festen Terminen (00/03/…/21 UTC, laut
-// WMS-Capabilities-Abstract) — keine WMS-Zeitdimension, daher kein Abruf des
-// tatsächlichen Aufnahmezeitpunkts möglich. Für die Anzeige wird der zuletzt
-// planmäßig fällige Termin genähert (siehe maplayers.js).
-export const DWD_SAT_UPDATE_INTERVAL_H = 3;
 
 export const MAPLAYERS_TIME_STEP_MIN = 15;

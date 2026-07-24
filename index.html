@@ -96,13 +96,15 @@
         <button id="ml-time-fwd" type="button">+15 min</button>
       </div>
       <input id="ml-time-slider" type="range" min="-120" max="30" step="15" value="0" />
-      <div class="hint" id="ml-sat-hint">Zeit gilt für das Radar.</div>
+      <div class="hint">Zeigt Radar und Satellit zum gewählten Zeitpunkt
+        (jeweils nächstliegend verfügbare Aufnahme).</div>
 
       <div class="ml-section">
         <label class="row">
           <span class="label"><input type="checkbox" id="ml-sat-on" /> Satellitenbild anzeigen</span>
         </label>
-        <div class="radio-row" id="ml-sat-products"><!-- Radios aus DWD_SAT_PRODUCTS --></div>
+        <div class="radio-row" id="ml-sat-products"><!-- Radios aus SAT_PRODUCTS --></div>
+        <div class="hint mono" id="ml-sat-time"></div>
         <div class="row opacity-row">
           <span class="label">Deckkraft Satellit</span>
           <span id="ml-sat-opacity-val" class="mono">70%</span>
@@ -114,6 +116,7 @@
         <label class="row">
           <span class="label"><input type="checkbox" id="ml-radar-on" /> Niederschlagsradar anzeigen</span>
         </label>
+        <div class="hint mono" id="ml-radar-time"></div>
         <div class="row opacity-row">
           <span class="label">Deckkraft Radar</span>
           <span id="ml-radar-opacity-val" class="mono">70%</span>

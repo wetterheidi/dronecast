@@ -217,3 +217,4 @@ sich ein Registrierungsmuster lohnt.
 - **Südhalbkugel:** Sichel-Orientierung der Mondscheibe spiegeln
   (aktuell NH-Konvention: zunehmend = rechts beleuchtet).
 - **RH-Profil-Ceiling** (siehe oben).
+- **Andere Satellitenbildquelle weltweit:** Alternative: NASA GIBS  Falls du doch einmal eine globale Abdeckung benötigst, bietet die NASA mit den Global Imagery Browse Services (GIBS) ebenfalls einen hervorragenden, kostenfreien WMS/WMTS. NASA GIBS integriert die europäischen Meteosat-Daten in ihre globalen Karten. Die Latenz ist dort mit ca. 30 Minuten minimal höher als direkt bei EUMETSAT, dafür lassen sich die Kacheln besonders performant als standardmäßiges WMTS-Overlay laden.  
