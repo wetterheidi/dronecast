@@ -1,0 +1,229 @@
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  color: #0b0b0b;
+}
+
+#map { position: absolute; inset: 0; cursor: crosshair; }
+
+#panel {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1000;
+  width: 380px;
+  max-height: calc(100% - 20px);
+  overflow-y: auto;
+  background: rgba(252, 252, 251, 0.96);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  padding: 12px 14px;
+}
+
+#panelhead { display: flex; align-items: center; justify-content: space-between; margin: 0 0 10px; }
+#panel h1 { font-size: 16px; margin: 0; }
+#paneltoggle {
+  display: none;
+  border: none;
+  background: none;
+  font-size: 18px;
+  color: #52514e;
+  cursor: pointer;
+  padding: 2px 8px;
+}
+
+.row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 8px 0 4px; }
+.label { font-weight: 600; }
+.hint { font-weight: 400; color: #52514e; font-size: 12px; }
+.mono { font-variant-numeric: tabular-nums; }
+
+select, input[type="number"] {
+  font: inherit;
+  padding: 3px 6px;
+  border: 1px solid #c9c8c2;
+  border-radius: 5px;
+  background: #fff;
+}
+
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
+.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 8px 0; }
+.grid2 label, .grid3 label { display: flex; flex-direction: column; gap: 3px; font-weight: 600; font-size: 12px; }
+.grid2 select, .grid3 select { width: 100%; }
+
+#load {
+  width: 100%;
+  padding: 8px;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: #1c5cab;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+#load:disabled { background: #9c9b95; cursor: default; }
+
+#status { margin: 8px 0 0; min-height: 1em; color: #52514e; }
+#status.error { color: #b3261e; }
+#status.busy { color: #1c5cab; }
+
+/* --- Vorhersageprodukte --------------------------------------------------- */
+#now[hidden], #products[hidden] { display: none; }
+#products { margin-top: 12px; }
+#productbtns { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.product {
+  font: inherit;
+  padding: 8px 10px;
+  text-align: left;
+  color: #1c5cab;
+  background: #fff;
+  border: 1px solid #1c5cab;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.product:disabled { color: #9c9b95; border-color: #c9c8c2; cursor: default; }
+
+/* Meteogramm-Overlay: großer Bereich links neben dem Panel (mobil: Vollbild). */
+#meteogram {
+  position: absolute;
+  inset: 10px 400px 10px 10px;
+  z-index: 1100;
+  background: rgba(252, 252, 251, 0.98);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#meteogram[hidden] { display: none; }
+.mg-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+  font-weight: 600;
+  border-bottom: 1px solid #eceae4;
+}
+#mg-close {
+  margin-left: auto;
+  border: none;
+  background: none;
+  font-size: 20px;
+  color: #52514e;
+  cursor: pointer;
+  padding: 0 4px;
+}
+#mg-close:hover { color: #0b0b0b; }
+#mg-body { flex: 1; min-height: 0; overflow: auto; padding: 6px 8px; }
+.mg-svg { display: block; }
+
+/* Cross-Section-Overlay: gleiche Hülle wie Meteogramm, füllt den Container. */
+#crosssection {
+  position: absolute;
+  inset: 10px 400px 10px 10px;
+  z-index: 1100;
+  background: rgba(252, 252, 251, 0.98);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#crosssection[hidden] { display: none; }
+#xs-body { flex: 1; min-height: 0; overflow: hidden; padding: 4px 6px 8px; }
+.xs-svg { display: block; cursor: crosshair; }
+#xs-close { margin-left: auto; border: none; background: none; font-size: 20px; color: #52514e; cursor: pointer; padding: 0 4px; }
+#xs-close:hover { color: #0b0b0b; }
+
+/* Go/No-Go-Tabelle-Overlay: gleiche Hülle wie Meteogramm/Cross-Section. */
+#gonogo {
+  position: absolute;
+  inset: 10px 400px 10px 10px;
+  z-index: 1100;
+  background: rgba(252, 252, 251, 0.98);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#gonogo[hidden] { display: none; }
+#gng-profile { margin-left: auto; font-size: 12px; max-width: 240px; }
+#gng-close { border: none; background: none; font-size: 20px; color: #52514e; cursor: pointer; padding: 0 4px; }
+#gng-close:hover { color: #0b0b0b; }
+#gng-body { flex: 1; min-height: 0; overflow: hidden; padding: 4px 6px 8px; }
+
+.gng-scroll { height: 100%; overflow: auto; }
+.gng-table { border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 12px; white-space: nowrap; }
+.gng-table th, .gng-table td { padding: 4px 8px; border: 1px solid #eceae4; text-align: center; }
+.gng-corner, .gng-rowlabel {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: rgba(252, 252, 251, 0.98);
+  text-align: left;
+  font-weight: 600;
+}
+.gng-daterow th, .gng-hourrow th { background: #f4f3ef; }
+.gng-daterow .gng-corner, .gng-hourrow .gng-corner { z-index: 3; }
+.gng-conclusion th, .gng-conclusion td { font-weight: 700; }
+
+.go-green { background: #dcf2d8; }
+.go-yellow { background: #fdecc2; }
+.go-red { background: #f6cfcd; }
+.go-na { background: #e6e5e1; color: #6b6a65; }
+
+/* Aktuelle Bedingungen: kompakte Kennwert-Liste. */
+.now-time { font-weight: 600; margin: 2px 0 8px; }
+.wx-group { margin: 10px 0 4px; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: #52514e; }
+.wx-line { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-bottom: 1px solid #eceae4; }
+.wx-line:last-child { border-bottom: none; }
+.wx-line .k { color: #52514e; }
+.wx-line .v { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+#settings { margin-top: 12px; }
+#settings summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
+
+.footer { margin-top: 12px; font-size: 11px; color: #52514e; line-height: 1.5; }
+
+.point-tip { font-variant-numeric: tabular-nums; }
+
+/* --- Mobil: Panel als Bottom-Sheet --------------------------------------- */
+@media (max-width: 700px), (max-height: 500px) {
+  #panel {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-height: 62dvh;
+    border-radius: 12px 12px 0 0;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    transition: max-height 0.2s ease;
+  }
+  #paneltoggle { display: block; }
+  #panelhead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    margin: -12px -14px 10px;
+    padding: 10px 14px;
+    background: rgba(252, 252, 251, 0.96);
+  }
+  #panel.collapsed { max-height: 46px; overflow: hidden; }
+
+  /* Touch-Ziele vergrößern; 16px verhindert iOS-Safari-Auto-Zoom. */
+  select, input, button { font-size: 16px; }
+  select { padding: 6px 8px; }
+  #load { padding: 12px; }
+  .product { padding: 12px; }
+
+  /* Overlays bildschirmfüllend. */
+  #meteogram, #crosssection, #gonogo { inset: 0; border-radius: 0; z-index: 1300; }
+
+  .leaflet-top.leaflet-left { top: env(safe-area-inset-top); }
+}

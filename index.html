@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>DroneForecast — Wetter für Drohnenbediener</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='13' fill='%231c5cab'/%3E%3Cg fill='none' stroke='%23ffffff' stroke-width='4' stroke-linecap='round'%3E%3Ccircle cx='32' cy='32' r='6'/%3E%3Cpath d='M20 20 h-6 M44 20 h6 M20 44 h-6 M44 44 h6'/%3E%3Ccircle cx='14' cy='20' r='5'/%3E%3Ccircle cx='50' cy='20' r='5'/%3E%3Ccircle cx='14' cy='44' r='5'/%3E%3Ccircle cx='50' cy='44' r='5'/%3E%3Cpath d='M26 26 L38 38 M38 26 L26 38'/%3E%3C/g%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="panel">
+    <div id="panelhead">
+      <h1>DroneForecast</h1>
+      <button id="paneltoggle" title="Bedienfeld ein-/ausklappen" aria-expanded="true">▾</button>
+    </div>
+
+    <div class="row">
+      <span class="label" id="pointlabel">Operationsraum</span>
+      <span id="pointpos" class="mono">Karte anklicken</span>
+    </div>
+
+    <button id="load" disabled>Vorhersage laden</button>
+    <div id="status"></div>
+
+    <!-- Aktuelle Bedingungen am Klickpunkt -->
+    <section id="now" hidden>
+      <div id="now-body"></div>
+    </section>
+
+    <!-- Vorhersageprodukte -->
+    <div id="products" hidden>
+      <div class="label">Vorhersageprodukte</div>
+      <div id="productbtns">
+        <button class="product" data-prod="meteogram">Meteogramm</button>
+        <button class="product" data-prod="xsection">Cross-Section</button>
+        <button class="product" data-prod="briefing">Briefing</button>
+        <button class="product" data-prod="table">Tabelle (Go/No-Go)</button>
+      </div>
+    </div>
+
+    <details id="settings">
+      <summary>Einstellungen</summary>
+      <label class="row">
+        <span class="label">Modell</span>
+        <select id="set-model">
+          <option value="icon_d2">ICON-D2 (~2,2 km)</option>
+          <option value="icon_eu">ICON-EU (~6,5 km)</option>
+        </select>
+      </label>
+      <div class="grid2">
+        <label>Vorhersage bis (Höhe AGL)
+          <select id="set-maxheight"></select>
+        </label>
+        <label>Zeithorizont
+          <select id="set-days"></select>
+        </label>
+      </div>
+      <div class="grid3">
+        <label>Höhe
+          <select id="set-unitheight">
+            <option value="m">m</option>
+            <option value="ft">ft</option>
+          </select>
+        </label>
+        <label>Wind
+          <select id="set-unitwind">
+            <option value="kmh">km/h</option>
+            <option value="ms">m/s</option>
+            <option value="kt">kt</option>
+          </select>
+        </label>
+        <label>Temp
+          <select id="set-unittemp">
+            <option value="c">°C</option>
+            <option value="f">°F</option>
+          </select>
+        </label>
+      </div>
+    </details>
+
+    <div class="footer">
+      Daten: DWD ICON · Modell-Level-Winde via open-meteo.mah.priv.at,
+      Oberflächenfelder via open-meteo.com · bilinear/linear interpoliert.
+      <br>Keine amtliche Flugwetterberatung — Verantwortung beim Piloten.
+    </div>
+  </div>
+
+  <!-- Meteogramm-Overlay -->
+  <div id="meteogram" hidden>
+    <div class="mg-head">
+      <span>Meteogramm</span>
+      <span class="hint" id="mg-sub"></span>
+      <button id="mg-close" title="Schließen">×</button>
+    </div>
+    <div id="mg-body"></div>
+  </div>
+
+  <!-- Cross-Section-Overlay -->
+  <div id="crosssection" hidden>
+    <div class="mg-head">
+      <span>Cross-Section</span>
+      <span class="hint" id="xs-sub"></span>
+      <button id="xs-close" title="Schließen">×</button>
+    </div>
+    <div id="xs-body"></div>
+  </div>
+
+  <!-- Go/No-Go-Tabelle-Overlay -->
+  <div id="gonogo" hidden>
+    <div class="mg-head">
+      <span>Go/No-Go</span>
+      <span class="hint" id="gng-sub"></span>
+      <select id="gng-profile" title="Drohnenprofil"></select>
+      <button id="gng-close" title="Schließen">×</button>
+    </div>
+    <div id="gng-body"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>
