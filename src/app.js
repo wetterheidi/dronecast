@@ -13,7 +13,7 @@ import { settings, loadSettings, updateSetting, OPTIONS } from "./settings.js";
 import { parseCoordInput } from "./coords.js";
 import { initGeoman } from "./geoman.js";
 import {
-  fmtHeight, fmtWind, fmtTemp, fmtDirPadded, heightUnit,
+  fmtHeight, fmtWind, fmtTemp, fmtDirPadded, heightUnit, heightToDisplay,
 } from "./units.js";
 
 /* global L */
@@ -134,8 +134,14 @@ async function loadForecast() {
       winds.push({ h, ...r });
     }
 
-    state.data = { surface, winds, loadedAt: now, wf };
-    setStatus(`Geladen · ${model.label} · Gitterhöhe ${Math.round(surface.elevation)} m`, "");
+    // Modell-eigene Orographie am Punkt (bilinear) — zum Abgleich mit der
+    // echten (DEM-)Geländehöhe: großer Unterschied heißt, das Modellgitter
+    // löst das lokale Gelände hier nicht auf (siehe METHODIK.md, „Wind auf
+    // Höhe vs. Modell-Orographie"), nicht dass ein Wert falsch berechnet ist.
+    const modelElevation = wf.elevationAt(lat, lon);
+
+    state.data = { surface, winds, loadedAt: now, wf, modelElevation };
+    setStatus(`Geladen · ${model.label} · Elevation ${fmtHeight(surface.elevation)}`, "");
     el("now").hidden = false;
     el("products").hidden = false;
     renderNow();
@@ -152,6 +158,11 @@ async function loadForecast() {
 // ---------------------------------------------------------------------------
 // Produkt „Aktuell" (Lebenszeichen der Pipeline)
 // ---------------------------------------------------------------------------
+// Ab dieser Differenz zwischen echter (DEM-)Geländehöhe und modelleigener
+// Orographie gilt das lokale Gelände als vom Gitter nicht aufgelöst — grobe
+// Faustregel, keine Literaturkonstante (siehe METHODIK.md).
+const TERRAIN_MISMATCH_WARN_M = 100;
+
 function renderNow() {
   const d = state.data;
   if (!d) return;
@@ -166,6 +177,19 @@ function renderNow() {
 
   const rows = [];
   rows.push(`<div class="now-time">Gültig (loc): ${time}</div>`);
+
+  // Modell-Orographie vs. echtes Gelände: großer Unterschied = lokales
+  // Gelände vom Gitter nicht aufgelöst, Wind-auf-Höhe-Werte mit Vorsicht.
+  if (d.modelElevation != null) {
+    const deltaM = d.modelElevation - surface.elevation;
+    const warn = Math.abs(deltaM) >= TERRAIN_MISMATCH_WARN_M;
+    const sign = deltaM >= 0 ? "+" : "−";
+    const deltaTxt = `${sign}${Math.round(Math.abs(heightToDisplay(deltaM)))} ${heightUnit()}`;
+    rows.push(line("Modellorographie", `${fmtHeight(d.modelElevation)} (Δ ${deltaTxt})`, warn));
+    if (warn) {
+      rows.push(`<div class="hint warn">⚠ Gelände hier vom Modellgitter nicht aufgelöst — Wind auf Höhe mit Vorsicht interpretieren.</div>`);
+    }
+  }
 
   // Modell-Level-Wind auf Flughöhe – der Kernvorteil.
   rows.push(`<div class="wx-group">Wind auf Höhe (${heightUnit()} AGL)</div>`);
@@ -188,14 +212,14 @@ function renderNow() {
   rows.push(line("Niederschlag", num(at("precipitation"), surface.units.precipitation || "mm")));
   if (at("visibility") != null) rows.push(line("Sicht", visKm(at("visibility"))));
   if (at("cape") != null) rows.push(line("CAPE", num(at("cape"), "J/kg")));
-  if (at("freezing_level_height") != null) rows.push(line("Nullgradgrenze", fmtHeight(at("freezing_level_height"))));
+  if (at("freezing_level_height") != null) rows.push(line("Nullgradgrenze (AMSL)", fmtHeight(at("freezing_level_height"))));
   rows.push(line("Wetter", wmoText(at("weather_code"))));
 
   el("now-body").innerHTML = rows.join("");
 }
 
-function line(k, v) {
-  return `<div class="wx-line"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+function line(k, v, warn) {
+  return `<div class="wx-line${warn ? " warn" : ""}"><span class="k">${k}</span><span class="v">${v}</span></div>`;
 }
 
 // ---------------------------------------------------------------------------

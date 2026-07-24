@@ -195,6 +195,8 @@ select, input[type="number"], input[type="text"] {
 .wx-line:last-child { border-bottom: none; }
 .wx-line .k { color: #52514e; }
 .wx-line .v { font-variant-numeric: tabular-nums; font-weight: 600; }
+.wx-line.warn .v { color: #b3261e; }
+.hint.warn { color: #b3261e; margin: -2px 0 6px; }
 
 #settings { margin-top: 12px; }
 #settings summary { cursor: pointer; font-weight: 600; padding: 2px 0; }

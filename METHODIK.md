@@ -135,16 +135,90 @@ Meteogramm- oder Go/No-Go-Bewertung.
 
 ## 5. Nullgradgrenze
 
-Zwei unabhängige, aktuell **nicht querverglichene** Quellen:
-- **Cross-Section:** [src/column.js](src/column.js), `zeroCrossing()` —
-  unterster Level-Übergang `T ≥ 0 °C → T < 0 °C` von unten nach oben, linear
-  zwischen den beiden Leveln interpoliert.
+Zwei unabhängige Quellen mit **unterschiedlichem Bezugsniveau** — nicht
+direkt vergleichbar, ohne die Geländehöhe (`surface.elevation`) einzurechnen:
+
 - **„Aktuell"-Panel:** die API-eigene Oberflächenvariable
   `freezing_level_height` (optional, modellabhängig verfügbar), unverändert
-  übernommen.
+  übernommen. **Bezugsniveau: AMSL** (Höhe über Meeresspiegel, so liefert
+  Open-Meteo diese Variable) — Zeile ist entsprechend als „Nullgradgrenze
+  (AMSL)" beschriftet ([src/app.js](src/app.js), `renderNow()`).
+- **Cross-Section:** [src/column.js](src/column.js), `zeroCrossing()` —
+  unterster Level-Übergang `T ≥ 0 °C → T < 0 °C` von unten nach oben, linear
+  zwischen den beiden Leveln interpoliert. **Bezugsniveau: AGL**, da sie auf
+  `height_agl_level{l}` rechnet (siehe `fetchColumn()`), passend zur
+  AGL-Höhenachse der Cross-Section.
 
-Beide sollten in der Praxis nah beieinanderliegen, sind aber technisch
-unabhängig berechnet (unterschiedliche Modell-Ausgabewege).
+Umrechnung: `AMSL ≈ AGL + surface.elevation`. Beide Werte weichen also
+**um die Modell-Geländehöhe am Punkt** voneinander ab — das ist kein
+Rechenfehler, sondern unterschiedliche Referenzniveaus für dieselbe
+physikalische Höhe. Aktuell wird das nicht automatisch umgerechnet oder
+gegengeprüft; wer beide Werte vergleicht, muss die Geländehöhe manuell
+berücksichtigen.
+
+---
+
+## 5b. Elevation: echtes Gelände vs. Modell-Orographie
+
+Zwei unabhängige Quellen mit **unterschiedlicher Bedeutung von „elevation"**:
+
+- **`surface.elevation`** ([src/weather.js](src/weather.js), `fetchSurface()`
+  gegen `api.open-meteo.com`) ist die **echte Geländehöhe** aus einem
+  90-m-Digital-Elevation-Model — unabhängig vom gewählten Modell und
+  identisch zu Open-Meteos dedizierter Elevation-API. Wird im Status nach
+  dem Laden als „Elevation" angezeigt ([src/app.js](src/app.js),
+  `loadForecast()`).
+- **`WindField`-internes `elevation`** ([src/windfield.js](src/windfield.js),
+  `storePoint()`/`elevationAt()`, Daten von `open-meteo.mah.priv.at`) ist
+  die **modelleigene, geglättete Orographie** des jeweiligen Gitters (ICON
+  nutzt dafür ein SLEVE-geländefolgendes Koordinatensystem, siehe unten).
+
+### Warum wir das NICHT ineinander umrechnen (Korrektur einer früheren Annahme)
+
+Naheliegend wäre: „Wind auf 120 m AGL" einfach relativ zur **echten**
+Geländehöhe anfragen (`mode: "amsl"`, Ziel = `surface.elevation + 120`)
+statt relativ zur Modell-Orographie. **Das ist physikalisch falsch** und
+wurde hier bewusst verworfen, nachdem wir es zunächst vorgeschlagen hatten:
+
+Das unterste Modell-Level liegt *absichtlich* auf einer festen Höhe über
+der **modelleigenen** Orographie — dort ist die bodennahe Grenzschicht
+(Reibung, Scherung, Turbulenz) tatsächlich aufgelöst, exakt wie bei der
+WMO-10-m-Windkonvention, die ebenfalls vom untersten Modell-Level aus
+relativ zur Modell-Oberfläche extrapoliert wird. Fragt man stattdessen
+„echte Geländehöhe + 120 m" als AMSL-Ziel an, kann das bei großer
+Modell/Real-Differenz einen Level treffen, der im Modell **weit oberhalb**
+der eigenen Grenzschicht liegt — der zurückgegebene Wind wäre dann zu
+schwach reibungsbeeinflusst und würde eine falsche Präzision vortäuschen,
+die schlechter ist als der Status quo.
+
+### Die eigentliche Grenze: unaufgelöstes Gelände
+
+Große Differenz zwischen `surface.elevation` (echt) und der Modell-
+Orographie ist kein Rechenfehler, sondern das direkte Symptom, dass das
+**Modellgitter diese Geländeform nicht auflöst** — laut DWD-eigener
+ICON-Dokumentation braucht das Erfassen einzelner Bergketten oder Täler
+ein feineres Gitter, als ICON-D2 (~2,2 km) oder ICON-EU (~6,5 km) bieten.
+Beispiele (empirisch geprüft):
+
+| Ort | Echt (DEM) | Modell-Orographie | Δ |
+|---|---|---|---|
+| Zugspitze (Einzelgipfel, ICON-D2) | 2677 m | 2177 m | −500 m |
+| Innsbruck (Talkessel, ICON-EU) | 579 m | 936 m | +357 m |
+
+Eine echte Korrektur bräuchte ein eigenes Downscaling-Modell (Mesoscale-
+to-Microscale-Kopplung wie WAsP, CFD-Mikrositing oder ML-Downscaling) —
+außerhalb des Rahmens dieser App. Was die App stattdessen tut: die
+Differenz **offenlegen statt verschweigen**, passend zum „na" wird nie
+still grün"-Prinzip aus Abschnitt 6.2.
+
+### Umsetzung
+[src/app.js](src/app.js), `renderNow()`: `WindField.elevationAt(lat, lon)`
+(bilinear an der Abfrageposition) gegen `surface.elevation` verglichen,
+als „Modellorographie"-Zeile mit Differenz angezeigt. Ab
+`TERRAIN_MISMATCH_WARN_M = 100` m (grobe Faustregel, keine
+Literaturkonstante) wird die Zeile rot hervorgehoben plus ein Warnhinweis
+eingeblendet: die Wind-auf-Höhe-Werte in diesem Fall mit Vorsicht
+interpretieren, da das Modellgitter das lokale Gelände hier nicht auflöst.
 
 ---
 
