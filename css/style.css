@@ -224,6 +224,9 @@ select, input[type="number"], input[type="text"] {
 
 .opacity-row { margin: 6px 0 2px; }
 
+.wind-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 6px 0 2px; font-size: 12px; }
+.wind-legend .chip { display: inline-block; width: 14px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+
 input[type="range"] {
   width: 100%;
   margin: 4px 0 10px;

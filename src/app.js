@@ -13,6 +13,7 @@ import { settings, loadSettings, updateSetting, OPTIONS } from "./settings.js";
 import { parseCoordInput } from "./coords.js";
 import { initGeoman } from "./geoman.js";
 import { initMapLayers } from "./maplayers.js";
+import { initWindOverlay } from "./windoverlay.js";
 import {
   fmtHeight, fmtWind, fmtTemp, fmtDirPadded, heightUnit, heightToDisplay,
 } from "./units.js";
@@ -61,6 +62,10 @@ initGeoman(map);
 
 // Kartenlayer: Satellit (DWD-WMS) + Niederschlagsradar (RainViewer).
 initMapLayers(map);
+
+// Kartenlayer: Wind 10 m flächig (unterstes Modelllevel, Michaels Instanz) —
+// nach initMapLayers, da der gemeinsame wxOverlays-Pane dort angelegt wird.
+initWindOverlay(map);
 
 // Kartenklick setzt den Operationspunkt — außer Geoman zeichnet/editiert gerade.
 map.on("click", (e) => {

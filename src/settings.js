@@ -1,7 +1,7 @@
 import {
   DEFAULT_MAX_HEIGHT, DEFAULT_FORECAST_DAYS,
   MAX_HEIGHT_OPTIONS, FORECAST_DAYS_OPTIONS,
-  SAT_PRODUCTS,
+  SAT_PRODUCTS, WIND_OVERLAY_DEFAULT_DENSITY,
 } from "./config.js";
 import { setUnits } from "./units.js";
 import { DRONE_PROFILES } from "./droneProfiles.js";
@@ -23,6 +23,10 @@ const DEFAULTS = {
   satLayerOpacity: 0.7,
   radarLayerOn: false,
   radarLayerOpacity: 0.7,
+  windLayerOn: false,
+  windLayerBarbs: true,
+  windLayerOpacity: 0.5,
+  windLayerDensity: WIND_OVERLAY_DEFAULT_DENSITY,
 };
 
 export const settings = { ...DEFAULTS };

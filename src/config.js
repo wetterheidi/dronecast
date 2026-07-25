@@ -86,3 +86,25 @@ export const SAT_PRODUCTS = [
 ];
 
 export const MAPLAYERS_TIME_STEP_MIN = 15;
+
+// Wind-Overlay (flächige Darstellung, unterstes Modelllevel ~10 m AGL):
+// Mindest-Zoom, ab dem der Layer Daten holt (Drohnenflüge sind kleinräumig —
+// bei icon_d2 (0,02° ≈ 2,2 km Gitterweite) zeigt Zoom 9 einen ca. 300 km
+// breiten Ausschnitt, ab Zoom ≈12 ist das native Gitter unausgedünnt
+// darstellbar), sowie Punktebudget je Kartenausschnitt/Refresh. Schon die
+// "grobe" Dichtestufe braucht bei einem typischen Fenster ~450–500 Punkte in
+// diesem Zoombereich — das Budget muss deutlich darüber liegen, sonst zeigen
+// alle Dichtestufen dasselbe (kappungsbegrenzte) Gitter.
+export const WIND_OVERLAY_MIN_ZOOM = 9;
+export const WIND_OVERLAY_MAX_POINTS = 1500;
+export const WIND_OVERLAY_POINTS_PER_REQUEST = 75;
+
+// Gitterdichte der Fiedern/Farbfläche: Zielabstand in Bildschirmpixeln
+// zwischen benachbarten Gitterpunkten (bei aktuellem Zoom). Nutzerwählbar im
+// Wind-Layer-Panel; "mittel" ist Standard.
+export const WIND_OVERLAY_DENSITY_OPTIONS = [
+  { id: "fine", label: "Fein", targetPx: 26 },
+  { id: "medium", label: "Mittel", targetPx: 36 },
+  { id: "coarse", label: "Grob", targetPx: 48 },
+];
+export const WIND_OVERLAY_DEFAULT_DENSITY = "medium";
