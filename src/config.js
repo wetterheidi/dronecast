@@ -99,12 +99,20 @@ export const WIND_OVERLAY_MIN_ZOOM = 9;
 export const WIND_OVERLAY_MAX_POINTS = 1500;
 export const WIND_OVERLAY_POINTS_PER_REQUEST = 75;
 
-// Gitterdichte der Fiedern/Farbfläche: Zielabstand in Bildschirmpixeln
-// zwischen benachbarten Gitterpunkten (bei aktuellem Zoom). Nutzerwählbar im
-// Wind-Layer-Panel; "mittel" ist Standard.
+// Gitterdichte der Fiedern/Farbfläche als ganzzahliges Vielfaches des
+// dichtesten (budgetbegrenzten) Basisgitters — "Gitterpunktsabstand 1×/2×/3×".
+// Bewusst NICHT über einen Pixel-Zielabstand: der würde auf Zweierpotenz-
+// Strides gerundet, und weil die Wunsch-Abstände enger beieinander liegen als
+// diese Faktor-2-Quantisierung, kollabierten benachbarte Stufen (und bei
+// großen Fenstern alle drei) aufs selbe Gitter. Ein echtes Vielfaches des
+// Basisstride ist dagegen immer unterscheidbar. Nutzerwählbar im Panel.
 export const WIND_OVERLAY_DENSITY_OPTIONS = [
-  { id: "fine", label: "Fein", targetPx: 26 },
-  { id: "medium", label: "Mittel", targetPx: 36 },
-  { id: "coarse", label: "Grob", targetPx: 48 },
+  { id: "fine", label: "Dicht (1×)", mult: 1 },
+  { id: "medium", label: "Mittel (2×)", mult: 2 },
+  { id: "coarse", label: "Weit (3×)", mult: 3 },
 ];
-export const WIND_OVERLAY_DEFAULT_DENSITY = "medium";
+export const WIND_OVERLAY_DEFAULT_DENSITY = "fine";
+
+// Ziel-Pixelabstand des dichtesten (Basis-)Gitters. ~ Fiederngröße (44 px),
+// leicht darunter für eine dichte, aber noch lesbare Darstellung bei "1×".
+export const WIND_OVERLAY_BASE_TARGET_PX = 40;

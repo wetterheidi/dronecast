@@ -28,10 +28,15 @@
  * Testmessungen zu deutlich asymmetrischen Abständen führte (N-S ca. doppelt
  * so groß wie O-W). Da eine nicht rotierte Web-Mercator-Karte konform ist
  * (px/km an einem Punkt richtungsunabhängig gleich), wird eine einzige
- * Zielweite in km aus dem gewünschten Pixelabstand abgeleitet und dann je
+ * Zielweite in km aus einem festen Basis-Pixelabstand abgeleitet und dann je
  * Achse in die passende Anzahl Modellgitter-Schritte umgerechnet (siehe
- * `buildGrid`/`strideForAxis`). Die Zieldichte (Pixelabstand) ist über
- * WIND_OVERLAY_DENSITY_OPTIONS/`windLayerDensity` nutzerwählbar.
+ * `buildBaseGrid`/`strideForAxis`). Dieses Basisgitter ist das dichteste,
+ * budgetbegrenzte Gitter; die nutzerwählbare Dichte (1×/2×/3×) ist ein
+ * ganzzahliges Vielfaches DIESES Basisstride (`buildGrid`). Das Vielfache
+ * wird bewusst NACH der Budgetbegrenzung angewendet: so sind die Dichtestufen
+ * mathematisch garantiert immer unterscheidbar (1×<2×<3×) — anders als bei
+ * einem pixelbasierten Ziel, das auf Zweierpotenz-Strides rundet und
+ * benachbarte Stufen aufs selbe Gitter kollabieren ließe.
  *
  * Rendering wie in METOCViewer (windbarb_viewer.html): Fiedern als
  * L.divIcon-Marker mit Inline-SVG, Farbfläche als eigenes <canvas> im
@@ -42,7 +47,7 @@
 import {
   API_BASE, MODELS,
   WIND_OVERLAY_MIN_ZOOM, WIND_OVERLAY_MAX_POINTS, WIND_OVERLAY_POINTS_PER_REQUEST,
-  WIND_OVERLAY_DENSITY_OPTIONS,
+  WIND_OVERLAY_DENSITY_OPTIONS, WIND_OVERLAY_BASE_TARGET_PX,
 } from "./config.js";
 import { settings, updateSetting } from "./settings.js";
 import { nearestFutureIndex } from "./weather.js";
@@ -117,9 +122,9 @@ export function initWindOverlay(map) {
   let fetchGen = 0;
 
   // -- Grid-Geometrie ---------------------------------------------------------
-  function densityTargetPx() {
+  function densityMult() {
     const opt = WIND_OVERLAY_DENSITY_OPTIONS.find((d) => d.id === settings.windLayerDensity);
-    return (opt || WIND_OVERLAY_DENSITY_OPTIONS[1]).targetPx;
+    return (opt || WIND_OVERLAY_DENSITY_OPTIONS[0]).mult;
   }
 
   // Kleinste Zweierpotenz, mit der `gridDeg` mal Stride mal km/Grad die
@@ -130,57 +135,80 @@ export function initWindOverlay(map) {
     return s;
   }
 
-  function buildGrid(bounds, zoom, model, targetPx) {
+  function bboxDeg(bounds, model) {
+    const latPad = (bounds.getNorth() - bounds.getSouth()) * 0.15;
+    const lonPad = (bounds.getEast() - bounds.getWest()) * 0.15;
+    return {
+      latMin: Math.max(model.bbox.latMin, bounds.getSouth() - latPad),
+      latMax: Math.min(model.bbox.latMax, bounds.getNorth() + latPad),
+      lonMin: Math.max(model.bbox.lonMin, bounds.getWest() - lonPad),
+      lonMax: Math.min(model.bbox.lonMax, bounds.getEast() + lonPad),
+    };
+  }
+
+  function nodeCount(box, g, latStride, lonStride) {
+    const iLatLo = Math.ceil(box.latMin / g / latStride) * latStride;
+    const iLatHi = Math.floor(box.latMax / g / latStride) * latStride;
+    const iLonLo = Math.ceil(box.lonMin / g / lonStride) * lonStride;
+    const iLonHi = Math.floor(box.lonMax / g / lonStride) * lonStride;
+    const nLat = Math.max(0, Math.floor((iLatHi - iLatLo) / latStride) + 1);
+    const nLon = Math.max(0, Math.floor((iLonHi - iLonLo) / lonStride) + 1);
+    return nLat * nLon;
+  }
+
+  // Dichtestes Gitter, das noch ins Punktebudget passt (Basis für die
+  // 1×/2×/3×-Dichtewahl). Zoom-adaptiv und km-basiert je Achse (Anisotropie,
+  // siehe Kopfkommentar).
+  function buildBaseGrid(bounds, zoom, model) {
     const g = model.grid;
     const centerLat = (bounds.getNorth() + bounds.getSouth()) / 2;
     const kmPerDegLat = KM_PER_DEG;
     const kmPerDegLon = KM_PER_DEG * Math.cos((centerLat * Math.PI) / 180);
-    // Konforme Projektion: px/km ist an einem Punkt richtungsunabhängig
-    // gleich groß — eine einzige Zielweite in km ableiten und je Achse
-    // getrennt in Grad-Stride umrechnen (siehe Kopfkommentar).
     const pxPerDegLon = (256 * Math.pow(2, zoom)) / 360;
     const pxPerKm = pxPerDegLon / kmPerDegLon;
-    const targetKm = targetPx / pxPerKm;
+    const targetKm = WIND_OVERLAY_BASE_TARGET_PX / pxPerKm;
 
     let latStride = strideForAxis(g, kmPerDegLat, targetKm);
     let lonStride = strideForAxis(g, kmPerDegLon, targetKm);
-
-    const latPad = (bounds.getNorth() - bounds.getSouth()) * 0.15;
-    const lonPad = (bounds.getEast() - bounds.getWest()) * 0.15;
-    const latMin = Math.max(model.bbox.latMin, bounds.getSouth() - latPad);
-    const latMax = Math.min(model.bbox.latMax, bounds.getNorth() + latPad);
-    const lonMin = Math.max(model.bbox.lonMin, bounds.getWest() - lonPad);
-    const lonMax = Math.min(model.bbox.lonMax, bounds.getEast() + lonPad);
+    const box = bboxDeg(bounds, model);
 
     for (let guard = 0; guard < 20; guard++) {
-      const iLatLo = Math.ceil(latMin / g / latStride) * latStride;
-      const iLatHi = Math.floor(latMax / g / latStride) * latStride;
-      const iLonLo = Math.ceil(lonMin / g / lonStride) * lonStride;
-      const iLonHi = Math.floor(lonMax / g / lonStride) * lonStride;
-      const nLat = Math.max(0, Math.floor((iLatHi - iLatLo) / latStride) + 1);
-      const nLon = Math.max(0, Math.floor((iLonHi - iLonLo) / lonStride) + 1);
-      if (nLat * nLon <= WIND_OVERLAY_MAX_POINTS || (latStride >= 128 && lonStride >= 128)) {
-        const nodes = [];
-        for (let a = iLatLo; a <= iLatHi; a += latStride) {
-          for (let b = iLonLo; b <= iLonHi; b += lonStride) nodes.push([a, b]);
-        }
-        return { nodes, latStride, lonStride };
+      if (nodeCount(box, g, latStride, lonStride) <= WIND_OVERLAY_MAX_POINTS ||
+          (latStride >= 128 && lonStride >= 128)) {
+        break;
       }
-      // Nur die (in km!) jeweils feinere Achse verdoppeln, nicht beide
-      // zugleich und nicht anhand des rohen Stride-Werts: km/Grad unterscheidet
-      // sich zwischen Breite und Länge, gleicher Stride bedeutet also nicht
-      // gleiche physische Zellgröße. Ein Vergleich der rohen Stride-Werte
-      // (oder gemeinsames Verdoppeln) kann eine "feinere" Dichtestufe an
-      // dieser Kappungsschwelle unbeabsichtigt gröber enden lassen als eine
-      // benachbarte, eigentlich gröbere Stufe. Km-basiertes Einzelverdoppeln
-      // nähert sich der Grenze in kleinen Schritten und bleibt monoton.
+      // Nur die (in km!) jeweils feinere Achse verdoppeln — km/Grad
+      // unterscheidet sich zwischen Breite und Länge, gleicher Stride ist also
+      // nicht gleiche physische Zellgröße; einzelnes Verdoppeln nähert sich
+      // der Budgetgrenze in kleinen Schritten und hält das Seitenverhältnis.
       if (latStride * kmPerDegLat <= lonStride * kmPerDegLon) {
         latStride = Math.min(latStride * 2, 128);
       } else {
         lonStride = Math.min(lonStride * 2, 128);
       }
     }
-    return { nodes: [], latStride, lonStride };
+    return { latStride, lonStride, box };
+  }
+
+  // Gitter für die gewählte Dichte: das budgetbegrenzte Basisgitter mit dem
+  // Dichte-Vielfachen (1×/2×/3×) je Achse ausgedünnt. Weil das Vielfache erst
+  // NACH der Budgetbegrenzung greift, sind die Stufen immer echt verschieden
+  // (1×<2×<3×) und liegen — als Vielfaches eines schon passenden Basisgitters —
+  // stets unter dem Budget.
+  function buildGrid(bounds, zoom, model, mult) {
+    const g = model.grid;
+    const { latStride: baseLat, lonStride: baseLon, box } = buildBaseGrid(bounds, zoom, model);
+    const latStride = baseLat * mult;
+    const lonStride = baseLon * mult;
+    const iLatLo = Math.ceil(box.latMin / g / latStride) * latStride;
+    const iLatHi = Math.floor(box.latMax / g / latStride) * latStride;
+    const iLonLo = Math.ceil(box.lonMin / g / lonStride) * lonStride;
+    const iLonHi = Math.floor(box.lonMax / g / lonStride) * lonStride;
+    const nodes = [];
+    for (let a = iLatLo; a <= iLatHi; a += latStride) {
+      for (let b = iLonLo; b <= iLonHi; b += lonStride) nodes.push([a, b]);
+    }
+    return { nodes, latStride, lonStride };
   }
 
   // -- Cache (LRU) --------------------------------------------------------------
@@ -261,8 +289,17 @@ export function initWindOverlay(map) {
     return MODELS[modelKey].nLevels;
   }
 
-  async function refresh() {
-    if (!settings.windLayerOn) return;
+  // Grid für den aktuellen Kartenausschnitt neu berechnen und SOFORT (ohne
+  // Debounce) aus dem Cache zeichnen — Fläche UND Fiedern. Wichtig fürs
+  // Pannen: vorher wurde nur die Fläche sofort neu gezeichnet (eigenes
+  // canvas-Reposition), die Fiedern aber erst mit der (debounced) Netzabfrage
+  // neu aufgebaut — dadurch blieben im frisch aufgedeckten Kartenbereich bis
+  // zu 500 ms lang gar keine Fiedern sichtbar (die alten sitzen ja an ihren
+  // ursprünglichen Geokoordinaten und wandern nicht "mit"). Das hier läuft
+  // bei jeder Bewegung sofort, nur der eigentliche Netzabruf bleibt debounced
+  // (siehe `refreshOnViewChange`), um beim Pannen keine Anfragen zu spammen.
+  function computeGridForCurrentView() {
+    if (!settings.windLayerOn) return null;
     const zoom = map.getZoom();
     if (zoom < WIND_OVERLAY_MIN_ZOOM) {
       el("ml-wind-hint").hidden = false;
@@ -270,13 +307,13 @@ export function initWindOverlay(map) {
       barbGroup.clearLayers();
       clearCanvas();
       setStatus("");
-      return;
+      return null;
     }
     el("ml-wind-hint").hidden = true;
 
     const modelKey = settings.model;
     const model = MODELS[modelKey];
-    if (!model) return;
+    if (!model) return null;
     const lvl = currentLevelFor(modelKey);
 
     if (cacheTs && Date.now() - cacheTs > CACHE_TTL_MS) {
@@ -290,12 +327,17 @@ export function initWindOverlay(map) {
       currentLevel = lvl;
     }
 
-    const { nodes, latStride, lonStride } = buildGrid(map.getBounds(), zoom, model, densityTargetPx());
+    const bounds = map.getBounds();
+    const { nodes, latStride, lonStride } = buildGrid(bounds, zoom, model, densityMult());
     lastNodes = nodes;
     lastLatStride = latStride;
     lastLonStride = lonStride;
-    renderAll(); // sofort aus Cache
+    renderAll(); // sofort aus Cache — Fläche UND Fiedern
 
+    return { nodes, modelKey, model, lvl };
+  }
+
+  async function fetchAndRender(nodes, modelKey, model, lvl) {
     const missing = nodes.filter(([a, b]) => !cache.has(cacheKey(a, b, lvl, modelKey)));
     if (!missing.length) {
       setStatus(`${nodes.length} Punkte (alle aus Cache)`);
@@ -327,7 +369,25 @@ export function initWindOverlay(map) {
     renderAll();
   }
 
-  const debouncedRefresh = debounce(refresh, REFRESH_DEBOUNCE_MS);
+  const debouncedFetchAndRender = debounce(fetchAndRender, REFRESH_DEBOUNCE_MS);
+
+  // Für gezielte Nutzeraktionen (Checkbox, Dichte, Modell-/Horizontwechsel,
+  // Init): Grid sofort neu berechnen UND sofort nachladen (kein künstlicher
+  // Zusatzverzug).
+  function refresh() {
+    const view = computeGridForCurrentView();
+    if (!view) return;
+    debouncedFetchAndRender.now(view.nodes, view.modelKey, view.model, view.lvl);
+  }
+
+  // Fürs Pannen/Zoomen: Grid sofort neu berechnen und aus dem Cache zeichnen
+  // (s. o.), aber den eigentlichen Netzabruf debouncen, damit kontinuierliches
+  // Pannen nicht bei jedem Zwischenschritt Requests auslöst.
+  function refreshOnViewChange() {
+    const view = computeGridForCurrentView();
+    if (!view) return;
+    debouncedFetchAndRender(view.nodes, view.modelKey, view.model, view.lvl);
+  }
 
   // -- Rendering: Fiedern -------------------------------------------------------
   function collectNodeUV() {
@@ -368,12 +428,14 @@ export function initWindOverlay(map) {
   }
 
   // -- Rendering: Farbfläche ------------------------------------------------------
+  // Nur Größe/Position — das Zeichnen übernimmt computeGridForCurrentView()
+  // via renderAll(), damit Fläche und Fiedern beim Pannen/Zoomen synchron
+  // aus demselben (sofort neu berechneten) Grid gezeichnet werden.
   function resetCanvas() {
     const size = map.getSize();
     canvas.width = size.x;
     canvas.height = size.y;
     L.DomUtil.setPosition(canvas, map.containerPointToLayerPoint([0, 0]));
-    renderFill();
   }
 
   function clearCanvas() {
@@ -522,8 +584,7 @@ export function initWindOverlay(map) {
       refresh();
     });
 
-    map.on("moveend zoomend", debouncedRefresh);
-    map.on("moveend zoomend resize", resetCanvas);
+    map.on("moveend zoomend resize", () => { resetCanvas(); refreshOnViewChange(); });
     map.on("zoomstart", clearCanvas);
 
     // Modell-/Horizontwechsel invalidieren den Cache. initWindOverlay läuft
@@ -624,10 +685,22 @@ function makeBarbSVG(spdKt, dirFrom, lat, size, color) {
     + `</g></svg>`;
 }
 
+// `.now(...)` feuert sofort UND storniert einen ggf. noch ausstehenden
+// verzögerten Aufruf — nötig, weil gezielte Nutzeraktionen (Checkbox,
+// Dichte, Modellwechsel) und das debounced Pannen/Zoomen denselben Fetch
+// auslösen: ohne gemeinsamen Timer könnte ein alter, noch ausstehender
+// Pan-Request nach einem sofortigen Aufruf verspätet feuern und dessen
+// (aktuelleres) Ergebnis mit veralteten Daten überschreiben.
 function debounce(fn, ms) {
   let t = null;
-  return (...args) => {
+  const wrapped = (...args) => {
     clearTimeout(t);
-    t = setTimeout(() => fn(...args), ms);
+    t = setTimeout(() => { t = null; fn(...args); }, ms);
   };
+  wrapped.now = (...args) => {
+    clearTimeout(t);
+    t = null;
+    fn(...args);
+  };
+  return wrapped;
 }
