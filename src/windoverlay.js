@@ -60,6 +60,10 @@ const el = (id) => document.getElementById(id);
 const KMH_TO_MS = 1 / 3.6;
 const KT_PER_MS = 1.94384;
 const BARB_SIZE = 44; // px
+// Fiedern einfarbig, kontrastreich (dunkel + weißer Halo) — die Geschwindigkeit
+// zeigen die Fiedern (Fahnen/Wimpel) und die Farbfläche bereits; eine zusätzliche
+// Einfärbung nach Geschwindigkeit verschlechterte nur die Lesbarkeit über OSM.
+const BARB_COLOR = "#0b1220";
 const REFRESH_DEBOUNCE_MS = 500;
 const CACHE_TTL_MS = 60 * 60 * 1000; // Modellläufe kommen ~stündlich neu
 const CACHE_MAX = 4000; // LRU-Deckel (Punkte × Level × Modell)
@@ -360,7 +364,7 @@ export function initWindOverlay(map) {
     if (myGen !== fetchGen) return; // durch neueren Refresh überholt
     cacheTs = Date.now();
     if (times?.length) {
-      const slider = el("ml-wind-slider");
+      const slider = el("mf-time-slider");
       slider.max = String(times.length - 1);
       if (timeIdx === 0) timeIdx = nearestFutureIndex(times, Date.now());
       slider.value = String(clampIdx(timeIdx));
@@ -415,8 +419,7 @@ export function initWindOverlay(map) {
       const lat = iLat * g, lon = iLon * g;
       const spdMs = Math.hypot(u, v);
       const dirFrom = (Math.atan2(-u, -v) * 180 / Math.PI + 360) % 360;
-      const color = hex(classFor(spdMs).rgb);
-      const html = makeBarbSVG(spdMs * KT_PER_MS, dirFrom, lat, BARB_SIZE, color);
+      const html = makeBarbSVG(spdMs * KT_PER_MS, dirFrom, lat, BARB_SIZE, BARB_COLOR);
       const icon = L.divIcon({
         className: "", // wichtig: sonst setzt Leaflet einen weißen Icon-Hintergrund
         html,
@@ -516,14 +519,14 @@ export function initWindOverlay(map) {
 
   function setTimeIdx(i) {
     timeIdx = clampIdx(i);
-    el("ml-wind-slider").value = String(timeIdx);
+    el("mf-time-slider").value = String(timeIdx);
     renderAll(); // kein Fetch — alle Stunden liegen je Punkt bereits im Cache
   }
 
   function updateTimeLabel() {
-    if (!times?.length) { el("ml-wind-time").textContent = "–"; return; }
+    if (!times?.length) { el("mf-time-display").textContent = "–"; return; }
     const d = new Date(times[timeIdx] * 1000);
-    el("ml-wind-time").textContent = `Gültig: ${d.toLocaleString("de-DE", {
+    el("mf-time-display").textContent = `Gültig: ${d.toLocaleString("de-DE", {
       weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
     })}`;
   }
@@ -555,9 +558,20 @@ export function initWindOverlay(map) {
   }
 
   // -- UI-Verdrahtung -----------------------------------------------------------------
+  // "Wind 10 m" ist der Master-Schalter (Abruf + Rendering überhaupt);
+  // "Windfiedern" darunter ist nur eine Rendering-Option davon (Fiedern
+  // an/aus, die Fläche bleibt unabhängig davon sichtbar). Das Untermenü mit
+  // dieser und den weiteren Optionen wird nur angezeigt, solange der Master
+  // an ist — sonst sähe "Windfiedern" wie ein zweiter, unabhängiger Schalter
+  // aus (der ohne aktiven Master auch nichts bewirkt).
+  function setWindBodyVisible(visible) {
+    el("ml-wind-body").hidden = !visible;
+  }
+
   function wireUI() {
     el("ml-wind-on").addEventListener("change", (e) => {
       updateSetting("windLayerOn", e.target.checked);
+      setWindBodyVisible(e.target.checked);
       if (e.target.checked) refresh(); else removeAll();
     });
     el("ml-wind-barbs").addEventListener("change", (e) => {
@@ -571,9 +585,9 @@ export function initWindOverlay(map) {
     });
     opacity.addEventListener("change", (e) => updateSetting("windLayerOpacity", Number(e.target.value) / 100));
 
-    el("ml-wind-slider").addEventListener("input", (e) => setTimeIdx(Number(e.target.value)));
-    el("ml-wind-back").addEventListener("click", () => setTimeIdx(timeIdx - 1));
-    el("ml-wind-fwd").addEventListener("click", () => setTimeIdx(timeIdx + 1));
+    el("mf-time-slider").addEventListener("input", (e) => setTimeIdx(Number(e.target.value)));
+    el("mf-time-back").addEventListener("click", () => setTimeIdx(timeIdx - 1));
+    el("mf-time-fwd").addEventListener("click", () => setTimeIdx(timeIdx + 1));
 
     // Dichteänderung braucht kein Cache-Clear (Level/Modell bleiben gleich —
     // nur welche Knoten angefragt/gerendert werden ändert sich), nur einen
@@ -613,6 +627,7 @@ export function initWindOverlay(map) {
 
   function restoreFromSettings() {
     el("ml-wind-on").checked = settings.windLayerOn;
+    setWindBodyVisible(settings.windLayerOn);
     el("ml-wind-barbs").checked = settings.windLayerBarbs;
     el("ml-wind-opacity").value = String(Math.round(settings.windLayerOpacity * 100));
     el("ml-wind-opacity-val").textContent = `${Math.round(settings.windLayerOpacity * 100)}%`;
@@ -636,13 +651,17 @@ export function initWindOverlay(map) {
 }
 
 // -- WMO-Windfieder als Inline-SVG (portiert aus METOCViewer/windbarb_viewer.html) --
-// Halo (weißer Umriss) statt Basiskarten-abhängiger Doppelpalette — funktioniert
-// unverändert auf OSM wie auf der Esri-Hybrid-Basiskarte.
+// Einfarbig dunkel mit kräftigem weißem Halo (Umriss) statt Einfärbung nach
+// Geschwindigkeit: der weiße Halo liefert Kontrast über der dunklen Esri-
+// Satellitenkarte, der dunkle Kern über der hellen, unruhigen OSM-Karte. Der
+// Halo ist bewusst breiter als in der Ursprungsportierung, weil die
+// geschwindigkeitsabhängige (teils helle) Färbung — die vorher etwas Kontrast
+// mitbrachte — nun wegfällt.
 function makeBarbSVG(spdKt, dirFrom, lat, size, color) {
   const side = lat < 0 ? -1 : 1; // Südhalbkugel: Fiedern spiegeln
   const halo = "#ffffff";
   const h = size / 2;
-  const SHAFT = 18, BW = 10, BS = 4.5, SW = 1.8, HALO = SW + 2.5;
+  const SHAFT = 18, BW = 10, BS = 4.5, SW = 2.0, HALO = SW + 3.5;
 
   if (spdKt < 2.5) {
     const c = `<circle cx="${h}" cy="${h}" r="4" fill="none" stroke="${color}" stroke-width="${SW}"/>`

@@ -201,12 +201,12 @@ select, input[type="number"], input[type="text"] {
 #settings { margin-top: 12px; }
 #settings summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
 
-/* --- Kartenlayer (Satellit/Radar) ----------------------------------------- */
-#maplayers { margin-top: 12px; }
-#maplayers summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
+/* --- Kartenlayer: Nowcasting (Satellit/Radar) + Flächige Modellparameter --- */
+#maplayers, #modelfields { margin-top: 12px; }
+#maplayers summary, #modelfields summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
 
 .ml-timenav { margin: 8px 0 4px; }
-#ml-time-back, #ml-time-fwd {
+#ml-time-back, #ml-time-fwd, #mf-time-back, #mf-time-fwd {
   font: inherit;
   padding: 3px 10px;
   border: 1px solid #c9c8c2;
@@ -215,9 +215,10 @@ select, input[type="number"], input[type="text"] {
   cursor: pointer;
   white-space: nowrap;
 }
-#ml-time-display { flex: 1; text-align: center; }
+#ml-time-display, #mf-time-display { flex: 1; text-align: center; }
 
 .ml-section { margin: 10px 0; padding-top: 8px; border-top: 1px solid #eceae4; }
+.ml-subsection { margin: 8px 0 0 4px; padding-left: 10px; border-left: 2px solid #eceae4; }
 
 .radio-row { display: flex; gap: 12px; flex-wrap: wrap; margin: 4px 0 8px; font-size: 13px; }
 .radio-row label { display: flex; align-items: center; gap: 4px; }

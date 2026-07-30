@@ -67,25 +67,82 @@ initMapLayers(map);
 // nach initMapLayers, da der gemeinsame wxOverlays-Pane dort angelegt wird.
 initWindOverlay(map);
 
-// Kartenklick setzt den Operationspunkt — außer Geoman zeichnet/editiert gerade.
-map.on("click", (e) => {
+// Punkt per Rechtsklick (Desktop) oder Long-Press (Touch) setzen und sofort
+// laden. requestPoint entprellt, weil mobile Browser beim Long-Press oft
+// zusätzlich ein contextmenu-Event feuern — sonst würde doppelt geladen.
+let lastPointRequestAt = 0;
+function requestPoint(lat, lon) {
+  const now = Date.now();
+  if (now - lastPointRequestAt < 700) return;
+  lastPointRequestAt = now;
+  setPoint(lat, lon, { autoLoad: true });
+}
+
+// Rechtsklick auf die Karte setzt/verschiebt den Operationspunkt. Bewusst NICHT
+// der Linksklick, damit das Arbeiten mit dem Geoman-Werkzeug den Marker nicht
+// versehentlich verschiebt. Alternativ per Drag verschiebbar (dragend unten).
+map.on("contextmenu", (e) => {
   if (map.pm.globalDrawModeEnabled() || map.pm.globalEditModeEnabled()) return;
-  setPoint(e.latlng.lat, e.latlng.lng);
+  requestPoint(e.latlng.lat, e.latlng.lng);
 });
 
-function setPoint(lat, lon) {
+// Long-Press auf Touch-Displays als Ersatz für den Rechtsklick: eigene
+// Erkennung, da Leaflet kein verlässliches Long-Press-Event liefert.
+(function enableLongPressPoint() {
+  const container = map.getContainer();
+  const HOLD_MS = 500;   // Haltedauer bis zum Auslösen
+  const MOVE_TOL = 12;   // erlaubte Fingerbewegung (px); mehr = Pan/Zoom
+  let timer = null, startX = 0, startY = 0;
+  const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+
+  container.addEventListener("touchstart", (e) => {
+    // Nur Einzelfinger, nicht während Geoman zeichnet/editiert, nicht auf dem
+    // (ziehbaren) Marker selbst.
+    if (e.touches.length !== 1) { cancel(); return; }
+    if (map.pm.globalDrawModeEnabled() || map.pm.globalEditModeEnabled()) return;
+    if (e.target.closest && e.target.closest(".leaflet-marker-icon")) return;
+    const t = e.touches[0];
+    startX = t.clientX; startY = t.clientY;
+    cancel();
+    timer = setTimeout(() => {
+      timer = null;
+      const rect = container.getBoundingClientRect();
+      const cp = L.point(startX - rect.left, startY - rect.top);
+      const ll = map.containerPointToLatLng(cp);
+      requestPoint(ll.lat, ll.lng);
+    }, HOLD_MS);
+  }, { passive: true });
+
+  container.addEventListener("touchmove", (e) => {
+    if (!timer) return;
+    const t = e.touches[0];
+    if (Math.abs(t.clientX - startX) > MOVE_TOL || Math.abs(t.clientY - startY) > MOVE_TOL) cancel();
+  }, { passive: true });
+
+  container.addEventListener("touchend", cancel, { passive: true });
+  container.addEventListener("touchcancel", cancel, { passive: true });
+})();
+
+function setPoint(lat, lon, { autoLoad = false } = {}) {
   state.point = { lat, lon };
   const label = `${lat.toFixed(4)}°N ${lon.toFixed(4)}°E`;
   el("pointpos").textContent = label;
   if (state.marker) {
     state.marker.setLatLng([lat, lon]);
   } else {
-    state.marker = L.marker([lat, lon]).addTo(map);
+    // Ziehbarer Marker; pmIgnore hält ihn aus dem Geoman-Editiermodus heraus.
+    state.marker = L.marker([lat, lon], { draggable: true, pmIgnore: true }).addTo(map);
+    // Nach dem Ziehen: neuen Punkt übernehmen und Vorhersage sofort neu laden.
+    state.marker.on("dragend", () => {
+      const p = state.marker.getLatLng();
+      setPoint(p.lat, p.lng, { autoLoad: true });
+    });
   }
   state.marker.bindTooltip(label, { className: "point-tip" });
   el("load").disabled = false;
   setStatus("Bereit zum Laden.", "");
   updateSetting("lastPoint", { lat, lon });
+  if (autoLoad) loadForecast();
 }
 
 // Zuletzt verwendete Position beim Start wiederherstellen (kein Auto-Laden).
@@ -97,7 +154,7 @@ if (settings.lastPoint) setPoint(settings.lastPoint.lat, settings.lastPoint.lon)
 function goToCoordInput() {
   const parsed = parseCoordInput(el("coordinput").value);
   if (!parsed) { setStatus("Ungültige Koordinate.", "error"); return; }
-  setPoint(parsed.lat, parsed.lon);
+  setPoint(parsed.lat, parsed.lon, { autoLoad: true });
   map.setView([parsed.lat, parsed.lon], Math.max(map.getZoom(), 11));
 }
 el("coordgo").addEventListener("click", goToCoordInput);

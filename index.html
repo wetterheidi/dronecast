@@ -21,7 +21,7 @@
 
     <div class="row">
       <span class="label" id="pointlabel">Operationsraum</span>
-      <span id="pointpos" class="mono">Karte anklicken</span>
+      <span id="pointpos" class="mono">Rechtsklick / Long-Press / ziehen</span>
     </div>
     <div class="row">
       <input id="coordinput" type="text" placeholder="48.1234, 11.5678 oder 32UPU6347420615" />
@@ -88,7 +88,7 @@
     </details>
 
     <details id="maplayers">
-      <summary>Satellit &amp; Niederschlagsradar &amp; Wind</summary>
+      <summary>Nowcasting (Satellit &amp; Radar)</summary>
 
       <div class="row ml-timenav">
         <button id="ml-time-back" type="button">−15 min</button>
@@ -123,32 +123,40 @@
         </div>
         <input id="ml-radar-opacity" type="range" min="10" max="100" step="5" value="70" />
       </div>
+    </details>
+
+    <details id="modelfields">
+      <summary>Numerische Vorhersagen</summary>
+
+      <div class="row ml-timenav">
+        <button id="mf-time-back" type="button">−1 h</button>
+        <span id="mf-time-display" class="mono">–</span>
+        <button id="mf-time-fwd" type="button">+1 h</button>
+      </div>
+      <input id="mf-time-slider" type="range" min="0" max="47" step="1" value="0" />
+      <div class="hint">Gemeinsame Zeitachse für alle flächigen Modellparameter unten.</div>
 
       <div class="ml-section">
         <label class="row">
           <span class="label"><input type="checkbox" id="ml-wind-on" /> Wind 10 m (unterstes Modelllevel)</span>
         </label>
         <div class="hint warn" id="ml-wind-hint" hidden>Zum Anzeigen bitte näher heranzoomen (ab Zoom 9).</div>
-        <div class="row ml-timenav">
-          <button id="ml-wind-back" type="button">−1 h</button>
-          <span id="ml-wind-time" class="mono">–</span>
-          <button id="ml-wind-fwd" type="button">+1 h</button>
+        <div id="ml-wind-body" class="ml-subsection" hidden>
+          <label class="row">
+            <span class="label"><input type="checkbox" id="ml-wind-barbs" /> Windfiedern (WMO)</span>
+          </label>
+          <div class="row">
+            <span class="label">Gitterdichte (Fiedern &amp; Fläche)</span>
+          </div>
+          <div class="radio-row" id="ml-wind-density"><!-- Radios aus WIND_OVERLAY_DENSITY_OPTIONS --></div>
+          <div class="row opacity-row">
+            <span class="label">Deckkraft Windfläche</span>
+            <span id="ml-wind-opacity-val" class="mono">50%</span>
+          </div>
+          <input id="ml-wind-opacity" type="range" min="10" max="100" step="5" value="50" />
+          <div class="wind-legend" id="ml-wind-legend"></div>
+          <div class="hint mono" id="ml-wind-status"></div>
         </div>
-        <input id="ml-wind-slider" type="range" min="0" max="47" step="1" value="0" />
-        <label class="row">
-          <span class="label"><input type="checkbox" id="ml-wind-barbs" /> Windfiedern (WMO)</span>
-        </label>
-        <div class="row">
-          <span class="label">Gitterdichte (Fiedern &amp; Fläche)</span>
-        </div>
-        <div class="radio-row" id="ml-wind-density"><!-- Radios aus WIND_OVERLAY_DENSITY_OPTIONS --></div>
-        <div class="row opacity-row">
-          <span class="label">Deckkraft Windfläche</span>
-          <span id="ml-wind-opacity-val" class="mono">50%</span>
-        </div>
-        <input id="ml-wind-opacity" type="range" min="10" max="100" step="5" value="50" />
-        <div class="wind-legend" id="ml-wind-legend"></div>
-        <div class="hint mono" id="ml-wind-status"></div>
       </div>
     </details>
 
