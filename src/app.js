@@ -555,7 +555,11 @@ function initSettings() {
     // Flughöhenlinie und Zoom-Bereich hängen nur von dieser Einstellung ab.
     if (!el("crosssection").hidden) renderXs();
   });
-  bind("set-days", "forecastDays", () => needReload());
+  // Der Horizont ändert die Datenbasis (mehr/weniger Stunden). Ist ein Punkt
+  // geladen, sofort automatisch neu abrufen, damit Meteogramm/Cross-Section und
+  // die übrigen Produkte direkt nachziehen, statt auf einen manuellen Reload zu
+  // warten. Ohne geladenen Punkt bleibt es beim reinen Speichern der Einstellung.
+  bind("set-days", "forecastDays", () => { if (state.data) loadForecast(); });
   bind("set-unitheight", "unitHeight", refreshViews);
   bind("set-unitwind", "unitWind", refreshViews);
   bind("set-unittemp", "unitTemp", refreshViews);
@@ -587,7 +591,8 @@ function fillOptions(id, values, label) {
   el(id).innerHTML = values.map((v) => `<option value="${v}">${label(v)}</option>`).join("");
 }
 
-// Modell/Höhe/Horizont ändern die Datenbasis: erneutes Laden nötig.
+// Modellwechsel ändert die Datenbasis grundlegend (anderes Gitter/andere API):
+// erneutes Laden nötig. Der Horizont lädt inzwischen automatisch neu (s. o.).
 function needReload() {
   if (state.data) setStatus("Einstellung geändert — bitte Vorhersage neu laden.", "busy");
 }
