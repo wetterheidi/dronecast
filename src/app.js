@@ -224,6 +224,9 @@ async function loadForecast() {
     // echten (DEM-)Geländehöhe: großer Unterschied heißt, das Modellgitter
     // löst das lokale Gelände hier nicht auf (siehe METHODIK.md, „Wind auf
     // Höhe vs. Modell-Orographie"), nicht dass ein Wert falsch berechnet ist.
+    // ensureCorners lädt die 4 Gitterecken am Punkt — elevationAt liefert sonst
+    // null (init selbst lädt nur den Sondierungspunkt, nicht die Ecken).
+    await wf.ensureCorners(lat, lon);
     const modelElevation = wf.elevationAt(lat, lon);
 
     // Die Modell-Level-Winde auf den Vorschau-Höhen berechnet renderNow zur
