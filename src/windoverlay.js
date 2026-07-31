@@ -1,15 +1,32 @@
 /**
- * Kartenlayer: Wind 10 m (unterstes Modelllevel) als flächige Darstellung —
- * WMO-Windfiedern an Gitterpunkten plus interpolierte, halbtransparente
- * Farbfläche der Windgeschwindigkeit. Datenquelle wie windfield.js/column.js:
+ * Kartenlayer: Wind auf nativen Modelleveln (Boden ~10 m AGL bis maxHeight,
+ * per Höhenschieber wählbar) als flächige Darstellung — WMO-Windfiedern an
+ * Gitterpunkten plus interpolierte, halbtransparente Farbfläche der
+ * Windgeschwindigkeit. Datenquelle wie windfield.js/column.js:
  * Michaels Instanz (Modell-Level-Daten, siehe config.js `API_BASE`), hier
  * aber gitterweise statt punktweise abgefragt — es gibt keinen eigenen
  * Gitter-/Tile-Endpunkt, nur die normale Multi-Punkt-`/v1/forecast`-API
  * (komma-getrennte lat/lon-Listen).
  *
- * Level ist überall Parameter (`currentLevel()`) — bewusst so gebaut, damit
- * ein späterer Höhen-Slider (Ausbaustufe 2/3) nur diese eine Funktion
- * ersetzen muss, statt Fetch/Cache/Rendering umzubauen.
+ * Höhenschieber: Statt nur des untersten Levels wird beim Netzabruf das ganze
+ * vertikale „Level-Band" vom Boden (~10 m) bis knapp über die eingestellte
+ * maxHeight in EINEM Request je Gitterpunkt mitgeladen (alle Comps aller
+ * Bandlevel als `hourly`-Variablen). Der Schieber wechselt danach nur den
+ * gerenderten Levelindex — reines Neuzeichnen aus dem Cache, ohne neue
+ * Requests (genau wie der Zeitslider). Das Band selbst (welche Level, welche
+ * Höhen) wird einmal je Modell an einem Sondierpunkt bestimmt (`ensureBand`),
+ * weil native ICON-Level keine feste Meterhöhe haben.
+ *
+ * Parameter-Deskriptor (`PARAMS`/`ACTIVE_PARAM`): Welche API-Variablen geladen
+ * und wie sie eingefärbt/als Fiedern gezeichnet werden, ist in einem Deskriptor
+ * gekapselt — Fetch, Cache, Rendering und Legende sind deskriptorgetrieben.
+ * Höhenband, Gitter, Sondierung und Opacity sind parameter-UNABHÄNGIG. Ein
+ * späterer Zusatzparameter (Temperatur, Feuchte, …) ist damit „Deskriptor +
+ * `fillStops` ergänzen (+ UI-Auswahl)", ohne die Pipeline umzubauen. Vektor-
+ * parameter (`barb` gesetzt) zeigen zusätzlich Fiedern; Skalarparameter nur die
+ * Farbfläche. Der Cache-Key trägt die Parameter-ID, damit später mehrere
+ * Parameter nebeneinander im Cache liegen können. Bislang gibt es nur `wind`
+ * und noch keine UI-Auswahl — `ACTIVE_PARAM` ist konstant.
  *
  * Räumliche Begrenzung: Drohnenflüge sind kleinräumig, daher liefert der
  * Layer erst ab einem Mindest-Zoom Daten (WIND_OVERLAY_MIN_ZOOM, config.js)
@@ -47,11 +64,12 @@
 import {
   API_BASE, MODELS,
   WIND_OVERLAY_MIN_ZOOM, WIND_OVERLAY_MAX_POINTS, WIND_OVERLAY_POINTS_PER_REQUEST,
-  WIND_OVERLAY_DENSITY_OPTIONS, WIND_OVERLAY_BASE_TARGET_PX,
+  WIND_OVERLAY_DENSITY_OPTIONS, WIND_OVERLAY_BASE_TARGET_PX, WIND_OVERLAY_PROBE_LEVELS,
+  WIND_OVERLAY_MAX_CONCURRENCY, WIND_OVERLAY_CHUNK_RETRIES,
 } from "./config.js";
 import { settings, updateSetting } from "./settings.js";
 import { nearestFutureIndex } from "./weather.js";
-import { windToDisplay, windUnit } from "./units.js";
+import { windToDisplay, windUnit, heightToDisplay, heightUnit } from "./units.js";
 
 /* global L */
 
@@ -65,8 +83,17 @@ const BARB_SIZE = 44; // px
 // Einfärbung nach Geschwindigkeit verschlechterte nur die Lesbarkeit über OSM.
 const BARB_COLOR = "#0b1220";
 const REFRESH_DEBOUNCE_MS = 500;
+const WIND_OVERLAY_MAX_RETRIES = 4; // Deckel für Auto-Nachladeversuche nach Teilfehlern
 const CACHE_TTL_MS = 60 * 60 * 1000; // Modellläufe kommen ~stündlich neu
-const CACHE_MAX = 4000; // LRU-Deckel (Punkte × Level × Modell)
+// LRU-Deckel: seit dem Höhenschieber liegt je Punkt das GANZE Level-Band im
+// Cache (ein Eintrag pro Punkt × Level × Parameter). Der Deckel MUSS größer
+// sein als das, was ein einzelner Kartenausschnitt braucht — sonst verdrängt
+// das Laden der oberen Level die unteren (oder umgekehrt), und ein Höhenwechsel
+// zeigt Lücken, die nie nachgeladen werden (Höhenwechsel löst bewusst keinen
+// Fetch aus). Worst Case: Punktebudget (WIND_OVERLAY_MAX_POINTS) × maximale
+// Bandtiefe (~WIND_OVERLAY_PROBE_LEVELS) ≈ 1500 × 30 = 45 000; plus Reserve,
+// damit Pannen nicht sofort die anderen Level des aktuellen Ausschnitts räumt.
+const CACHE_MAX = 60000;
 const FILL_ZINDEX = 30; // im wxOverlays-Pane: über Radar(20)/Sat(10), unter den Fiedern
 const PX_STEP = 2; // Canvas-Raster: je 2×2-px-Block einmal berechnet
 const AUTO_CHECK_MS = 10 * 60 * 1000;
@@ -76,22 +103,73 @@ const KM_PER_DEG = 111.32; // Erdradius-Näherung für Breite; Länge: KM_PER_DE
 // typischen Drohnen-Limits orientiert (vgl. droneProfiles.js: windSurface
 // max. 10 m/s, windBandMax 12 m/s, gustSurface 15 m/s). Bewusst statisch
 // statt ans gewählte Profil gekoppelt (Profile sind austauschbare Platzhalter).
-const FILL_STOPS = [
-  { maxMs: 2, rgb: [110, 170, 235] },
-  { maxMs: 4, rgb: [120, 200, 160] },
-  { maxMs: 6, rgb: [160, 210, 100] },
-  { maxMs: 8, rgb: [235, 210, 80] },
-  { maxMs: 10, rgb: [240, 150, 60] }, // typ. Bodenwind-Limit
-  { maxMs: 12, rgb: [225, 70, 60] }, // typ. Bandmax-Limit
-  { maxMs: Infinity, rgb: [150, 40, 160] },
+const WIND_FILL_STOPS = [
+  { max: 2, rgb: [110, 170, 235] },
+  { max: 4, rgb: [120, 200, 160] },
+  { max: 6, rgb: [160, 210, 100] },
+  { max: 8, rgb: [235, 210, 80] },
+  { max: 10, rgb: [240, 150, 60] }, // typ. Bodenwind-Limit
+  { max: 12, rgb: [225, 70, 60] }, // typ. Bandmax-Limit
+  { max: Infinity, rgb: [150, 40, 160] },
 ];
 
-function classFor(speedMs) {
-  for (const s of FILL_STOPS) if (speedMs <= s.maxMs) return s;
-  return FILL_STOPS[FILL_STOPS.length - 1];
+// Farbklasse für einen Skalarwert anhand der (parameterspezifischen) Stops.
+// `stops` in nativer Einheit des Parameters (Wind: m/s).
+function classFor(value, stops) {
+  for (const s of stops) if (value <= s.max) return s;
+  return stops[stops.length - 1];
 }
 function hex(rgb) {
   return "#" + rgb.map((c) => c.toString(16).padStart(2, "0")).join("");
+}
+
+// -- Parameter-Deskriptoren ---------------------------------------------------
+// Ein Eintrag beschreibt einen flächig darstellbaren Modellparameter vollständig:
+//   comps         Komponenten, die je Level geladen werden (API-Variable +
+//                 Umrechnung roh→native Einheit: factor, optional offset).
+//   scalar(c)     Wert der Farbfläche aus einem Sample c = {compName: Wert}.
+//   barb(c)|null  Fiederndaten {spdKt, dirFrom} für Vektorparameter; null = keine
+//                 Fiedern (Skalarparameter zeigen nur die Farbfläche).
+//   fillStops     Farbklassen (native Einheit), legendDisplay/legendUnit für die
+//                 Legende (native Einheit → Anzeige).
+// Höhenband, Gitter, Sondierung und Opacity sind hiervon unabhängig.
+const PARAMS = {
+  wind: {
+    id: "wind",
+    label: "Wind",
+    kind: "vector",
+    comps: [
+      { name: "u", varFor: (l) => `wind_u_component_level${l}`, factor: KMH_TO_MS },
+      { name: "v", varFor: (l) => `wind_v_component_level${l}`, factor: KMH_TO_MS },
+    ],
+    scalar: (c) => Math.hypot(c.u, c.v),
+    barb: (c) => ({
+      spdKt: Math.hypot(c.u, c.v) * KT_PER_MS,
+      dirFrom: (Math.atan2(-c.u, -c.v) * 180 / Math.PI + 360) % 360,
+    }),
+    fillStops: WIND_FILL_STOPS,
+    legendDisplay: windToDisplay,
+    legendUnit: windUnit,
+  },
+  // Später z. B. (nur zur Illustration der Erweiterung — noch nicht aktiv):
+  // temperature: {
+  //   id: "temperature", label: "Temperatur", kind: "scalar",
+  //   comps: [{ name: "t", varFor: (l) => `temperature_level${l}`, factor: 1 }],
+  //   scalar: (c) => c.t, barb: null,
+  //   fillStops: TEMP_STOPS, legendDisplay: tempToDisplay, legendUnit: tempUnit,
+  // },
+};
+// Aktiver Parameter — noch ohne UI-Auswahl konstant „Wind". Später aus einem
+// Setting (z. B. settings.windLayerParam) gewählt.
+const ACTIVE_PARAM = PARAMS.wind;
+
+function firstFinite(arr) {
+  if (!Array.isArray(arr)) return null;
+  for (const v of arr) if (v != null && Number.isFinite(v)) return v;
+  return null;
+}
+function clampNum(x, lo, hi) {
+  return Math.min(hi, Math.max(lo, x));
 }
 
 export function initWindOverlay(map) {
@@ -113,17 +191,21 @@ export function initWindOverlay(map) {
   canvas.style.pointerEvents = "none";
   const ctx = canvas.getContext("2d");
 
-  const cache = new Map(); // key "iLat,iLon,level,model" -> {u: Float32Array, v: Float32Array} (m/s)
+  const cache = new Map(); // key "iLat,iLon,level,param,model" -> {comps: {name: Float32Array}} (native Einheit)
   let times = null; // Unix-Sekunden (stündlich), gemeinsam für alle Cache-Einträge
   let timeIdx = 0;
+  let heightIdx = clampNum(settings.windLayerHeightIdx | 0, 0, 999); // Index ins Level-Band (0 = Boden)
   let cacheTs = 0;
   let currentModel = null;
-  let currentLevel = null;
+  let currentBand = null; // { levels: [nLevels, …], heights: [~m AGL, …] }, levels[0] = Boden
+  let bandKey = null; // "modelKey,maxHeight" — für welche Kombination currentBand gilt
   let lastNodes = null; // [[iLat,iLon], …] des letzten Grids
   let lastLatStride = 1;
   let lastLonStride = 1;
   let abortCtrl = null;
   let fetchGen = 0;
+
+  const bandKeyFor = (modelKey) => `${modelKey},${settings.maxHeight}`;
 
   // -- Grid-Geometrie ---------------------------------------------------------
   function densityMult() {
@@ -216,8 +298,8 @@ export function initWindOverlay(map) {
   }
 
   // -- Cache (LRU) --------------------------------------------------------------
-  function cacheKey(iLat, iLon, lvl, modelKey) {
-    return `${iLat},${iLon},${lvl},${modelKey}`;
+  function cacheKey(iLat, iLon, lvl, paramId, modelKey) {
+    return `${iLat},${iLon},${lvl},${paramId},${modelKey}`;
   }
   function cacheGet(key) {
     const v = cache.get(key);
@@ -235,15 +317,22 @@ export function initWindOverlay(map) {
     return Math.round(x * 1e5) / 1e5;
   }
 
-  async function fetchChunk(chunk, modelKey, model, lvl, signal) {
+  // Lädt je Punkt das GESAMTE Level-Band des aktiven Parameters in einem
+  // Request (alle Comps × alle Bandlevel als `hourly`-Variablen). Danach ist
+  // das Verschieben des Höhenschiebers reines Neuzeichnen aus dem Cache.
+  async function fetchChunk(chunk, modelKey, model, band, param, signal) {
     // Wie column.js/weather.js: `forecast_days` statt start_date/end_date —
     // letzteres würde bei kalendertag-basierter Rundung leicht über den
     // gewünschten Horizont hinausgreifen (unnötig viele Datenlücken-Stunden
     // am Ende des Sliders, sobald der Modelllauf dort nicht mehr reicht).
+    const hourlyVars = [];
+    for (const lvl of band.levels) {
+      for (const c of param.comps) hourlyVars.push(c.varFor(lvl));
+    }
     const params = new URLSearchParams({
       latitude: chunk.map(([a]) => round5(a * model.grid)).join(","),
       longitude: chunk.map(([, b]) => round5(b * model.grid)).join(","),
-      hourly: `wind_u_component_level${lvl},wind_v_component_level${lvl}`,
+      hourly: hourlyVars.join(","),
       models: model.apiModel,
       timeformat: "unixtime",
       forecast_days: String(settings.forecastDays),
@@ -266,33 +355,127 @@ export function initWindOverlay(map) {
       const h = d.hourly || {};
       if (!times) times = h.time || [];
       const T = times.length;
-      const uSrc = h[`wind_u_component_level${lvl}`] || [];
-      const vSrc = h[`wind_v_component_level${lvl}`] || [];
-      const u = new Float32Array(T);
-      const v = new Float32Array(T);
-      for (let t = 0; t < T; t++) {
-        u[t] = uSrc[t] == null ? NaN : uSrc[t] * KMH_TO_MS;
-        v[t] = vSrc[t] == null ? NaN : vSrc[t] * KMH_TO_MS;
+      for (const lvl of band.levels) {
+        const comps = {};
+        for (const c of param.comps) {
+          const src = h[c.varFor(lvl)] || [];
+          const off = c.offset || 0;
+          const a = new Float32Array(T);
+          for (let t = 0; t < T; t++) a[t] = src[t] == null ? NaN : src[t] * c.factor + off;
+          comps[c.name] = a;
+        }
+        cacheSet(cacheKey(iLat, iLon, lvl, param.id, modelKey), { comps });
       }
-      cacheSet(cacheKey(iLat, iLon, lvl, modelKey), { u, v });
     });
   }
 
-  async function fetchMissing(nodes, modelKey, model, lvl, signal) {
+  async function fetchChunkWithRetry(chunk, modelKey, model, band, param, signal) {
+    let lastErr;
+    for (let attempt = 0; attempt <= WIND_OVERLAY_CHUNK_RETRIES; attempt++) {
+      if (signal.aborted) throw new DOMException("aborted", "AbortError");
+      try {
+        await fetchChunk(chunk, modelKey, model, band, param, signal);
+        return;
+      } catch (e) {
+        if (signal.aborted) throw e;
+        lastErr = e;
+        if (attempt < WIND_OVERLAY_CHUNK_RETRIES) await sleep(250 * (attempt + 1), signal);
+      }
+    }
+    throw lastErr;
+  }
+
+  // Lädt die fehlenden Knoten in Chunks über einen Worker-Pool mit begrenzter
+  // Parallelität. Jeder fertige Chunk ruft onChunk() (progressives Rendern +
+  // Fortschritt). Fehlgeschlagene Chunks werden gezählt statt den ganzen
+  // Refresh abzubrechen — so bleiben erfolgreiche Chunks sichtbar, und ein
+  // Auto-Retry (fetchAndRender) holt nur die noch fehlenden nach.
+  async function fetchMissing(nodes, modelKey, model, band, param, signal, onChunk) {
     const chunks = [];
     for (let i = 0; i < nodes.length; i += WIND_OVERLAY_POINTS_PER_REQUEST) {
       chunks.push(nodes.slice(i, i + WIND_OVERLAY_POINTS_PER_REQUEST));
     }
-    await Promise.all(chunks.map((c) => fetchChunk(c, modelKey, model, lvl, signal)));
+    let next = 0;
+    let done = 0;
+    let failed = 0;
+    async function worker() {
+      while (!signal.aborted) {
+        const i = next++;
+        if (i >= chunks.length) return;
+        try {
+          await fetchChunkWithRetry(chunks[i], modelKey, model, band, param, signal);
+          done++;
+        } catch (e) {
+          if (signal.aborted) return;
+          failed++;
+        }
+        onChunk?.(done, failed, chunks.length);
+      }
+    }
+    const n = Math.min(WIND_OVERLAY_MAX_CONCURRENCY, chunks.length);
+    await Promise.all(Array.from({ length: n }, worker));
+    return { done, failed, total: chunks.length };
+  }
+
+  // Ein Knoten „fehlt", solange nicht ALLE Bandlevel des aktiven Parameters im
+  // Cache liegen (nach einer maxHeight-Erhöhung kann ein Teil schon da sein).
+  function missingNodes(nodes, band, param, modelKey) {
+    return nodes.filter(([a, b]) =>
+      !band.levels.every((l) => cache.has(cacheKey(a, b, l, param.id, modelKey))));
+  }
+
+  // -- Level-Band --------------------------------------------------------------
+  // Bestimmt einmal je Modell+maxHeight das vertikale Band nativer Level vom
+  // Boden (~10 m) bis knapp über maxHeight, samt zugehöriger ~Höhen (für die
+  // Slider-Beschriftung). Native ICON-Level haben keine feste Meterhöhe, daher
+  // eine Sondierabfrage von `height_agl_level{l}` an der Kartenmitte (wie
+  // windfield.js). Ergebnis in currentBand/bandKey gecacht.
+  async function ensureBand(modelKey, model, signal) {
+    const key = bandKeyFor(modelKey);
+    if (bandKey === key && currentBand) return currentBand;
+    const c = map.getCenter();
+    const lat = clampNum(c.lat, model.bbox.latMin, model.bbox.latMax);
+    const lon = clampNum(c.lng, model.bbox.lonMin, model.bbox.lonMax);
+    const n = model.nLevels;
+    const probeLevels = [];
+    for (let l = n; l > Math.max(1, n - WIND_OVERLAY_PROBE_LEVELS); l--) probeLevels.push(l);
+    const params = new URLSearchParams({
+      latitude: String(round5(lat)),
+      longitude: String(round5(lon)),
+      hourly: probeLevels.map((l) => `height_agl_level${l}`).join(","),
+      models: model.apiModel,
+      timeformat: "unixtime",
+      forecast_days: "1",
+      cell_selection: "nearest",
+    });
+    const resp = await fetch(`${API_BASE}/v1/forecast?${params}`, { signal });
+    const body = await resp.text();
+    let data;
+    try {
+      data = JSON.parse(body);
+    } catch {
+      throw new Error(`Serverfehler: ${body.slice(0, 180)}`);
+    }
+    if (!resp.ok || data.error) {
+      throw new Error(data.reason ? `API-Fehler: ${data.reason.slice(0, 180)}` : `API-Fehler ${resp.status}`);
+    }
+    const h = (Array.isArray(data) ? data[0] : data).hourly || {};
+    const levels = [];
+    const heights = [];
+    for (const l of probeLevels) {
+      const hl = firstFinite(h[`height_agl_level${l}`]);
+      levels.push(l);
+      heights.push(hl);
+      // Erstes Level, das maxHeight erreicht/überschreitet, ist die Bandgrenze
+      // (inklusiv — so reicht der Schieber genau bis über die eingestellte Höhe).
+      if (hl != null && hl >= settings.maxHeight) break;
+    }
+    currentBand = { levels, heights };
+    bandKey = key;
+    return currentBand;
   }
 
   // -- Refresh (Zoom-/Bounds-/Modellwechsel) -------------------------------------
-  function currentLevelFor(modelKey) {
-    // Einziger Ort, der "unterstes Level" festlegt — ein späterer Höhen-
-    // Slider (Ausbaustufe 2/3) ersetzt nur diese Funktion.
-    return MODELS[modelKey].nLevels;
-  }
-
   // Grid für den aktuellen Kartenausschnitt neu berechnen und SOFORT (ohne
   // Debounce) aus dem Cache zeichnen — Fläche UND Fiedern. Wichtig fürs
   // Pannen: vorher wurde nur die Fläche sofort neu gezeichnet (eigenes
@@ -318,17 +501,19 @@ export function initWindOverlay(map) {
     const modelKey = settings.model;
     const model = MODELS[modelKey];
     if (!model) return null;
-    const lvl = currentLevelFor(modelKey);
 
     if (cacheTs && Date.now() - cacheTs > CACHE_TTL_MS) {
       cache.clear();
       times = null;
+      currentBand = null;
+      bandKey = null;
     }
-    if (currentModel !== modelKey || currentLevel !== lvl) {
+    if (currentModel !== modelKey) {
       cache.clear();
       times = null;
+      currentBand = null;
+      bandKey = null;
       currentModel = modelKey;
-      currentLevel = lvl;
     }
 
     const bounds = map.getBounds();
@@ -338,13 +523,19 @@ export function initWindOverlay(map) {
     lastLonStride = lonStride;
     renderAll(); // sofort aus Cache — Fläche UND Fiedern
 
-    return { nodes, modelKey, model, lvl };
+    return { nodes, modelKey, model };
   }
 
-  async function fetchAndRender(nodes, modelKey, model, lvl) {
-    const missing = nodes.filter(([a, b]) => !cache.has(cacheKey(a, b, lvl, modelKey)));
-    if (!missing.length) {
+  async function fetchAndRender(nodes, modelKey, model) {
+    const param = ACTIVE_PARAM;
+    // Schnellpfad: Band schon bekannt und alle Knoten im Cache → nur zeichnen,
+    // ohne einen ggf. laufenden Fetch abzubrechen (wie zuvor beim reinen
+    // Cache-Treffer). Der Höhenschieber selbst löst hierüber nie einen Fetch aus.
+    let band = (bandKey === bandKeyFor(modelKey) && currentBand) ? currentBand : null;
+    if (band && !missingNodes(nodes, band, param, modelKey).length) {
+      syncHeightSlider();
       setStatus(`${nodes.length} Punkte (alle aus Cache)`);
+      renderAll();
       return;
     }
 
@@ -353,12 +544,44 @@ export function initWindOverlay(map) {
     abortCtrl = ctrl;
     const myGen = ++fetchGen;
 
-    setStatus(`Lade ${missing.length} von ${nodes.length} Punkten …`);
+    if (!band) {
+      setStatus("Bestimme Modelllevel …", true);
+      try {
+        band = await ensureBand(modelKey, model, ctrl.signal);
+      } catch (e) {
+        if (ctrl.signal.aborted) return;
+        setStatus(`Fehler: ${e.message || e}`);
+        scheduleRetry();
+        return;
+      }
+      if (myGen !== fetchGen) return; // durch neueren Refresh überholt
+      syncHeightSlider();
+      renderAll(); // Band bekannt → aus Cache zeichnen (falls schon Daten da)
+    }
+
+    const missing = missingNodes(nodes, band, param, modelKey);
+    if (!missing.length) {
+      setStatus(`${nodes.length} Punkte (alle aus Cache)`);
+      renderAll();
+      return;
+    }
+
+    // Progressiv rendern: jeder fertige Chunk zeichnet (throttled) den Cache neu,
+    // damit sich die Fläche/Fiedern sichtbar auffüllen statt erst am Ende.
+    const throttledRender = throttle(renderAll, 150);
+    setStatus(`Lade 0/${missing.length} Punkte …`, true);
+    let result;
     try {
-      await fetchMissing(missing, modelKey, model, lvl, ctrl.signal);
+      result = await fetchMissing(missing, modelKey, model, band, param, ctrl.signal, (done, failed, total) => {
+        if (myGen !== fetchGen) return;
+        const loaded = Math.min(done * WIND_OVERLAY_POINTS_PER_REQUEST, missing.length);
+        setStatus(`Lade ${loaded}/${missing.length} Punkte …`, true);
+        throttledRender();
+      });
     } catch (e) {
       if (ctrl.signal.aborted) return;
       setStatus(`Fehler: ${e.message || e}`);
+      scheduleRetry();
       return;
     }
     if (myGen !== fetchGen) return; // durch neueren Refresh überholt
@@ -369,8 +592,31 @@ export function initWindOverlay(map) {
       if (timeIdx === 0) timeIdx = nearestFutureIndex(times, Date.now());
       slider.value = String(clampIdx(timeIdx));
     }
-    setStatus(`${nodes.length} Punkte geladen`);
     renderAll();
+    if (result.failed) {
+      // Ein Teil fehlt trotz Retry — Lücken bleiben, automatisch nachladen.
+      setStatus(`${result.failed} von ${result.total} Blöcken fehlgeschlagen – erneuter Versuch …`, true);
+      scheduleRetry();
+    } else {
+      retryCount = 0;
+      setStatus(`${nodes.length} Punkte geladen`);
+    }
+  }
+
+  // Nach Teilfehlern automatisch nachladen (nur die noch fehlenden Knoten, da
+  // fetchAndRender über missingNodes filtert). Begrenzte Anzahl mit Backoff,
+  // damit ein dauerhaft nicht erreichbarer Server keine Endlosschleife erzeugt.
+  // Der Zähler wird bei vollem Erfolg und bei jedem echten View-Wechsel (neues
+  // Grid) zurückgesetzt.
+  let retryCount = 0;
+  let retryTimer = null;
+  function scheduleRetry() {
+    if (!settings.windLayerOn || retryCount >= WIND_OVERLAY_MAX_RETRIES) return;
+    clearTimeout(retryTimer);
+    retryCount++;
+    retryTimer = setTimeout(() => {
+      if (settings.windLayerOn) refresh();
+    }, 1500 * retryCount);
   }
 
   const debouncedFetchAndRender = debounce(fetchAndRender, REFRESH_DEBOUNCE_MS);
@@ -381,7 +627,7 @@ export function initWindOverlay(map) {
   function refresh() {
     const view = computeGridForCurrentView();
     if (!view) return;
-    debouncedFetchAndRender.now(view.nodes, view.modelKey, view.model, view.lvl);
+    debouncedFetchAndRender.now(view.nodes, view.modelKey, view.model);
   }
 
   // Fürs Pannen/Zoomen: Grid sofort neu berechnen und aus dem Cache zeichnen
@@ -390,36 +636,62 @@ export function initWindOverlay(map) {
   function refreshOnViewChange() {
     const view = computeGridForCurrentView();
     if (!view) return;
-    debouncedFetchAndRender(view.nodes, view.modelKey, view.model, view.lvl);
+    // Neue Nutzerabsicht (Pannen/Zoomen) → frisches Retry-Budget. Die Retries
+    // selbst laufen über refresh() und setzen den Zähler NICHT zurück, sonst
+    // gäbe es bei dauerhaftem Serverfehler eine Endlosschleife.
+    retryCount = 0;
+    debouncedFetchAndRender(view.nodes, view.modelKey, view.model);
+  }
+
+  // -- Rendering: Sampling ------------------------------------------------------
+  // Aktuell gewähltes Level (aus Höhenschieber-Index ins Band).
+  function activeLevel() {
+    if (!currentBand || !currentBand.levels.length) return null;
+    return currentBand.levels[clampNum(heightIdx, 0, currentBand.levels.length - 1)];
+  }
+
+  // Sample aller Comps des Parameters an der aktuellen Stunde; null bei Lücke.
+  function sampleComps(entry, param) {
+    const c = {};
+    for (const comp of param.comps) {
+      const v = entry.comps[comp.name]?.[timeIdx];
+      if (!Number.isFinite(v)) return null;
+      c[comp.name] = v;
+    }
+    return c;
+  }
+
+  function collectSamples() {
+    const out = new Map();
+    const lvl = activeLevel();
+    if (!lastNodes || !times?.length || lvl == null) return out;
+    const param = ACTIVE_PARAM;
+    for (const [iLat, iLon] of lastNodes) {
+      const e = cacheGet(cacheKey(iLat, iLon, lvl, param.id, currentModel));
+      if (!e) continue;
+      const c = sampleComps(e, param);
+      if (c) out.set(`${iLat},${iLon}`, c);
+    }
+    return out;
   }
 
   // -- Rendering: Fiedern -------------------------------------------------------
-  function collectNodeUV() {
-    const map_ = new Map();
-    if (!lastNodes || !times?.length) return map_;
-    for (const [iLat, iLon] of lastNodes) {
-      const e = cacheGet(cacheKey(iLat, iLon, currentLevel, currentModel));
-      if (!e) continue;
-      const u = e.u[timeIdx], v = e.v[timeIdx];
-      if (!Number.isFinite(u) || !Number.isFinite(v)) continue;
-      map_.set(`${iLat},${iLon}`, [u, v]);
-    }
-    return map_;
-  }
-
+  // Nur für Vektorparameter (param.barb gesetzt); Skalarparameter überspringen.
   function renderBarbs() {
     barbGroup.clearLayers();
-    if (!settings.windLayerOn || !settings.windLayerBarbs || !lastNodes || !times?.length) return;
+    const param = ACTIVE_PARAM;
+    const lvl = activeLevel();
+    if (!settings.windLayerOn || !settings.windLayerBarbs || !param.barb
+        || !lastNodes || !times?.length || lvl == null) return;
     const g = MODELS[currentModel].grid;
     for (const [iLat, iLon] of lastNodes) {
-      const e = cacheGet(cacheKey(iLat, iLon, currentLevel, currentModel));
+      const e = cacheGet(cacheKey(iLat, iLon, lvl, param.id, currentModel));
       if (!e) continue;
-      const u = e.u[timeIdx], v = e.v[timeIdx];
-      if (!Number.isFinite(u) || !Number.isFinite(v)) continue;
+      const c = sampleComps(e, param);
+      if (!c) continue;
       const lat = iLat * g, lon = iLon * g;
-      const spdMs = Math.hypot(u, v);
-      const dirFrom = (Math.atan2(-u, -v) * 180 / Math.PI + 360) % 360;
-      const html = makeBarbSVG(spdMs * KT_PER_MS, dirFrom, lat, BARB_SIZE, BARB_COLOR);
+      const { spdKt, dirFrom } = param.barb(c);
+      const html = makeBarbSVG(spdKt, dirFrom, lat, BARB_SIZE, BARB_COLOR);
       const icon = L.divIcon({
         className: "", // wichtig: sonst setzt Leaflet einen weißen Icon-Hintergrund
         html,
@@ -447,8 +719,9 @@ export function initWindOverlay(map) {
 
   function renderFill() {
     if (!settings.windLayerOn) { clearCanvas(); return; }
-    const nodeUV = collectNodeUV();
-    if (!nodeUV.size) { clearCanvas(); return; }
+    const param = ACTIVE_PARAM;
+    const nodeSamples = collectSamples();
+    if (!nodeSamples.size) { clearCanvas(); return; }
 
     const cellDegLat = MODELS[currentModel].grid * lastLatStride;
     const cellDegLon = MODELS[currentModel].grid * lastLonStride;
@@ -475,15 +748,19 @@ export function initWindOverlay(map) {
         const cLon0 = Math.floor(fLon);
         const fx = fLon - cLon0;
         const lon0 = cLon0 * lastLonStride, lon1 = (cLon0 + 1) * lastLonStride;
-        const c00 = nodeUV.get(`${uv00row},${lon0}`);
-        const c10 = nodeUV.get(`${uv10row},${lon0}`);
-        const c01 = nodeUV.get(`${uv00row},${lon1}`);
-        const c11 = nodeUV.get(`${uv10row},${lon1}`);
+        const c00 = nodeSamples.get(`${uv00row},${lon0}`);
+        const c10 = nodeSamples.get(`${uv10row},${lon0}`);
+        const c01 = nodeSamples.get(`${uv00row},${lon1}`);
+        const c11 = nodeSamples.get(`${uv10row},${lon1}`);
         if (!c00 || !c10 || !c01 || !c11) continue; // Alpha bleibt 0 (Datenlücke)
 
-        const u = bilin(c00[0], c10[0], c01[0], c11[0], fy, fx);
-        const v = bilin(c00[1], c10[1], c01[1], c11[1], fy, fx);
-        const rgb = classFor(Math.hypot(u, v)).rgb;
+        // Jede Comp einzeln bilinear interpolieren, dann parameterspezifisch
+        // zum Skalarwert der Farbfläche verrechnen (Wind: Betrag aus u,v).
+        const interp = {};
+        for (const comp of param.comps) {
+          interp[comp.name] = bilin(c00[comp.name], c10[comp.name], c01[comp.name], c11[comp.name], fy, fx);
+        }
+        const rgb = classFor(param.scalar(interp), param.fillStops).rgb;
         fillBlock(data, size.x, size.y, px, py, PX_STEP, rgb);
       }
     }
@@ -509,6 +786,44 @@ export function initWindOverlay(map) {
     renderFill();
     renderBarbs();
     updateTimeLabel();
+    updateHeightLabel();
+  }
+
+  // -- Höhenschieber ---------------------------------------------------------------
+  // Slider-Bereich/Beschriftung an das aktuelle Level-Band angleichen und
+  // heightIdx auf gültigen Bereich klemmen (Band kann durch Modell-/maxHeight-
+  // Wechsel kürzer werden).
+  function syncHeightSlider() {
+    const slider = el("ml-wind-height");
+    if (!currentBand || !currentBand.levels.length) { slider.max = "0"; return; }
+    heightIdx = clampNum(heightIdx, 0, currentBand.levels.length - 1);
+    slider.max = String(currentBand.levels.length - 1);
+    slider.value = String(heightIdx);
+    updateHeightLabel();
+  }
+
+  function updateHeightLabel() {
+    const disp = el("ml-wind-height-display");
+    if (!currentBand || !currentBand.levels.length) { disp.textContent = "–"; return; }
+    const h = currentBand.heights[clampNum(heightIdx, 0, currentBand.heights.length - 1)];
+    disp.textContent = h == null ? "–" : `~${Math.round(heightToDisplay(h))} ${heightUnit()} AGL`;
+  }
+
+  // Zeichnen beim Ziehen drosseln: Label/Slider-Wert laufen sofort mit (billig),
+  // aber renderAll (Vollbild-Canvas + Neuaufbau aller Fieder-Marker) höchstens
+  // alle 100 ms, sonst ruckelt kontinuierliches Ziehen bei vielen Fiedern.
+  const throttledHeightRender = throttle(renderAll, 100);
+
+  // Kein Fetch — das gesamte Band liegt je Punkt bereits im Cache, also nur neu
+  // zeichnen. `persist` (diskrete Aktion) speichert die Höhe; `immediate` false
+  // beim Ziehen (input) drosselt das Zeichnen.
+  function setHeightIdx(i, { persist = false, immediate = true } = {}) {
+    if (!currentBand || !currentBand.levels.length) return;
+    heightIdx = clampNum(i, 0, currentBand.levels.length - 1);
+    el("ml-wind-height").value = String(heightIdx);
+    updateHeightLabel();
+    if (persist) updateSetting("windLayerHeightIdx", heightIdx);
+    if (immediate) renderAll(); else throttledHeightRender();
   }
 
   // -- Zeitslider -----------------------------------------------------------------
@@ -541,24 +856,29 @@ export function initWindOverlay(map) {
   }
 
   // -- Legende / Status --------------------------------------------------------------
+  // Deskriptorgetrieben: Farbklassen und Einheiten kommen aus dem aktiven
+  // Parameter (fillStops in nativer Einheit → legendDisplay/legendUnit).
   function renderLegend() {
-    let lastMs = 0;
-    const chips = FILL_STOPS.map((s) => {
-      const label = s.maxMs === Infinity
-        ? `> ${Math.round(windToDisplay(lastMs))}`
-        : `${Math.round(windToDisplay(lastMs))}–${Math.round(windToDisplay(s.maxMs))}`;
-      lastMs = s.maxMs;
+    const param = ACTIVE_PARAM;
+    let last = 0;
+    const chips = param.fillStops.map((s) => {
+      const label = s.max === Infinity
+        ? `> ${Math.round(param.legendDisplay(last))}`
+        : `${Math.round(param.legendDisplay(last))}–${Math.round(param.legendDisplay(s.max))}`;
+      last = s.max;
       return `<span><span class="chip" style="background:${hex(s.rgb)}"></span>${label}</span>`;
     });
-    el("ml-wind-legend").innerHTML = chips.join("") + ` <span class="hint">${windUnit()}</span>`;
+    el("ml-wind-legend").innerHTML = chips.join("") + ` <span class="hint">${param.legendUnit()}</span>`;
   }
 
-  function setStatus(msg) {
-    el("ml-wind-status").textContent = msg;
+  function setStatus(msg, busy) {
+    const s = el("ml-wind-status");
+    s.textContent = msg;
+    s.classList.toggle("busy", !!busy);
   }
 
   // -- UI-Verdrahtung -----------------------------------------------------------------
-  // "Wind 10 m" ist der Master-Schalter (Abruf + Rendering überhaupt);
+  // "Wind (Modelllevel)" ist der Master-Schalter (Abruf + Rendering überhaupt);
   // "Windfiedern" darunter ist nur eine Rendering-Option davon (Fiedern
   // an/aus, die Fläche bleibt unabhängig davon sichtbar). Das Untermenü mit
   // dieser und den weiteren Optionen wird nur angezeigt, solange der Master
@@ -589,6 +909,14 @@ export function initWindOverlay(map) {
     el("mf-time-back").addEventListener("click", () => setTimeIdx(timeIdx - 1));
     el("mf-time-fwd").addEventListener("click", () => setTimeIdx(timeIdx + 1));
 
+    // Höhenschieber: flüssiges Neuzeichnen beim Ziehen (input, ohne persist),
+    // Speichern bei diskreten Aktionen (change, Buttons). Löst nie einen Fetch
+    // aus — das ganze Band liegt bereits im Cache.
+    el("ml-wind-height").addEventListener("input", (e) => setHeightIdx(Number(e.target.value), { immediate: false }));
+    el("ml-wind-height").addEventListener("change", () => setHeightIdx(heightIdx, { persist: true }));
+    el("ml-wind-height-down").addEventListener("click", () => setHeightIdx(heightIdx - 1, { persist: true }));
+    el("ml-wind-height-up").addEventListener("click", () => setHeightIdx(heightIdx + 1, { persist: true }));
+
     // Dichteänderung braucht kein Cache-Clear (Level/Modell bleiben gleich —
     // nur welche Knoten angefragt/gerendert werden ändert sich), nur einen
     // erneuten refresh() mit dem neuen Grid.
@@ -607,14 +935,24 @@ export function initWindOverlay(map) {
     // synchroner Ausführung noch das alte settings.model lesen — daher hier
     // bewusst einen Tick später (queueMicrotask) neu laden.
     el("set-model")?.addEventListener("change", () => queueMicrotask(() => {
-      cache.clear(); times = null; currentModel = null; currentLevel = null;
+      cache.clear(); times = null; currentModel = null; currentBand = null; bandKey = null;
       refresh();
     }));
     el("set-days")?.addEventListener("change", () => queueMicrotask(() => {
       cache.clear(); times = null;
       refresh();
     }));
+    // maxHeight bestimmt die Bandtiefe. Kein Cache-Clear nötig (Level/Parameter
+    // je Punkt bleiben gültig, Cache-Key trägt das Level) — nur das Band neu
+    // bestimmen (bandKey enthält maxHeight, ensureBand baut es dann neu) und die
+    // ggf. neuen (tieferen) Level nachladen. refresh() erledigt beides.
+    el("set-maxheight")?.addEventListener("change", () => queueMicrotask(() => {
+      bandKey = null;
+      refresh();
+    }));
     el("set-unitwind")?.addEventListener("change", () => queueMicrotask(renderLegend));
+    // Höhen-Einheit (m/ft) betrifft nur die Slider-Beschriftung.
+    el("set-unitheight")?.addEventListener("change", () => queueMicrotask(updateHeightLabel));
   }
 
   function removeAll() {
@@ -634,6 +972,10 @@ export function initWindOverlay(map) {
     canvas.style.opacity = String(settings.windLayerOpacity);
     const densityRadio = el("ml-wind-density").querySelector(`input[value="${settings.windLayerDensity}"]`);
     if (densityRadio) densityRadio.checked = true;
+    // Höhenschieber-Anfangszustand: Bereich/Beschriftung setzt syncHeightSlider,
+    // sobald das Band nach dem ersten Fetch bekannt ist; bis dahin nur der Wert.
+    el("ml-wind-height").value = String(heightIdx);
+    updateHeightLabel();
     if (settings.windLayerOn) refresh();
   }
 
@@ -722,4 +1064,29 @@ function debounce(fn, ms) {
     fn(...args);
   };
   return wrapped;
+}
+
+// Ruft fn höchstens alle ms auf (führend + nachlaufend), damit das progressive
+// Rendern beim chunkweisen Nachladen nicht bei jedem der vielen Chunks das
+// (relativ teure) Vollbild-Canvas + alle Fieder-Marker neu aufbaut.
+function throttle(fn, ms) {
+  let last = 0;
+  let t = null;
+  const run = () => { last = Date.now(); t = null; fn(); };
+  return () => {
+    const wait = ms - (Date.now() - last);
+    if (wait <= 0) run();
+    else if (!t) t = setTimeout(run, wait);
+  };
+}
+
+// Abbrechbares setTimeout als Promise — für den Backoff zwischen Chunk-Retries.
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(t);
+      reject(new DOMException("aborted", "AbortError"));
+    }, { once: true });
+  });
 }

@@ -98,6 +98,13 @@ export const MAPLAYERS_TIME_STEP_MIN = 15;
 export const WIND_OVERLAY_MIN_ZOOM = 9;
 export const WIND_OVERLAY_MAX_POINTS = 1500;
 export const WIND_OVERLAY_POINTS_PER_REQUEST = 75;
+// Gleichzeitige Requests je Refresh. Bewusst begrenzt: seit dem Höhenschieber
+// lädt jeder Request das ganze Level-Band (~7–23 Level × 2 Comps × Horizont),
+// also ein Vielfaches der früheren Datenmenge. Zu viele parallele Großrequests
+// führten zu Timeouts/Rate-Limits (einzelne Chunks schlugen fehl → Lücken).
+export const WIND_OVERLAY_MAX_CONCURRENCY = 6;
+// Wiederholversuche je Chunk bei (nicht abgebrochenem) Fehler, mit Backoff.
+export const WIND_OVERLAY_CHUNK_RETRIES = 2;
 
 // Gitterdichte der Fiedern/Farbfläche als ganzzahliges Vielfaches des
 // dichtesten (budgetbegrenzten) Basisgitters — "Gitterpunktsabstand 1×/2×/3×".
@@ -116,3 +123,13 @@ export const WIND_OVERLAY_DEFAULT_DENSITY = "fine";
 // Ziel-Pixelabstand des dichtesten (Basis-)Gitters. ~ Fiederngröße (44 px),
 // leicht darunter für eine dichte, aber noch lesbare Darstellung bei "1×".
 export const WIND_OVERLAY_BASE_TARGET_PX = 40;
+
+// Höhenschieber: Die nativen ICON-Level haben keine feste Meterhöhe — ihre
+// Höhe AGL steht pro Punkt/Zeit in `height_agl_level{l}`. Beim Aktivieren des
+// Layers wird daher einmal je Modell an einem Sondierpunkt (Kartenmitte) die
+// Höhe der untersten Level abgefragt (wie windfield.js) und daraus das
+// „Level-Band" vom Boden (~10 m) bis knapp über die eingestellte maxHeight
+// gebildet. PROBE_LEVELS ist die Anzahl der dabei sondierten untersten Level —
+// großzügig, damit auch die höchste maxHeight (2000 m) sicher abgedeckt ist
+// (30 Level reichen bei ICON-D2 bis ~3150 m, bei ICON-EU bis ~5500 m).
+export const WIND_OVERLAY_PROBE_LEVELS = 30;

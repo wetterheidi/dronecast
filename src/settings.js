@@ -27,6 +27,7 @@ const DEFAULTS = {
   windLayerBarbs: true,
   windLayerOpacity: 0.5,
   windLayerDensity: WIND_OVERLAY_DEFAULT_DENSITY,
+  windLayerHeightIdx: 0, // Index ins Level-Band (0 = unterstes Level, ~10 m AGL)
 };
 
 export const settings = { ...DEFAULTS };

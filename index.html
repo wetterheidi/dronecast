@@ -138,10 +138,17 @@
 
       <div class="ml-section">
         <label class="row">
-          <span class="label"><input type="checkbox" id="ml-wind-on" /> Wind 10 m (unterstes Modelllevel)</span>
+          <span class="label"><input type="checkbox" id="ml-wind-on" /> Wind (Modelllevel)</span>
         </label>
         <div class="hint warn" id="ml-wind-hint" hidden>Zum Anzeigen bitte näher heranzoomen (ab Zoom 9).</div>
         <div id="ml-wind-body" class="ml-subsection" hidden>
+          <div class="row ml-timenav">
+            <button id="ml-wind-height-down" type="button">tiefer</button>
+            <span id="ml-wind-height-display" class="mono">–</span>
+            <button id="ml-wind-height-up" type="button">höher</button>
+          </div>
+          <input id="ml-wind-height" type="range" min="0" max="0" step="1" value="0" />
+          <div class="hint">Höhe (AGL) der angezeigten Windfläche &amp; Fiedern — natives Modelllevel.</div>
           <label class="row">
             <span class="label"><input type="checkbox" id="ml-wind-barbs" /> Windfiedern (WMO)</span>
           </label>
