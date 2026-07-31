@@ -229,6 +229,81 @@ sich ein Registrierungsmuster lohnt.
 
 ---
 
+## Nowcasting: Blitz-/Gewitterwarnung im Radius
+
+**Status:** vorgemerkt (nur diskutiert, realisierbar bestätigt) · **Rubrik:**
+Nowcasting-Layer · **Kontext geklärt:** App ist **rein nicht-kommerziell** und
+**reiner Client** (kein Backend) — das rahmt alle Optionen unten ein.
+
+### Ziel
+Warnhinweis für den Nutzer, wenn innerhalb eines voreingestellten Radius
+(10 / 20 km, konfigurierbar) **tatsächlich detektierte** Blitze auftraten.
+Sicherheitskritisch für Drohnenbetrieb, hartes Kriterium (kaum Graustufen).
+
+### Beobachtung ≠ Vorhersage (zwei verschiedene Features)
+- **Detektierte Blitze (Nowcast)** = gemessene Entladungen → *das* ist der
+  Radius-Warnhinweis. Braucht echte Detektionsdaten, die **Open-Meteo nicht
+  liefert**.
+- **Gewitterpotenzial (Forecast)** = CAPE, Lifted Index, `lightning_potential`
+  aus Open-Meteo → *vorausschauende* Warnung, aber keine Echtzeit-Detektion.
+  Könnte später als **ergänzende** Vorhersage danebenstehen (schnell machbar,
+  keine neue Quelle).
+
+### Datenquelle: Blitzortung.org (der gangbare Weg)
+Bei nicht-kommerziell lizenzrechtlich sauber (Attribution Pflicht:
+„Blitzdaten © Blitzortung.org & Mitwirkende"; keine Weiterverbreitung der
+Rohdaten). Kommerzielle Alternativen wären Météorage / nowcast GmbH
+(kostenpflichtig), NOAA GOES-GLM (nur Amerika), DWD (teils lizenziert) — hier
+nicht relevant.
+
+**Client-only möglich, weil WebSockets keinem CORS-Preflight unterliegen:**
+- WebSocket-Server `ws1..ws8.blitzortung.org` (Community-reverse-engineered,
+  dieselbe Quelle wie lightningmaps.org). Init-JSON senden, dann Event-Stream
+  `{time, lat, lon, …}`.
+- **Haken 1 – Dekompression:** Payload mit eigenem LZW-artigem Verfahren
+  gepackt → kleiner Decoder nötig (bekanntes Community-Snippet, ~30 Zeilen).
+- **Haken 2 – Fragilität:** undokumentiert, kann sich ohne Vorwarnung ändern.
+  Für ein sicherheitsrelevantes Feature → robuste Fehlerbehandlung +
+  expliziter „Datenquelle nicht verfügbar"-Zustand sind **Pflicht**.
+- **Haken 3 – globaler Stream:** Feed liefert weltweite Blitze → sofort
+  clientseitig auf Bounding-Box um Nutzerstandort (± ~0,3°) filtern.
+- **Persistenz-Grenze:** WebSocket lebt nur bei offener Seite → nur Warnung
+  *während aktiver Nutzung*, keine Hintergrund-Push. Für Vor-Ort-Check vor
+  dem Start genau richtig; echte Push bräuchte Backend + Service Worker.
+
+### Architektur-Skizze (client-only)
+```
+Nowcasting-Layer „Blitze"
+ ├─ LightningService (WebSocket-Wrapper)
+ │   ├─ connect() → ws{1..8}, Reconnect-Logik
+ │   ├─ decode()  → LZW-Decoder
+ │   ├─ Bounding-Box-Filter (Nutzerpos ± ~0.3°)
+ │   └─ Ringpuffer: Blitze der letzten 30 min, ältere verwerfen
+ ├─ Warnlogik
+ │   ├─ Haversine(Nutzer, Blitz) ≤ R
+ │   ├─ Stufen: <10 km rot · 10–20 km gelb · >20 km grün
+ │   └─ Zeitfenster (letzte 15/30 min; vgl. 30/30-Regel Luftfahrt)
+ └─ Leaflet-Layer: Blitz-Marker + Radius-Kreise + Warn-Badge
+```
+Dockt an vorhandenes Leaflet-Setup an (Repo nutzt `leaflet-rotate`); der
+Overlay-Pane `wxOverlays` aus [src/maplayers.js](src/maplayers.js) ist der
+naheliegende Andockpunkt, Persistenz analog `satLayerOn`/`radarLayerOn` in
+[src/settings.js](src/settings.js).
+
+### Zwingend
+- **Disclaimer** bei Rot/„nicht fliegen": ohne Gewähr, keine amtliche Quelle,
+  Sichtbeobachtung geht vor; Blitzortung ist Community-Netz mit variabler
+  Detektionseffizienz.
+- **Attribution** sichtbar (s. o.).
+
+### Vorgehen (Vorschlag)
+Direkt Stufe 1 (echte Detektion), da Client-only offen. Optional vorab ein
+kleiner Proof-of-Concept (nur Verbindung + Roh-Events in der Konsole), um die
+WebSocket-Fragilität abzusichern, bevor Feature-Arbeit investiert wird. CAPE-
+Vorhersage als spätere Ergänzung, nicht als Vorstufe nötig.
+
+---
+
 ## Weitere Ideen (Kurzliste)
 
 - **Cross-Section (Höhe × Zeit):** eigenes Produkt; hier gehören die
