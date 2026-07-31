@@ -31,8 +31,25 @@
     <button id="load" disabled>Vorhersage laden</button>
     <div id="status"></div>
 
-    <!-- Aktuelle Bedingungen am Klickpunkt -->
+    <!-- Masterzeit: eine Zeitachse für Bedingungen, numerische Felder UND
+         Nowcasting. Verhindert, dass Daten verschiedener Zeitpunkte gemischt
+         werden. 15-min-Raster (Radar/Sat-Bilder liegen so vor). -->
+    <div id="mastertime">
+      <div class="row mt-head">
+        <span class="label">Zeitpunkt</span>
+        <span id="master-time-label" class="mono">–</span>
+        <button id="master-time-now" type="button" title="Alles auf jetzt zurücksetzen">Jetzt</button>
+      </div>
+      <div class="mt-nav">
+        <button id="master-time-back" type="button" title="1 Stunde zurück">−1 h</button>
+        <input id="master-time-slider" type="range" min="0" max="0" step="1" value="0" />
+        <button id="master-time-fwd" type="button" title="1 Stunde vor">+1 h</button>
+      </div>
+    </div>
+
+    <!-- Bedingungen am Punkt (folgen der Masterzeit) -->
     <section id="now" hidden>
+      <div class="label">Bedingungen am Punkt</div>
       <div id="now-body"></div>
     </section>
 
@@ -90,14 +107,13 @@
     <details id="maplayers">
       <summary>Nowcasting (Satellit &amp; Radar)</summary>
 
-      <div class="row ml-timenav">
-        <button id="ml-time-back" type="button">−15 min</button>
-        <span id="ml-time-display" class="mono">▶ Aktuell</span>
-        <button id="ml-time-fwd" type="button">+15 min</button>
+      <div class="row ml-playrow">
+        <button id="ml-play" type="button" title="Radar-Schleife der letzten Stunden abspielen">▶ Abspielen</button>
+        <span id="ml-play-status" class="mono"></span>
       </div>
-      <input id="ml-time-slider" type="range" min="-120" max="30" step="15" value="0" />
-      <div class="hint">Zeigt Radar und Satellit zum gewählten Zeitpunkt
-        (jeweils nächstliegend verfügbare Aufnahme).</div>
+      <div class="hint">Radar und Satellit folgen der Masterzeit oben und zeigen die
+        jeweils nächstliegende verfügbare Aufnahme. „Abspielen" lässt die Radar-Schleife
+        der letzten Stunden laufen, ohne die Masterzeit zu verstellen.</div>
 
       <div class="ml-section">
         <label class="row">
@@ -128,13 +144,12 @@
     <details id="modelfields">
       <summary>Numerische Vorhersagen</summary>
 
-      <div class="row ml-timenav">
-        <button id="mf-time-back" type="button">−1 h</button>
+      <div class="row">
+        <span class="label">Gültig</span>
         <span id="mf-time-display" class="mono">–</span>
-        <button id="mf-time-fwd" type="button">+1 h</button>
       </div>
-      <input id="mf-time-slider" type="range" min="0" max="47" step="1" value="0" />
-      <div class="hint">Gemeinsame Zeitachse für alle flächigen Modellparameter unten.</div>
+      <div class="hint">Alle flächigen Modellparameter unten folgen der Masterzeit oben
+        (nächste verfügbare Modellstunde).</div>
 
       <div class="ml-section">
         <label class="row">

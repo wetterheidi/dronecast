@@ -83,6 +83,21 @@ export function nearestFutureIndex(timeSec, nowMs = Date.now()) {
   return timeSec.length - 1;
 }
 
+/** Index der Zeitreihe, der einem beliebigen Zeitpunkt am nächsten liegt
+ *  (symmetrisch, darf in der Vergangenheit landen). Für die Masterzeit: das
+ *  Stundenraster des Modells rastet auf die nächste verfügbare Stunde. */
+export function nearestIndex(timeSec, tMs) {
+  if (!timeSec.length) return -1;
+  const t = tMs / 1000;
+  let best = 0, bestDiff = Infinity;
+  for (let i = 0; i < timeSec.length; i++) {
+    const diff = Math.abs(timeSec[i] - t);
+    if (diff < bestDiff) { bestDiff = diff; best = i; }
+    else if (timeSec[i] > t) break; // Zeitreihe ist aufsteigend – ab hier nur größer
+  }
+  return best;
+}
+
 function round5(x) {
   return Math.round(x * 1e5) / 1e5;
 }

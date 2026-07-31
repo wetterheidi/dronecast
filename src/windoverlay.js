@@ -68,7 +68,8 @@ import {
   WIND_OVERLAY_MAX_CONCURRENCY, WIND_OVERLAY_CHUNK_RETRIES,
 } from "./config.js";
 import { settings, updateSetting } from "./settings.js";
-import { nearestFutureIndex } from "./weather.js";
+import { nearestIndex } from "./weather.js";
+import { subscribe as subscribeTime, getMasterMs } from "./timeController.js";
 import { windToDisplay, windUnit, heightToDisplay, heightUnit } from "./units.js";
 
 /* global L */
@@ -587,10 +588,8 @@ export function initWindOverlay(map) {
     if (myGen !== fetchGen) return; // durch neueren Refresh überholt
     cacheTs = Date.now();
     if (times?.length) {
-      const slider = el("mf-time-slider");
-      slider.max = String(times.length - 1);
-      if (timeIdx === 0) timeIdx = nearestFutureIndex(times, Date.now());
-      slider.value = String(clampIdx(timeIdx));
+      // An die Masterzeit koppeln: nächste verfügbare Modellstunde.
+      timeIdx = nearestIndex(times, getMasterMs());
     }
     renderAll();
     if (result.failed) {
@@ -826,16 +825,17 @@ export function initWindOverlay(map) {
     if (immediate) renderAll(); else throttledHeightRender();
   }
 
-  // -- Zeitslider -----------------------------------------------------------------
-  function clampIdx(i) {
-    if (!times?.length) return 0;
-    return Math.min(times.length - 1, Math.max(0, i));
-  }
-
-  function setTimeIdx(i) {
-    timeIdx = clampIdx(i);
-    el("mf-time-slider").value = String(timeIdx);
-    renderAll(); // kein Fetch — alle Stunden liegen je Punkt bereits im Cache
+  // -- Zeit (an die Masterzeit gekoppelt) -----------------------------------------
+  // Nächste verfügbare Modellstunde zur Masterzeit wählen und neu zeichnen. Kein
+  // Fetch — alle Stunden liegen je Punkt bereits im Cache. Beim kontinuierlichen
+  // Ziehen des Zeitreglers (committed=false) wird der Vollbild-Canvas gedrosselt,
+  // beim Loslassen/Buttons (committed=true) sofort gezeichnet.
+  const throttledTimeRender = throttle(renderAll, 100);
+  function syncToMasterTime(committed = true) {
+    if (!times?.length) { updateTimeLabel(); return; }
+    timeIdx = nearestIndex(times, getMasterMs());
+    if (!settings.windLayerOn) { updateTimeLabel(); return; }
+    if (committed) renderAll(); else throttledTimeRender();
   }
 
   function updateTimeLabel() {
@@ -905,9 +905,8 @@ export function initWindOverlay(map) {
     });
     opacity.addEventListener("change", (e) => updateSetting("windLayerOpacity", Number(e.target.value) / 100));
 
-    el("mf-time-slider").addEventListener("input", (e) => setTimeIdx(Number(e.target.value)));
-    el("mf-time-back").addEventListener("click", () => setTimeIdx(timeIdx - 1));
-    el("mf-time-fwd").addEventListener("click", () => setTimeIdx(timeIdx + 1));
+    // Zeit kommt zentral von der Masterzeit — kein eigener Slider mehr.
+    subscribeTime((ms, committed) => syncToMasterTime(committed));
 
     // Höhenschieber: flüssiges Neuzeichnen beim Ziehen (input, ohne persist),
     // Speichern bei diskreten Aktionen (change, Buttons). Löst nie einen Fetch

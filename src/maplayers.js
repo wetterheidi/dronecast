@@ -27,9 +27,9 @@
 import {
   RAINVIEWER_API, RAINVIEWER_META_TTL_MS, RAINVIEWER_COLOR_SCHEME,
   EUMETSAT_WMS_BASE, EUMETSAT_CAPS_URL, EUMETSAT_CAPS_TTL_MS, SAT_PRODUCTS,
-  MAPLAYERS_TIME_STEP_MIN,
 } from "./config.js";
 import { settings, updateSetting } from "./settings.js";
+import { subscribe as subscribeTime, getMasterMs, isNow } from "./timeController.js";
 
 /* global L */
 
@@ -48,7 +48,15 @@ export function initMapLayers(map) {
   let satExtentsTs = 0;
   let radarLayer = null;
   let satLayer = null;
-  let targetOffsetMin = 0; // Minuten relativ zu "jetzt" — nicht persistiert
+
+  // Abspielen-Schleife (Nowcasting): läuft unabhängig von der Masterzeit über
+  // die letzten Radar-Frames und stellt beim Stoppen wieder den Masterzeit-Frame
+  // her. Verstellt die Masterzeit bewusst NICHT.
+  let playing = false;
+  let playTimer = null;
+  let playMeta = null;
+  let playFrames = null;
+  let playPos = 0;
 
   function fmtLocalTimestamp(d) {
     const dd = String(d.getDate()).padStart(2, "0");
@@ -76,8 +84,35 @@ export function initMapLayers(map) {
   }
 
   // -- Radar (RainViewer) ---------------------------------------------------
+  // Einen konkreten Frame anzeigen (gemeinsam von Masterzeit-Refresh und der
+  // Abspielen-Schleife genutzt). Nur neu erzeugen, wenn sich der Frame wirklich
+  // geändert hat (spart Kachel-Requests bei ungenutzten Ticks).
+  function setRadarFrame(meta, frame) {
+    if (radarLayer && radarLayer._frameTime === frame.time) {
+      radarLayer.setOpacity(settings.radarLayerOpacity);
+    } else {
+      if (radarLayer) map.removeLayer(radarLayer);
+      const tileUrl = `${meta.host}${frame.path}/256/{z}/{x}/{y}/${RAINVIEWER_COLOR_SCHEME}/1_1.png`;
+      radarLayer = L.tileLayer(tileUrl, {
+        opacity: settings.radarLayerOpacity,
+        attribution: 'Radar: <a href="https://rainviewer.com" target="_blank">RainViewer</a>',
+        pane: "wxOverlays",
+        zIndex: 20,
+        tileSize: 256,
+        maxNativeZoom: 7,
+        maxZoom: 19,
+        transparent: true,
+      });
+      radarLayer._frameTime = frame.time;
+      radarLayer.addTo(map);
+    }
+    const isNowcast = (meta.radar.nowcast || []).some((f) => f.time === frame.time);
+    const frameTxt = fmtLocalTimestamp(new Date(frame.time * 1000));
+    el("ml-radar-time").textContent = `Angezeigt: ${frameTxt}${isNowcast ? " ▶ Nowcast" : ""}`;
+  }
+
   async function refreshRadar() {
-    if (!settings.radarLayerOn) return;
+    if (!settings.radarLayerOn || playing) return; // während des Abspielens steuert die Schleife
     let meta;
     try {
       meta = await getRVMeta();
@@ -85,36 +120,66 @@ export function initMapLayers(map) {
       el("ml-radar-time").textContent = "Radar: Metadaten nicht erreichbar";
       return;
     }
-    const targetSec = Math.round((Date.now() + targetOffsetMin * 60000) / 1000);
+    const targetSec = Math.round(getMasterMs() / 1000);
     const allFrames = [...(meta.radar.past || []), ...(meta.radar.nowcast || [])];
     const frame = rvClosest(allFrames, targetSec);
     if (!frame) return;
+    setRadarFrame(meta, frame);
+  }
 
-    // Nur neu erzeugen, wenn sich der Frame tatsächlich geändert hat (spart
-    // Kachel-Requests bei ungenutzten Auto-Refresh-Ticks).
-    if (radarLayer && radarLayer._frameTime === frame.time) {
-      radarLayer.setOpacity(settings.radarLayerOpacity);
+  // -- Abspielen-Schleife (Nowcasting) --------------------------------------
+  const PLAY_STEP_MS = 450;   // Zeit je Frame
+  const PLAY_LOOP_PAUSE_MS = 1100; // längere Pause am aktuellsten Frame
+
+  async function startPlay() {
+    let meta;
+    try {
+      meta = await getRVMeta();
+    } catch {
+      el("ml-play-status").textContent = "Radar nicht erreichbar";
       return;
     }
+    const frames = [...(meta.radar.past || []), ...(meta.radar.nowcast || [])];
+    if (!frames.length) { el("ml-play-status").textContent = "keine Frames"; return; }
 
-    if (radarLayer) map.removeLayer(radarLayer);
-    const tileUrl = `${meta.host}${frame.path}/256/{z}/{x}/{y}/${RAINVIEWER_COLOR_SCHEME}/1_1.png`;
-    radarLayer = L.tileLayer(tileUrl, {
-      opacity: settings.radarLayerOpacity,
-      attribution: 'Radar: <a href="https://rainviewer.com" target="_blank">RainViewer</a>',
-      pane: "wxOverlays",
-      zIndex: 20,
-      tileSize: 256,
-      maxNativeZoom: 7,
-      maxZoom: 19,
-      transparent: true,
-    });
-    radarLayer._frameTime = frame.time;
-    radarLayer.addTo(map);
+    // Radar sichtbar machen, falls aus — sonst liefe die Schleife unsichtbar.
+    if (!settings.radarLayerOn) {
+      updateSetting("radarLayerOn", true);
+      el("ml-radar-on").checked = true;
+    }
 
-    const isNowcast = (meta.radar.nowcast || []).some((f) => f.time === frame.time);
-    const frameTxt = fmtLocalTimestamp(new Date(frame.time * 1000));
-    el("ml-radar-time").textContent = `Angezeigt: ${frameTxt}${isNowcast ? " ▶ Nowcast" : ""}`;
+    playMeta = meta;
+    playFrames = frames;
+    playPos = 0;
+    playing = true;
+    el("ml-play").classList.add("playing");
+    el("ml-play").textContent = "⏸ Stopp";
+    playStep();
+  }
+
+  function playStep() {
+    if (!playing || !playFrames) return;
+    const frame = playFrames[playPos];
+    setRadarFrame(playMeta, frame);
+    const isNowcast = (playMeta.radar.nowcast || []).some((f) => f.time === frame.time);
+    el("ml-play-status").textContent =
+      `${fmtLocalTimestamp(new Date(frame.time * 1000))}${isNowcast ? " ▶" : ""}`;
+    const atEnd = playPos === playFrames.length - 1;
+    playPos = atEnd ? 0 : playPos + 1;
+    playTimer = setTimeout(playStep, atEnd ? PLAY_LOOP_PAUSE_MS : PLAY_STEP_MS);
+  }
+
+  function stopPlay() {
+    playing = false;
+    if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+    el("ml-play").classList.remove("playing");
+    el("ml-play").textContent = "▶ Abspielen";
+    el("ml-play-status").textContent = "";
+    refreshRadar(); // zurück zum Masterzeit-Frame
+  }
+
+  function togglePlay() {
+    if (playing) stopPlay(); else startPlay();
   }
 
   function removeRadar() {
@@ -168,10 +233,9 @@ export function initMapLayers(map) {
   // Zielzeitpunkt auf das reguläre Zeitraster des Produkts runden und in den
   // verfügbaren Bereich klemmen (die WMS-eigene nearestValue-Snapping-Logik
   // greift serverseitig ohnehin, das hier nur für eine korrekte Anzeige).
-  function resolveSatTime(extents, productId, offsetMin) {
+  function resolveSatTime(extents, productId, targetMs) {
     const ext = extents[productId];
     if (!ext) return null;
-    const targetMs = Date.now() + offsetMin * 60000;
     const clamped = Math.min(ext.endMs, Math.max(ext.startMs, targetMs));
     const steps = Math.round((clamped - ext.startMs) / ext.stepMs);
     return ext.startMs + steps * ext.stepMs;
@@ -182,7 +246,7 @@ export function initMapLayers(map) {
     const product = settings.satLayerProduct;
     let resolvedMs = null;
     try {
-      resolvedMs = resolveSatTime(await getSatExtents(), product, targetOffsetMin);
+      resolvedMs = resolveSatTime(await getSatExtents(), product, getMasterMs());
     } catch {
       el("ml-sat-time").textContent = "Zeitinfo nicht erreichbar (zeigt Standard-Zeitpunkt)";
     }
@@ -221,23 +285,6 @@ export function initMapLayers(map) {
     el("ml-sat-time").textContent = "";
   }
 
-  // -- Zeitsteuerung (gilt für Radar UND Satellit) ---------------------------
-  function offsetLabel() {
-    if (targetOffsetMin === 0) return "▶ Aktuell";
-    const sign = targetOffsetMin > 0 ? "+" : "−";
-    return `${sign}${Math.abs(targetOffsetMin)} min`;
-  }
-
-  function setOffset(min) {
-    const slider = el("ml-time-slider");
-    const lo = Number(slider.min), hi = Number(slider.max);
-    targetOffsetMin = Math.min(hi, Math.max(lo, min));
-    slider.value = String(targetOffsetMin);
-    el("ml-time-display").textContent = offsetLabel();
-    refreshRadar();
-    refreshSat();
-  }
-
   // -- UI-Verdrahtung ---------------------------------------------------------
   function renderSatProductRadios() {
     el("ml-sat-products").innerHTML = SAT_PRODUCTS.map((p) => `
@@ -249,9 +296,13 @@ export function initMapLayers(map) {
   }
 
   function wireUI() {
-    el("ml-time-back").addEventListener("click", () => setOffset(targetOffsetMin - MAPLAYERS_TIME_STEP_MIN));
-    el("ml-time-fwd").addEventListener("click", () => setOffset(targetOffsetMin + MAPLAYERS_TIME_STEP_MIN));
-    el("ml-time-slider").addEventListener("input", (e) => setOffset(Number(e.target.value)));
+    // Zeit kommt zentral von der Masterzeit — Radar/Sat lösen daraus die
+    // nächstliegende verfügbare Aufnahme auf. Nur bei "committed" (Regler
+    // losgelassen, Buttons, Jetzt) neu laden — sonst löst kontinuierliches
+    // Ziehen über Stunden dutzende Kachel-Requests aus. Während des Abspielens
+    // ignoriert refreshRadar die Masterzeit (Schleife hat Vorrang).
+    subscribeTime((ms, committed) => { if (committed) { refreshRadar(); refreshSat(); } });
+    el("ml-play").addEventListener("click", togglePlay);
 
     el("ml-sat-on").addEventListener("change", (e) => {
       updateSetting("satLayerOn", e.target.checked);
@@ -307,12 +358,12 @@ export function initMapLayers(map) {
   renderSatProductRadios();
   wireUI();
   restoreFromSettings();
-  el("ml-time-display").textContent = offsetLabel();
 
-  // Solange auf "Aktuell" gepinnt, alle paar Minuten nachziehen, damit neu
-  // veröffentlichte Radar-/Satellitenbilder automatisch nachgeladen werden.
+  // Solange die Masterzeit auf "jetzt" steht (und nicht abgespielt wird), alle
+  // paar Minuten nachziehen, damit neu veröffentlichte Radar-/Satellitenbilder
+  // automatisch nachgeladen werden.
   setInterval(() => {
-    if (targetOffsetMin !== 0) return;
+    if (!isNow() || playing) return;
     if (settings.radarLayerOn) refreshRadar();
     if (settings.satLayerOn) refreshSat();
   }, AUTO_REFRESH_MS);

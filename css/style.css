@@ -275,7 +275,8 @@ select, input[type="number"], input[type="text"] {
 #maplayers summary, #modelfields summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
 
 .ml-timenav { margin: 8px 0 4px; }
-#ml-time-back, #ml-time-fwd, #mf-time-back, #mf-time-fwd {
+#ml-wind-height-down, #ml-wind-height-up,
+#master-time-back, #master-time-fwd, #master-time-now, #ml-play {
   font: inherit;
   padding: 3px 10px;
   border: 1px solid #c9c8c2;
@@ -284,7 +285,27 @@ select, input[type="number"], input[type="text"] {
   cursor: pointer;
   white-space: nowrap;
 }
-#ml-time-display, #mf-time-display { flex: 1; text-align: center; }
+#ml-wind-height-display { flex: 1; text-align: center; }
+
+/* Masterzeit — eine Zeitachse für alle Bereiche. */
+#mastertime {
+  margin: 10px 0 4px;
+  padding: 8px 10px;
+  background: #f3f2ee;
+  border: 1px solid #e2e0d9;
+  border-radius: 8px;
+}
+.mt-head { margin: 0 0 6px; }
+#master-time-label { flex: 1; text-align: center; font-weight: 600; }
+#master-time-now { color: #1c5cab; font-weight: 600; }
+#master-time-now.active { background: #1c5cab; color: #fff; border-color: #1c5cab; }
+.mt-nav { display: flex; align-items: center; gap: 8px; }
+.mt-nav input[type="range"] { margin: 0; flex: 1; }
+
+/* Nowcasting: Abspielen-Schleife (unabhängig von der Masterzeit). */
+.ml-playrow { margin: 8px 0 4px; }
+#ml-play.playing { background: #1c5cab; color: #fff; border-color: #1c5cab; }
+#ml-play-status { flex: 1; text-align: right; color: #52514e; }
 
 .ml-section { margin: 10px 0; padding-top: 8px; border-top: 1px solid #eceae4; }
 .ml-subsection { margin: 8px 0 0 4px; padding-left: 10px; border-left: 2px solid #eceae4; }

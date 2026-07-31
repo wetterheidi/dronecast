@@ -1,6 +1,7 @@
 import { MODELS, PREVIEW_HEIGHTS } from "./config.js";
 import { WindField } from "./windfield.js";
-import { fetchSurface, nearestFutureIndex } from "./weather.js";
+import { fetchSurface, nearestIndex } from "./weather.js";
+import { initTimeControls, setRange, getMasterMs, subscribe as subscribeTime } from "./timeController.js";
 import { renderMeteogram } from "./meteogram.js";
 import { fetchColumn, buildField, lowestSaturatedHeight } from "./column.js";
 import { renderCrossSection } from "./crosssection.js";
@@ -66,6 +67,33 @@ initMapLayers(map);
 // Kartenlayer: Wind 10 m flächig (unterstes Modelllevel, Michaels Instanz) —
 // nach initMapLayers, da der gemeinsame wxOverlays-Pane dort angelegt wird.
 initWindOverlay(map);
+
+// Masterzeit: die eine Zeitachse für Bedingungen, numerische Felder und
+// Nowcasting. Nach initMapLayers/initWindOverlay verdrahten — die haben sich
+// dort bereits als Subscriber registriert und reagieren auf das erste
+// setRange(). Das Fenster wird schon vor dem ersten Laden gesetzt, damit
+// Nowcasting (Radar/Sat) eigenständig ohne Punktvorhersage funktioniert;
+// loadForecast() verfeinert die Grenzen später auf die echte Zeitreihe.
+initTimeControls();
+setMasterRange();
+subscribeTime(() => { if (state.data) renderNow(); });
+
+function startOfTodayMs() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+// Untergrenze 00Z heute (ab dort werden auch die numerischen Daten gehostet),
+// Obergrenze das Ende des Vorhersagehorizonts. Ohne geladene Zeitreihe eine
+// Schätzung aus dem eingestellten Horizont; mit Daten die echten Grenzen.
+function setMasterRange() {
+  const minMs = startOfTodayMs();
+  const maxMs = state.data?.surface?.time?.length
+    ? state.data.surface.time[state.data.surface.time.length - 1] * 1000
+    : Date.now() + settings.forecastDays * 24 * 3600e3;
+  setRange(minMs, maxMs);
+}
 
 // Punkt per Rechtsklick (Desktop) oder Long-Press (Touch) setzen und sofort
 // laden. requestPoint entprellt, weil mobile Browser beim Long-Press oft
@@ -192,21 +220,16 @@ async function loadForecast() {
       wf.init(lat, lon, settings.maxHeight, now, tMax),
     ]);
 
-    // Modell-Level-Wind auf den Vorschau-Höhen zur aktuellen Stunde.
-    const winds = [];
-    for (const h of PREVIEW_HEIGHTS) {
-      if (h > settings.maxHeight) continue;
-      const r = await wf.windAt(lat, lon, { type: "height", mode: "agl", value: h }, now);
-      winds.push({ h, ...r });
-    }
-
     // Modell-eigene Orographie am Punkt (bilinear) — zum Abgleich mit der
     // echten (DEM-)Geländehöhe: großer Unterschied heißt, das Modellgitter
     // löst das lokale Gelände hier nicht auf (siehe METHODIK.md, „Wind auf
     // Höhe vs. Modell-Orographie"), nicht dass ein Wert falsch berechnet ist.
     const modelElevation = wf.elevationAt(lat, lon);
 
-    state.data = { surface, winds, loadedAt: now, wf, modelElevation };
+    // Die Modell-Level-Winde auf den Vorschau-Höhen berechnet renderNow zur
+    // jeweils gewählten Masterzeit neu (billige In-Memory-Interpolation).
+    state.data = { surface, loadedAt: now, wf, modelElevation };
+    setMasterRange(); // Zeitfenster auf die echte Zeitreihe verfeinern
     setStatus(`Geladen · ${model.label} · Elevation ${fmtHeight(surface.elevation)}`, "");
     el("now").hidden = false;
     el("products").hidden = false;
@@ -229,11 +252,19 @@ async function loadForecast() {
 // Faustregel, keine Literaturkonstante (siehe METHODIK.md).
 const TERRAIN_MISMATCH_WARN_M = 100;
 
-function renderNow() {
+// Neuberechnung serialisieren: renderNow ist async (Höhenwinde werden zur
+// Masterzeit interpoliert). Beim schnellen Ziehen des Zeitreglers laufen
+// mehrere Aufrufe an — nur das jüngste Ergebnis darf ins DOM.
+let renderNowGen = 0;
+
+async function renderNow() {
   const d = state.data;
-  if (!d) return;
-  const { surface, winds } = d;
-  const i = nearestFutureIndex(surface.time, d.loadedAt);
+  if (!d || !state.point) return;
+  const gen = ++renderNowGen;
+  const { surface, wf } = d;
+  const { lat, lon } = state.point;
+  const tMs = getMasterMs();
+  const i = nearestIndex(surface.time, tMs);
   const at = (name) => (surface.vars[name] ? surface.vars[name][i] : null);
   const time = surface.time.length
     ? new Date(surface.time[i] * 1000).toLocaleString("de-DE", {
@@ -241,8 +272,19 @@ function renderNow() {
       })
     : "–";
 
+  // Modell-Level-Wind auf den Vorschau-Höhen zur Masterzeit (billig, da das
+  // Windfeld am Punkt bereits im Speicher liegt). Vor dem DOM-Aufbau, damit die
+  // Reihenfolge (Wind auf Höhe vor Oberfläche) erhalten bleibt.
+  const winds = [];
+  for (const h of PREVIEW_HEIGHTS) {
+    if (h > settings.maxHeight) continue;
+    const r = await wf.windAt(lat, lon, { type: "height", mode: "agl", value: h }, tMs);
+    winds.push({ h, ...r });
+  }
+  if (gen !== renderNowGen) return; // durch neueren Aufruf überholt
+
   const rows = [];
-  rows.push(`<div class="now-time">Gültig (loc): ${time}</div>`);
+  rows.push(`<div class="now-time">Gültig (Modellstunde, loc): ${time}</div>`);
 
   // Modell-Orographie vs. echtes Gelände: großer Unterschied = lokales
   // Gelände vom Gitter nicht aufgelöst, Wind-auf-Höhe-Werte mit Vorsicht.

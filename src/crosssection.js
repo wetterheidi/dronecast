@@ -244,7 +244,7 @@ function flightLine(g, y, maxHeightM, x) {
   const py = y(maxHeightM);
   g.append(mk("line", { x1: M.l, y1: py, x2: x.right, y2: py, stroke: "#fff", "stroke-width": 3 }));
   g.append(mk("line", { x1: M.l, y1: py, x2: x.right, y2: py, stroke: "#b5179e", "stroke-width": 1.4, "stroke-dasharray": "6 3" }));
-  g.append(txt(x.right - 4, py - 4, `Flughöhe ${fmtH(maxHeightM)}`, "#b5179e", 10, "end", 700));
+  g.append(txt(x.right - 4, py - 4, `Max. Flughöhe ${fmtH(maxHeightM)}`, "#b5179e", 10, "end", 700));
 }
 
 // --- Achsen ----------------------------------------------------------------
