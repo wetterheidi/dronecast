@@ -246,6 +246,38 @@ select, input[type="number"], input[type="text"] {
 .dp-group td { background: #f0efe9; font-weight: 600; color: #52514e; text-align: left; }
 .dp-disclaimer { margin: 4px 0 0; color: #8a5a12; font-size: 11px; }
 
+/* Datenbank-Editor (Stufe 2): Toolbar + Formular */
+.dp-toolbar { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+.dp-toolbar button, .dp-actions button {
+  font-size: 12px; padding: 3px 10px; border: 1px solid #d5d3cc;
+  background: #fff; border-radius: 5px; cursor: pointer; color: #0b0b0b;
+}
+.dp-toolbar button:hover, .dp-actions button:hover { background: #f4f3ef; }
+.dp-primary { background: #1f4e79; color: #fff; border-color: #1f4e79; }
+.dp-primary:hover { background: #183e60; }
+.dp-danger { color: #b3261e; border-color: #e3b7b3; }
+.dp-danger:hover { background: #fbe6e4; }
+
+.dp-form { display: flex; flex-direction: column; gap: 6px; }
+.dp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+.dp-field { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.dp-field-label { color: #52514e; }
+.dp-field input, .dp-field select {
+  font-size: 12px; padding: 3px 6px; border: 1px solid #d5d3cc;
+  border-radius: 4px; background: #fff; color: #0b0b0b;
+}
+.dp-limit { flex-direction: row; align-items: center; gap: 8px; }
+.dp-limit .dp-field-label { flex: 1; }
+.dp-inputbox { display: flex; align-items: center; gap: 6px; }
+.dp-inputbox input { width: 72px; text-align: right; }
+.dp-unit { color: #52514e; min-width: 36px; }
+.dp-form-group {
+  font-weight: 600; color: #52514e; margin-top: 4px;
+  border-bottom: 1px solid #eceae4; padding-bottom: 2px;
+}
+.dp-actions { display: flex; gap: 6px; margin-top: 8px; }
+.dp-err { color: #b3261e; font-size: 12px; margin: 2px 0; }
+
 .go-green { background: #dcf2d8; }
 .go-yellow { background: #fdecc2; }
 .go-red { background: #f6cfcd; }

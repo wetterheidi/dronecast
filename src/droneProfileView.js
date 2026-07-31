@@ -9,6 +9,8 @@
  * getippter Wert wie eine geprüfte Herstellerangabe wirken.
  */
 
+import { LIMIT_META, GROUP_LABEL } from "./droneProfileStore.js";
+
 // Herkunftskennzeichen. Unbekannt/fehlend gilt bewusst NICHT als "factory".
 const ORIGIN_META = {
   factory: { label: "Werksdaten", cls: "orig-factory", hint: "aus Herstellerdatenblatt recherchiert" },
@@ -21,19 +23,6 @@ const CATEGORY_LABEL = {
   multicopter: "Multicopter",
   "vtol-fixedwing": "VTOL / Starrflügler",
 };
-
-// Grenzwert-Zeilen in fester Reihenfolge, gruppiert nach Datenherkunft.
-// group: "man" = herstellerbasiert · "op" = operationell/regulatorisch (VLOS).
-const LIMIT_META = [
-  ["windSurface", "Wind 10 m (Boden)", "man"],
-  ["windBandMax", "Wind Höhenband (10 m–Flughöhe)", "man"],
-  ["gustSurface", "Böen 10 m", "man"],
-  ["precipitation", "Niederschlag", "man"],
-  ["tempMin", "Temperatur (Minimum)", "man"],
-  ["tempMax", "Temperatur (Maximum)", "man"],
-  ["cloudBase", "Wolkenbasis", "op"],
-  ["visibility", "Sicht", "op"],
-];
 
 const DIR_LABEL = { max: "max", min: "min" };
 
@@ -123,7 +112,7 @@ function limitsTable(p) {
 
   const tbody = document.createElement("tbody");
   let lastGroup = null;
-  for (const [key, label, group] of LIMIT_META) {
+  for (const { key, label, group } of LIMIT_META) {
     const lim = p.limits[key];
     if (!lim) continue;
     if (group !== lastGroup) {
@@ -147,9 +136,7 @@ function groupHeader(group) {
   tr.className = "dp-group";
   const td = document.createElement("td");
   td.colSpan = 4;
-  td.textContent = group === "man"
-    ? "Aus Herstellerangaben"
-    : "Betrieb / VLOS (für alle Modelle gleich, nicht modellspezifisch)";
+  td.textContent = GROUP_LABEL[group] || group;
   tr.append(td);
   return tr;
 }

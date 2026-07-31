@@ -8,8 +8,13 @@ import { renderCrossSection } from "./crosssection.js";
 import { buildBriefingHtml, buildBriefingContent } from "./briefing.js";
 import { evaluate as evaluateGoNoGo } from "./gonogo.js";
 import { renderGoNoGoTable } from "./gonogotable.js";
-import { DRONE_PROFILES, getProfile } from "./droneProfiles.js";
+import { DRONE_PROFILES } from "./droneProfiles.js";
+import {
+  listProfiles, getProfile, isEditable,
+  duplicateProfile, createBlankProfile, updateProfile, deleteProfile,
+} from "./droneProfileStore.js";
 import { renderProfileDetails } from "./droneProfileView.js";
+import { renderProfileEditor } from "./droneProfileEditor.js";
 import * as astro from "./astro.js";
 import { settings, loadSettings, updateSetting, OPTIONS } from "./settings.js";
 import { parseCoordInput } from "./coords.js";
@@ -489,23 +494,100 @@ async function openGoNoGo() {
 el("gng-close").addEventListener("click", () => { el("gonogo").hidden = true; });
 el("gng-profile").addEventListener("change", (e) => {
   updateSetting("droneProfile", e.target.value);
+  profileMode = "view"; // Profilwechsel verlässt den Editor
   refreshProfileDetails();
   if (!el("gonogo").hidden) openGoNoGo();
 });
 
-// Read-only-Profildetails ein-/ausblenden (Datenbank-Ansicht, Stufe 1).
+// --- Datenbank-Ansicht/-Editor (Stufe 1 + 2) --------------------------------
+// "view" = read-only Detailkarte mit Toolbar · "edit" = Formular.
+let profileMode = "view";
+
+// Profildetails ein-/ausblenden.
 el("gng-info").addEventListener("click", () => {
   const panel = el("gng-details");
   const show = panel.hidden;
   panel.hidden = !show;
   el("gng-info").setAttribute("aria-pressed", String(show));
-  if (show) refreshProfileDetails();
+  if (show) { profileMode = "view"; refreshProfileDetails(); }
 });
+
+// Befüllt die Profilauswahl aus der effektiven Liste (Werks- + Nutzerprofile),
+// mit Herkunftsmarkierung im Optionstext.
+function populateProfileSelect() {
+  el("gng-profile").innerHTML = listProfiles()
+    .map((p) => `<option value="${p.id}">${optionLabel(p)}</option>`)
+    .join("");
+  el("gng-profile").value = getProfile(settings.droneProfile).id;
+}
+
+function optionLabel(p) {
+  if (p.origin === "user") return `${p.label} · eigenes`;
+  if (p.origin === "imported") return `${p.label} · importiert`;
+  return p.label;
+}
+
+// Wählt ein Profil, aktualisiert Auswahl/Tabelle und rendert die Details neu.
+function selectProfile(id) {
+  updateSetting("droneProfile", id);
+  populateProfileSelect();
+  refreshProfileDetails();
+  if (!el("gonogo").hidden) openGoNoGo();
+}
 
 function refreshProfileDetails() {
   const panel = el("gng-details");
   if (panel.hidden) return;
-  renderProfileDetails(panel, getProfile(settings.droneProfile));
+  panel.innerHTML = "";
+  const prof = getProfile(settings.droneProfile);
+
+  if (profileMode === "edit") {
+    renderProfileEditor(panel, prof, {
+      onSave: (patch) => {
+        updateProfile(prof.id, patch);
+        profileMode = "view";
+        selectProfile(prof.id); // Label könnte sich geändert haben -> Select neu
+      },
+      onCancel: () => { profileMode = "view"; refreshProfileDetails(); },
+      onDelete: isEditable(prof.id) ? () => {
+        deleteProfile(prof.id);
+        profileMode = "view";
+        selectProfile(DRONE_PROFILES[0].id); // zurück auf erstes Werksmodell
+      } : null,
+    });
+    return;
+  }
+
+  // Ansichtsmodus: Toolbar (Aktionen) + read-only Detailkarte.
+  const bar = document.createElement("div");
+  bar.className = "dp-toolbar";
+  if (isEditable(prof.id)) {
+    bar.append(toolButton("Bearbeiten", "dp-primary", () => { profileMode = "edit"; refreshProfileDetails(); }));
+  }
+  bar.append(toolButton(isEditable(prof.id) ? "Duplizieren" : "Duplizieren & bearbeiten", "", () => {
+    const copy = duplicateProfile(prof.id);
+    profileMode = "edit";
+    selectProfile(copy.id);
+  }));
+  bar.append(toolButton("Neu", "", () => {
+    const fresh = createBlankProfile();
+    profileMode = "edit";
+    selectProfile(fresh.id);
+  }));
+  panel.append(bar);
+
+  const content = document.createElement("div");
+  renderProfileDetails(content, prof);
+  panel.append(content);
+}
+
+function toolButton(text, cls, onClick) {
+  const b = document.createElement("button");
+  b.type = "button";
+  if (cls) b.className = cls;
+  b.textContent = text;
+  b.addEventListener("click", onClick);
+  return b;
 }
 
 // Maximale mittlere Windgeschwindigkeit (m/s) zwischen hMinM und hMaxM zu
@@ -609,10 +691,9 @@ window.addEventListener("resize", () => {
 function initSettings() {
   fillOptions("set-maxheight", OPTIONS.maxHeight, (v) => `${v} m`);
   fillOptions("set-days", OPTIONS.forecastDays, (v) => `${v} ${v === 1 ? "Tag" : "Tage"}`);
-  el("gng-profile").innerHTML = DRONE_PROFILES.map((p) => `<option value="${p.id}">${p.label}</option>`).join("");
-  // getProfile() fällt auf das erste Modell zurück, falls ein früher gespeichertes
-  // Profil (z. B. ein entfernter Platzhalter) nicht mehr existiert -> Select nie leer.
-  el("gng-profile").value = getProfile(settings.droneProfile).id;
+  // Werks- + Nutzerprofile; getProfile() fällt auf das erste Werksmodell zurück,
+  // falls ein gespeichertes Profil (z. B. gelöscht) nicht mehr existiert.
+  populateProfileSelect();
 
   el("set-model").value = settings.model;
   el("set-maxheight").value = String(settings.maxHeight);
