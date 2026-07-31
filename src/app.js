@@ -4,7 +4,7 @@ import { fetchSurface, nearestFutureIndex } from "./weather.js";
 import { renderMeteogram } from "./meteogram.js";
 import { fetchColumn, buildField, lowestSaturatedHeight } from "./column.js";
 import { renderCrossSection } from "./crosssection.js";
-import { buildBriefingHtml } from "./briefing.js";
+import { buildBriefingHtml, buildBriefingContent } from "./briefing.js";
 import { evaluate as evaluateGoNoGo } from "./gonogo.js";
 import { renderGoNoGoTable } from "./gonogotable.js";
 import { DRONE_PROFILES, getProfile } from "./droneProfiles.js";
@@ -420,30 +420,68 @@ function bandHeights(hMinM, hMaxM) {
   return out;
 }
 
-// Briefing: druckbare HTML-Seite in neuem Tab (Oberfläche + Höhendaten heute).
+// Briefing: Overlay (Oberfläche + Höhendaten heute), analog zu den anderen
+// Produkten. Der Inhalt wird als Fragment ins Overlay gehängt; PDF/Drucken
+// bauen aus denselben Daten ein in sich geschlossenes Dokument (buildBriefingHtml).
 async function openBriefing() {
   if (!state.data || !state.point) return;
-  setStatus("Erstelle Briefing …", "busy");
+  el("briefing").hidden = false;
+  el("brf-sub").textContent = el("pointpos").textContent;
+  el("brf-body").innerHTML = "<p style='padding:8px'>Erstelle Briefing …</p>";
   try {
-    const col = await ensureColumn();
-    const html = buildBriefingHtml({
-      surface: state.data.surface,
-      col,
-      point: state.point,
-      modelLabel: MODELS[settings.model].label,
-      maxHeightM: settings.maxHeight,
-      loadedAt: state.data.loadedAt,
-    });
-    const tab = window.open();
-    if (!tab) { setStatus("Briefing: Popup wurde blockiert — bitte erlauben.", "error"); return; }
-    tab.document.open();
-    tab.document.write(html);
-    tab.document.close();
-    setStatus("Briefing in neuem Tab geöffnet.", "");
+    await ensureColumn();
+    el("brf-body").innerHTML = buildBriefingContent(briefingOpts());
   } catch (e) {
-    setStatus("Briefing fehlgeschlagen: " + (e.message || e), "error");
+    el("brf-body").innerHTML = "<p style='padding:8px'>Briefing fehlgeschlagen: "
+      + (e.message || e) + "</p>";
   }
 }
+
+// Opts für Briefing aus dem aktuellen Zustand (Säule muss gecacht sein).
+function briefingOpts() {
+  return {
+    surface: state.data.surface,
+    col: state.data.col,
+    point: state.point,
+    modelLabel: MODELS[settings.model].label,
+    maxHeightM: settings.maxHeight,
+    loadedAt: state.data.loadedAt,
+  };
+}
+
+// Briefing über die Druck-Engine des Browsers ausgeben (Drucken bzw. „Als PDF
+// speichern"). Das komplette, in sich geschlossene Dokument (mit @media
+// print-Regeln) wird in einen unsichtbaren iframe geschrieben und dessen
+// print() ausgelöst — so umgeht man den Popup-Blocker.
+function printBriefing() {
+  if (!state.data || !state.data.col) return;
+  const html = buildBriefingHtml(briefingOpts());
+  const frame = document.createElement("iframe");
+  frame.style.position = "fixed";
+  frame.style.right = "0";
+  frame.style.bottom = "0";
+  frame.style.width = "0";
+  frame.style.height = "0";
+  frame.style.border = "0";
+  document.body.appendChild(frame);
+  const cleanup = () => { setTimeout(() => frame.remove(), 1000); };
+  frame.onload = () => {
+    const win = frame.contentWindow;
+    win.onafterprint = cleanup;
+    win.focus();
+    win.print();
+    // Fallback, falls onafterprint nicht feuert (z. B. Dialog abgebrochen).
+    setTimeout(cleanup, 60000);
+  };
+  const doc = frame.contentWindow.document;
+  doc.open();
+  doc.write(html);
+  doc.close();
+}
+
+el("brf-close").addEventListener("click", () => { el("briefing").hidden = true; });
+el("brf-pdf").addEventListener("click", printBriefing);
+el("brf-print").addEventListener("click", printBriefing);
 
 // Bei Größenänderung offenes Overlay neu zeichnen (SVG an Container gebunden).
 let resizeTimer = null;
@@ -492,6 +530,9 @@ function refreshViews() {
     renderGoNoGoTable(el("gng-body"), evaluateGoNoGo(
       state.data.surface, state.data.windBandMax, getProfile(settings.droneProfile), settings.maxHeight,
     ));
+  }
+  if (!el("briefing").hidden && state.data?.col) {
+    el("brf-body").innerHTML = buildBriefingContent(briefingOpts());
   }
 }
 

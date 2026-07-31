@@ -21,7 +21,24 @@ const KMH_TO_MS = 1 / 3.6;
 // --- öffentliches API -------------------------------------------------------
 
 /**
- * Baut die komplette Briefing-Seite als HTML-String.
+ * Baut das komplette, in sich geschlossene Briefing-Dokument (für Druck / „Als
+ * PDF speichern" in einem eigenen Fenster/iframe). Enthält HEAD mit @media
+ * print-Regeln und die Überschrift; der eigentliche Inhalt kommt aus
+ * buildBriefingContent().
+ * @param {object} opts – siehe buildBriefingContent()
+ */
+export function buildBriefingHtml(opts) {
+  return HEAD
+    + `<div class="container"><h1>DroneForecast — Weather Briefing</h1>`
+    + buildBriefingContent(opts)
+    + `</div></body></html>`;
+}
+
+/**
+ * Baut den Briefing-Inhalt als HTML-Fragment (ohne <html>/<head>/<body> und
+ * ohne die H1-Überschrift) – so, dass er direkt in das Briefing-Overlay
+ * eingehängt werden kann. Für den Druck wird derselbe Inhalt von
+ * buildBriefingHtml() in ein vollständiges Dokument gewickelt.
  * @param {object} opts
  * @param {object} opts.surface  Rückgabe von fetchSurface()
  * @param {object} opts.col      Rohe Säule von fetchColumn()
@@ -30,7 +47,7 @@ const KMH_TO_MS = 1 / 3.6;
  * @param {number} opts.maxHeightM  max. Flughöhe (m AGL)
  * @param {number} opts.loadedAt    Ladezeitpunkt (ms) – bestimmt „heute" (UTC)
  */
-export function buildBriefingHtml({ surface, col, point, modelLabel, maxHeightM, loadedAt }) {
+export function buildBriefingContent({ surface, col, point, modelLabel, maxHeightM, loadedAt }) {
   const today = new Date(loadedAt).toISOString().slice(0, 10);
   const isToday = (sec) => new Date(sec * 1000).toISOString().slice(0, 10) === today;
 
@@ -42,10 +59,7 @@ export function buildBriefingHtml({ surface, col, point, modelLabel, maxHeightM,
   const wu = windUnit(), tu = tempUnit(), hu = heightUnit();
   const created = new Date(loadedAt).toISOString().slice(0, 16).replace("T", " ") + "Z";
 
-  let html = HEAD;
-  html += `<div class="container">
-    <h1>DroneForecast — Weather Briefing</h1>
-    <div class="header-info">
+  let html = `<div class="header-info">
       <p><strong>Position:</strong> ${point.lat.toFixed(4)}°N ${point.lon.toFixed(4)}°E · Gitterhöhe ${Math.round(col.elevation)} m NN</p>
       <p><strong>Modell:</strong> ${modelLabel}</p>
       <p><strong>Vorhersagetag:</strong> ${today} · <strong>erstellt:</strong> ${created}</p>
@@ -114,8 +128,7 @@ export function buildBriefingHtml({ surface, col, point, modelLabel, maxHeightM,
       Höhendaten: DWD ICON Modell-Level via open-meteo.mah.priv.at · Oberfläche via open-meteo.com.
       Wolken/Wetter METAR-nah aus dem Modell abgeleitet (Heuristik), keine Beobachtung.
       Keine amtliche Flugwetterberatung — Verantwortung beim Piloten.
-    </div>
-  </div></body></html>`;
+    </div>`;
   return html;
 }
 

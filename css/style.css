@@ -188,6 +188,49 @@ select, input[type="number"], input[type="text"] {
 .go-red { background: #f6cfcd; }
 .go-na { background: #e6e5e1; color: #6b6a65; }
 
+/* Briefing-Overlay: gleiche Hülle wie Meteogramm/Cross-Section, scrollbarer
+   HTML-Inhalt. Kopf trägt zusätzlich PDF-/Drucken-Buttons. */
+#briefing {
+  position: absolute;
+  inset: 10px 400px 10px 10px;
+  z-index: 1100;
+  background: rgba(252, 252, 251, 0.98);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#briefing[hidden] { display: none; }
+#brf-sub { margin-right: auto; }
+.brf-action {
+  border: 1px solid #cfcdc6;
+  background: #f4f3ef;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1c5cab;
+  cursor: pointer;
+  padding: 3px 10px;
+}
+.brf-action:hover { background: #e9e7e0; }
+#brf-close { border: none; background: none; font-size: 20px; color: #52514e; cursor: pointer; padding: 0 4px; }
+#brf-close:hover { color: #0b0b0b; }
+#brf-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 16px 12px; color: #333; }
+
+/* Inhaltsstile des Briefings (gespiegelt aus dem Standalone-Dokument in
+   briefing.js, hier auf das Overlay begrenzt). */
+#brf-body h2, #brf-body h3 { color: #1c5cab; border-bottom: 2px solid #3a8fd0; padding-bottom: 8px; }
+#brf-body h3 { font-size: 1em; border-bottom-width: 1px; margin-top: 24px; }
+#brf-body table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.85em; font-variant-numeric: tabular-nums; }
+#brf-body th, #brf-body td { padding: 5px 9px; border: 1px solid #ddd; text-align: left; }
+#brf-body th { background-color: #f2f2f2; font-weight: bold; }
+#brf-body tr:nth-child(even) { background-color: #f9f9f9; }
+#brf-body .header-info { background-color: #eef2f6; padding: 12px 15px; border-radius: 5px; margin: 10px 0 16px; }
+#brf-body .header-info p { margin: 4px 0; }
+#brf-body .section { margin-top: 24px; }
+#brf-body .footer { margin-top: 28px; font-size: 0.8em; color: #777; }
+
 /* Aktuelle Bedingungen: kompakte Kennwert-Liste. */
 .now-time { font-weight: 600; margin: 2px 0 8px; }
 .wx-group { margin: 10px 0 4px; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: #52514e; }
@@ -350,7 +393,7 @@ input[type="range"]::-moz-range-thumb {
   input[type="range"] { height: 24px; }
 
   /* Overlays bildschirmfüllend. */
-  #meteogram, #crosssection, #gonogo { inset: 0; border-radius: 0; z-index: 1300; }
+  #meteogram, #crosssection, #gonogo, #briefing { inset: 0; border-radius: 0; z-index: 1300; }
 
   .leaflet-top.leaflet-left { top: env(safe-area-inset-top); }
 }
