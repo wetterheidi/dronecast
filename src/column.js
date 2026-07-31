@@ -49,15 +49,17 @@ export async function fetchColumn(lat, lon, modelKey, forecastDays, fetchImpl = 
 }
 
 /**
- * Auf ein Log-Höhengitter interpolierte Felder für die Cross-Section.
+ * Auf ein Höhengitter interpolierte Felder für die Cross-Section.
+ * grid "log" (Standard, dicht am Boden) für die Gesamthöhe, "lin" (gleichmäßig)
+ * für den Zoom bis zur Flughöhe mit feiner vertikaler Auflösung.
  * @returns { time, targetH (m AGL, aufsteigend), spd[k][i] (m/s), dir[k][i] (° Herkunft),
  *            temp[k][i] (°C), freezing[i] (m AGL | null) }
  */
-export function buildField(col, capM = 8000, nTarget = 44) {
+export function buildField(col, capM = 8000, nTarget = 44, grid = "log") {
   const { time, h, u, v, t, rh } = col;
   const T = time.length;
   const hMin = Math.max(10, firstFinite(h[0]) || 10);
-  const targetH = logspace(hMin, capM, nTarget);
+  const targetH = grid === "lin" ? linspace(hMin, capM, nTarget) : logspace(hMin, capM, nTarget);
 
   const spd = [], dir = [], temp = [], uc = [], vc = [], rhc = [], cloud = [];
   for (let k = 0; k < nTarget; k++) {
@@ -168,6 +170,11 @@ function cloudFrac(rh) {
 function logspace(a, b, n) {
   const la = Math.log(a), lb = Math.log(b), out = new Float64Array(n);
   for (let i = 0; i < n; i++) out[i] = Math.exp(la + (lb - la) * i / (n - 1));
+  return out;
+}
+function linspace(a, b, n) {
+  const out = new Float64Array(n);
+  for (let i = 0; i < n; i++) out[i] = a + (b - a) * i / (n - 1);
   return out;
 }
 function toArr(src, T, factor) {

@@ -16,6 +16,7 @@ const DEFAULTS = {
   maxHeight: DEFAULT_MAX_HEIGHT, // m AGL
   forecastDays: DEFAULT_FORECAST_DAYS,
   droneProfile: DRONE_PROFILES[0].id,
+  xsZoom: false, // Cross-Section: false = Gesamthöhe (log), true = bis Flughöhe (fein, linear)
   lastPoint: null, // { lat, lon } – zuletzt gewählter Operationspunkt
   baseLayer: "OpenStreetMap", // Name der aktiven Leaflet-Basiskarte
   satLayerOn: false,

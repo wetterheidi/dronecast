@@ -352,17 +352,57 @@ async function openCrossSection() {
   if (!state.data || !state.point) return;
   el("crosssection").hidden = false;
   el("xs-sub").textContent = el("pointpos").textContent;
-  if (!state.data.field) {
+  if (!state.data.col) {
     el("xs-body").textContent = "Lade Höhenprofil …";
     try {
-      state.data.field = buildField(await ensureColumn());
+      await ensureColumn();
     } catch (e) {
       el("xs-body").textContent = "Fehler beim Laden des Höhenprofils: " + (e.message || e);
       return;
     }
   }
-  renderCrossSection(el("xs-body"), state.data.field, { maxHeightM: settings.maxHeight });
+  renderXs();
 }
+
+// Etwas Luft über der Flughöhe im Zoom-Modus, damit die Flughöhenlinie im
+// Bild bleibt und der Bereich knapp darüber sichtbar ist.
+const XS_ZOOM_HEADROOM = 1.15;
+
+// Aktuelle Cross-Section zeichnen: je nach Modus das Gesamtfeld (log-Gitter)
+// oder das feine Zoomfeld bis knapp über Flughöhe (lineares Gitter). Beide
+// werden aus der gecachten Säule gebaut und in state.data wiederverwendet.
+function renderXs() {
+  if (!state.data?.col) return;
+  syncXsToggle();
+  let field, axis;
+  if (settings.xsZoom) {
+    const cap = Math.round(settings.maxHeight * XS_ZOOM_HEADROOM);
+    if (!state.data.fieldZoom || state.data.fieldZoomCap !== cap) {
+      state.data.fieldZoom = buildField(state.data.col, cap, 60, "lin");
+      state.data.fieldZoomCap = cap;
+    }
+    field = state.data.fieldZoom;
+    axis = "lin";
+  } else {
+    if (!state.data.field) state.data.field = buildField(state.data.col);
+    field = state.data.field;
+    axis = "log";
+  }
+  renderCrossSection(el("xs-body"), field, { maxHeightM: settings.maxHeight, axis });
+}
+
+function syncXsToggle() {
+  document.querySelectorAll("#xs-range button").forEach((b) => {
+    b.classList.toggle("active", (b.dataset.range === "zoom") === settings.xsZoom);
+  });
+}
+
+el("xs-range").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-range]");
+  if (!btn) return;
+  updateSetting("xsZoom", btn.dataset.range === "zoom");
+  renderXs();
+});
 el("xs-close").addEventListener("click", () => { el("crosssection").hidden = true; });
 
 // Go/No-Go-Tabelle: Windmaximum zwischen 10 m und Flughöhe pro Stunde aus dem
@@ -488,9 +528,7 @@ window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
     if (!el("meteogram").hidden) openMeteogram();
-    if (!el("crosssection").hidden && state.data?.field) {
-      renderCrossSection(el("xs-body"), state.data.field, { maxHeightM: settings.maxHeight });
-    }
+    if (!el("crosssection").hidden) renderXs();
   }, 150);
 });
 
@@ -511,7 +549,12 @@ function initSettings() {
   el("set-unittemp").value = settings.unitTemp;
 
   bind("set-model", "model");
-  bind("set-maxheight", "maxHeight", () => needReload());
+  bind("set-maxheight", "maxHeight", () => {
+    needReload();
+    // Cross-Section kann sofort nachziehen: die Säule enthält alle Level,
+    // Flughöhenlinie und Zoom-Bereich hängen nur von dieser Einstellung ab.
+    if (!el("crosssection").hidden) renderXs();
+  });
   bind("set-days", "forecastDays", () => needReload());
   bind("set-unitheight", "unitHeight", refreshViews);
   bind("set-unitwind", "unitWind", refreshViews);
@@ -522,9 +565,7 @@ function initSettings() {
 function refreshViews() {
   renderNow();
   if (!el("meteogram").hidden) openMeteogram();
-  if (!el("crosssection").hidden && state.data?.field) {
-    renderCrossSection(el("xs-body"), state.data.field, { maxHeightM: settings.maxHeight });
-  }
+  if (!el("crosssection").hidden) renderXs();
   if (!el("gonogo").hidden && state.data?.windBandMax) {
     renderGoNoGoTable(el("gng-body"), evaluateGoNoGo(
       state.data.surface, state.data.windBandMax, getProfile(settings.droneProfile), settings.maxHeight,

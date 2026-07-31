@@ -130,7 +130,32 @@ select, input[type="number"], input[type="text"] {
 }
 #mg-close:hover { color: #0b0b0b; }
 #mg-body { flex: 1; min-height: 0; overflow: auto; padding: 6px 8px; }
-.mg-svg { display: block; }
+.mg-svg { display: block; cursor: crosshair; }
+
+/* Segment-Umschalter (z. B. Höhenbereich der Cross-Section). */
+.seg-toggle {
+  display: inline-flex;
+  margin-left: auto;
+  border: 1px solid #c9c8c2;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.seg-toggle button {
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 400;
+  color: #52514e;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+.seg-toggle button + button { border-left: 1px solid #c9c8c2; }
+.seg-toggle button.active {
+  background: #2f6cb6;
+  color: #fff;
+  font-weight: 600;
+}
 
 /* Cross-Section-Overlay: gleiche Hülle wie Meteogramm, füllt den Container. */
 #crosssection {
@@ -148,6 +173,7 @@ select, input[type="number"], input[type="text"] {
 #xs-body { flex: 1; min-height: 0; overflow: hidden; padding: 4px 6px 8px; }
 .xs-svg { display: block; cursor: crosshair; }
 #xs-close { margin-left: auto; border: none; background: none; font-size: 20px; color: #52514e; cursor: pointer; padding: 0 4px; }
+.seg-toggle + #xs-close { margin-left: 8px; } /* Umschalter übernimmt das Auffüllen */
 #xs-close:hover { color: #0b0b0b; }
 
 /* Go/No-Go-Tabelle-Overlay: gleiche Hülle wie Meteogramm/Cross-Section. */

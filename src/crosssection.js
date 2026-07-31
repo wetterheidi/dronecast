@@ -4,6 +4,8 @@
  * (divergierend um 0 °C + Nullgradlinie). Log-Höhenachse (dicht am Boden),
  * Flughöhe als Linie markiert. Farbskalen: Wind einhuig hell→dunkel,
  * Temperatur zweihuig Blau↔Rot mit neutralem Grau bei 0 °C (beide CVD-sicher).
+ * opts.axis = "lin" schaltet auf eine lineare Höhenachse (Zoom-Modus bis
+ * Flughöhe: feines Gitter, dichtere Windpfeile).
  */
 
 import {
@@ -48,9 +50,13 @@ export function renderCrossSection(host, field, opts = {}) {
   const cTop = tBot + GAP, cBot = cTop + panelH;            // Bewölkung
 
   const hMin = targetH[0], hMax = targetH[targetH.length - 1];
+  const lin = opts.axis === "lin";
   const yFor = (top, bot) => {
-    const la = Math.log(hMin), lb = Math.log(hMax);
-    const f = (h) => bot - (Math.log(clamp(h, hMin, hMax)) - la) / (lb - la) * (bot - top);
+    const la = lin ? hMin : Math.log(hMin), lb = lin ? hMax : Math.log(hMax);
+    const f = (h) => {
+      const s = lin ? clamp(h, hMin, hMax) : Math.log(clamp(h, hMin, hMax));
+      return bot - (s - la) / (lb - la) * (bot - top);
+    };
     f.top = top; f.bot = bot;
     return f;
   };
@@ -61,22 +67,22 @@ export function renderCrossSection(host, field, opts = {}) {
 
   // Panels: Heatmap-Zellen (Färbung nach physikalischem Wert, Skala einheitenfest).
   const gW = mk("g", {}), gT = mk("g", {}), gC = mk("g", {});
-  heat(gW, field, field.spd, (v) => ramp(WIND_STOPS, v), x, yW, targetH, time);
-  heat(gT, field, field.temp, (v) => ramp(TEMP_STOPS, v), x, yT, targetH, time);
-  heat(gC, field, field.cloud, (v) => ramp(CLOUD_STOPS, v * 100), x, yC, targetH, time);
+  heat(gW, field, field.spd, (v) => ramp(WIND_STOPS, v), x, yW, targetH, time, lin);
+  heat(gT, field, field.temp, (v) => ramp(TEMP_STOPS, v), x, yT, targetH, time, lin);
+  heat(gC, field, field.cloud, (v) => ramp(CLOUD_STOPS, v * 100), x, yC, targetH, time, lin);
   svg.append(gW, gT, gC);
 
   // Höhen-Gitter + Achsenbeschriftung je Panel.
-  heightAxis(svg, yW, hMin, hMax, x);
-  heightAxis(svg, yT, hMin, hMax, x);
-  heightAxis(svg, yC, hMin, hMax, x);
+  heightAxis(svg, yW, hMin, hMax, x, lin);
+  heightAxis(svg, yT, hMin, hMax, x, lin);
+  heightAxis(svg, yC, hMin, hMax, x, lin);
 
   // Zeitachse + Tagestrenner über alle Panels.
   timeAxis(svg, time, x, wTop, cBot);
 
-  // Overlays.
-  windArrows(gW, field, x, yW, targetH, time);
-  freezingLine(svg, field, x, yT);
+  // Overlays. Im Zoom-Modus (lin) dichtere Pfeilreihen — dafür ist er da.
+  windArrows(gW, field, x, yW, targetH, time, lin ? 11 : 7);
+  freezingLine(svg, field, x, yT, hMin, hMax);
   for (const y of [yW, yT, yC]) flightLine(svg, y, opts.maxHeightM, x);
 
   // Titel + Farbleisten (Labels in Anzeigeeinheit, Färbung physikalisch).
@@ -88,13 +94,13 @@ export function renderCrossSection(host, field, opts = {}) {
   colorbar(svg, x.right + 12, cTop, cBot, CLOUD_STOPS, (v) => v, "%");
 
   host.append(svg);
-  setupHover(svg, { field, x, panels: [[wTop, wBot, yW], [tTop, tBot, yT], [cTop, cBot, yC]], hMin, hMax, W, Hpx });
+  setupHover(svg, { field, x, panels: [[wTop, wBot, yW], [tTop, tBot, yT], [cTop, cBot, yC]], hMin, hMax, W, Hpx, lin });
 }
 
 // --- Hover-Ablesung --------------------------------------------------------
 
 function setupHover(svg, ctx) {
-  const { field, x, panels, hMin, hMax, W, Hpx } = ctx;
+  const { field, x, panels, hMin, hMax, W, Hpx, lin } = ctx;
   const { time, targetH } = field;
   const t0 = time[0], t1 = time[time.length - 1], dt = time[1] - time[0], T = time.length;
   const pw = x.right - M.l;
@@ -104,7 +110,10 @@ function setupHover(svg, ctx) {
   const invX = (px) => t0 + (px - M.l) / pw * (t1 - t0);
   const invY = (py, top, bot) => {
     const frac = (bot - py) / (bot - top);
-    return clamp(Math.exp(Math.log(hMin) + frac * (Math.log(hMax) - Math.log(hMin))), hMin, hMax);
+    const h = lin
+      ? hMin + frac * (hMax - hMin)
+      : Math.exp(Math.log(hMin) + frac * (Math.log(hMax) - Math.log(hMin)));
+    return clamp(h, hMin, hMax);
   };
   const sampleAt = (i, h) => {
     let k = 1; while (k < targetH.length && targetH[k] < h) k++;
@@ -157,13 +166,15 @@ function drawTip(ov, px, py, lines, W, Hpx) {
 
 // --- Heatmap ---------------------------------------------------------------
 
-function heat(g, field, val2d, colorFn, x, y, targetH, time) {
+function heat(g, field, val2d, colorFn, x, y, targetH, time, lin) {
   const n = targetH.length, T = time.length;
   const dt = time[1] - time[0];
-  // Höhen-Kanten (geometrische Mittel im Log-Raum).
+  // Höhen-Kanten: Mittel passend zum Gitter (log: geometrisch, lin: arithmetisch).
   const yE = new Float64Array(n + 1);
   yE[0] = targetH[0]; yE[n] = targetH[n - 1];
-  for (let k = 1; k < n; k++) yE[k] = Math.sqrt(targetH[k - 1] * targetH[k]);
+  for (let k = 1; k < n; k++) {
+    yE[k] = lin ? (targetH[k - 1] + targetH[k]) / 2 : Math.sqrt(targetH[k - 1] * targetH[k]);
+  }
   for (let i = 0; i < T; i++) {
     const x0 = clamp(x(time[i] - dt / 2), M.l, x.right);
     const x1 = clamp(x(time[i] + dt / 2), M.l, x.right);
@@ -183,10 +194,10 @@ function heat(g, field, val2d, colorFn, x, y, targetH, time) {
 
 // --- Overlays --------------------------------------------------------------
 
-function windArrows(g, field, x, y, targetH, time) {
+function windArrows(g, field, x, y, targetH, time, nRows = 7) {
   const n = targetH.length, T = time.length;
   const stepT = Math.max(1, Math.round(3 * 3600 / (time[1] - time[0])));   // ~3 h
-  const stepK = Math.max(1, Math.round(n / 7));                            // ~7 Höhen
+  const stepK = Math.max(1, Math.round(n / nRows));
   for (let i = Math.floor(stepT / 2); i < T; i += stepT) {
     for (let k = Math.floor(stepK / 2); k < n; k += stepK) {
       const s = field.spd[k][i], d = field.dir[k][i];
@@ -211,20 +222,21 @@ function arrowHalo(g, cx, cy, dirFrom, L) {
   g.append(line("#fff", 3), head("#fff"), line(INK, 1.4), head(INK));
 }
 
-function freezingLine(g, field, x, y) {
-  let d = "", pen = false;
+function freezingLine(g, field, x, y, hMin, hMax) {
+  let d = "", pen = false, hFirst = null;
   for (let i = 0; i < field.time.length; i++) {
     const h = field.freezing[i];
-    if (!Number.isFinite(h)) { pen = false; continue; }
+    // Außerhalb des dargestellten Bandes (Zoom-Modus): Lücke statt Klemmen an den Rand.
+    if (!Number.isFinite(h) || h < hMin || h > hMax) { pen = false; continue; }
     d += (pen ? "L" : "M") + x(field.time[i]).toFixed(1) + " " + y(h).toFixed(1) + " ";
     pen = true;
+    if (hFirst == null) hFirst = h;
   }
   if (!d) return;
   g.append(mk("path", { d, fill: "none", stroke: "#fff", "stroke-width": 3.2 }));
   g.append(mk("path", { d, fill: "none", stroke: INK, "stroke-width": 1.4 }));
   // Beschriftung am linken Ende.
-  const h0 = field.freezing.find(Number.isFinite);
-  if (Number.isFinite(h0)) g.append(txt(M.l + 6, y(h0) - 4, "0 °C", INK, 10, "start", 700));
+  g.append(txt(M.l + 6, y(hFirst) - 4, "0 °C", INK, 10, "start", 700));
 }
 
 function flightLine(g, y, maxHeightM, x) {
@@ -237,8 +249,9 @@ function flightLine(g, y, maxHeightM, x) {
 
 // --- Achsen ----------------------------------------------------------------
 
-function heightAxis(svg, y, hMin, hMax, x) {
-  for (const hM of niceLogHeights(hMin, hMax)) {
+function heightAxis(svg, y, hMin, hMax, x, lin) {
+  const ticks = lin ? niceTicks(hMin, hMax, 6) : niceLogHeights(hMin, hMax);
+  for (const hM of ticks) {
     const py = y(hM);
     svg.append(mk("line", { x1: M.l, y1: py, x2: x.right, y2: py, stroke: GRID, "stroke-width": 1, opacity: 0.5 }));
     svg.append(txt(M.l - 4, py + 3, fmtH(hM), MUTED, 10, "end"));

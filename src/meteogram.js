@@ -20,6 +20,7 @@
 import {
   heightToDisplay, heightUnit,
   windToDisplay, windUnit, tempToDisplay, tempUnit,
+  fmtHeight, fmtWind, fmtDir, fmtTemp,
 } from "./units.js";
 import { refineCloudBase } from "./clouds.js";
 
@@ -81,15 +82,82 @@ export function renderMeteogram(host, model) {
   drawTimeAxis(svg, time, x, stackTop, stackBot);
 
   let yTop = TOPAXIS;
+  const bounds = [];
   for (const p of panels) {
     const g = mk("g", {});
     p.draw(g, model, x, yTop, yTop + p.h, pw);
     svg.append(g);
+    bounds.push([yTop, yTop + p.h]);
     yTop += p.h + GAP;
   }
 
   host.append(svg);
+  setupHover(svg, model, { x, time, W, H, bounds, stackTop, stackBot });
 }
+
+// --- Hover-Ablesung --------------------------------------------------------
+
+// Fadenkreuz wie in der Cross-Section: Zeit gerastet (stündlich), senkrechte
+// Linie über den ganzen Stapel, waagerechte im überfahrenen Panel, Tooltip
+// mit allen Werten der Stunde (Formatierung in Anzeigeeinheiten).
+function setupHover(svg, m, ctx) {
+  const { x, time, W, H, bounds, stackTop, stackBot } = ctx;
+  const t0 = time[0], t1 = time[time.length - 1], dt = time[1] - time[0], T = time.length;
+  const ov = mk("g", { "pointer-events": "none" });
+  svg.append(ov);
+  const clearOv = () => { while (ov.firstChild) ov.removeChild(ov.firstChild); };
+
+  svg.addEventListener("pointermove", (e) => {
+    const r = svg.getBoundingClientRect();
+    const px = (e.clientX - r.left) * (W / r.width);
+    const py = (e.clientY - r.top) * (H / r.height);
+    if (px < M.l || px > x.right || py < stackTop || py > stackBot) { clearOv(); return; }
+
+    const i = clamp(Math.round(((px - M.l) / (x.right - M.l)) * (t1 - t0) / dt), 0, T - 1);
+    const sx = x(time[i]);
+    clearOv();
+    ov.append(mk("line", { x1: sx, y1: stackTop, x2: sx, y2: stackBot, stroke: INK, "stroke-width": 0.8, opacity: 0.55 }));
+    const panel = bounds.find(([a, b]) => py >= a && py <= b);
+    if (panel) {
+      ov.append(mk("line", { x1: M.l, y1: py, x2: x.right, y2: py, stroke: INK, "stroke-width": 0.8, opacity: 0.55 }));
+      ov.append(mk("circle", { cx: sx, cy: py, r: 3.2, fill: "none", stroke: "#fff", "stroke-width": 2.4 }));
+      ov.append(mk("circle", { cx: sx, cy: py, r: 3.2, fill: "none", stroke: INK, "stroke-width": 1.3 }));
+    }
+
+    const V = m.vars;
+    const F = (v, fn) => (Number.isFinite(v) ? fn(v) : "–");
+    const pct = (v) => F(v, (p) => `${Math.round(p)} %`);
+    const spd = Number.isFinite(V.wind_speed_10m[i]) ? V.wind_speed_10m[i] / 3.6 : NaN;
+    const gust = Number.isFinite(V.wind_gusts_10m[i]) ? V.wind_gusts_10m[i] / 3.6 : NaN;
+    const base = refineCloudBase(V.temperature_2m[i], V.dew_point_2m[i], V.cloud_cover_low[i],
+      m.rhCeiling ? m.rhCeiling[i] : null);
+    const lines = [
+      new Date(time[i] * 1000).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" }),
+      `Temp ${F(V.temperature_2m[i], fmtTemp)} · Td ${F(V.dew_point_2m[i], fmtTemp)}`,
+      `Feuchte ${pct(V.relative_humidity_2m[i])} · Nied. ${F(V.precipitation[i], (p) => `${p < 1 ? p.toFixed(2) : p.toFixed(1)} mm/h`)}`,
+      `Wind ${F(spd, fmtWind)} · ${F(V.wind_direction_10m[i], fmtDir)} · Böen ${F(gust, fmtWind)}`,
+      `Wolken t ${pct(V.cloud_cover_low[i])} · m ${pct(V.cloud_cover_mid[i])} · h ${pct(V.cloud_cover_high[i])}`,
+      `Basis ${base ? fmtHeight(base.baseM) : "–"} · Sicht ${F(V.visibility[i], (v) => `${(v / 1000).toFixed(1)} km`)}`,
+    ];
+    const ww = wwCat(V.weather_code[i]);
+    if (ww) lines.splice(1, 0, `Wetter: ${ww.label}`);
+    drawTip(ov, px, py, lines, W, H);
+  });
+  svg.addEventListener("pointerleave", clearOv);
+}
+
+function drawTip(ov, px, py, lines, W, H) {
+  const pad = 7, lh = 15, w = 212, h = pad * 2 + lines.length * lh;
+  let tx = px + 14, ty = py + 14;
+  if (tx + w > W) tx = px - 14 - w;
+  if (ty + h > H) ty = py - 14 - h;
+  ov.append(mk("rect", { x: tx, y: ty, width: w, height: h, rx: 5, fill: "rgba(252,252,251,0.97)", stroke: "#c9c8c2", "stroke-width": 1 }));
+  lines.forEach((ln, j) => {
+    ov.append(txt(tx + pad, ty + pad + lh * (j + 1) - 4, ln, j === 0 ? INK : MUTED, 11, "start", j === 0 ? 700 : 400));
+  });
+}
+
+function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
 // --- Panels ----------------------------------------------------------------
 
