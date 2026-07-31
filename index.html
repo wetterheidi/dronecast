@@ -47,60 +47,20 @@
       </div>
     </div>
 
-    <!-- Bedingungen am Punkt (folgen der Masterzeit) -->
-    <section id="now" hidden>
-      <div class="label">Bedingungen am Punkt</div>
+    <!-- Punktvorhersage (folgt der Masterzeit) -->
+    <details id="now" hidden>
+      <summary>Punktvorhersage</summary>
       <div id="now-body"></div>
-    </section>
 
-    <!-- Vorhersageprodukte -->
-    <div id="products" hidden>
-      <div class="label">Vorhersageprodukte</div>
-      <div id="productbtns">
-        <button class="product" data-prod="meteogram">Meteogramm</button>
-        <button class="product" data-prod="xsection">Cross-Section</button>
-        <button class="product" data-prod="briefing">Briefing</button>
-        <button class="product" data-prod="table">Tabelle (Go/No-Go)</button>
-      </div>
-    </div>
-
-    <details id="settings">
-      <summary>Einstellungen</summary>
-      <label class="row">
-        <span class="label">Modell</span>
-        <select id="set-model">
-          <option value="icon_d2">ICON-D2 (~2,2 km)</option>
-          <option value="icon_eu">ICON-EU (~6,5 km)</option>
-        </select>
-      </label>
-      <div class="grid2">
-        <label>Vorhersage bis (Höhe AGL)
-          <select id="set-maxheight"></select>
-        </label>
-        <label>Zeithorizont
-          <select id="set-days"></select>
-        </label>
-      </div>
-      <div class="grid3">
-        <label>Höhe
-          <select id="set-unitheight">
-            <option value="m">m</option>
-            <option value="ft">ft</option>
-          </select>
-        </label>
-        <label>Wind
-          <select id="set-unitwind">
-            <option value="kmh">km/h</option>
-            <option value="ms">m/s</option>
-            <option value="kt">kt</option>
-          </select>
-        </label>
-        <label>Temp
-          <select id="set-unittemp">
-            <option value="c">°C</option>
-            <option value="f">°F</option>
-          </select>
-        </label>
+      <!-- Vorhersageprodukte: allesamt Vorhersagen für den einen Punkt -->
+      <div id="products" hidden>
+        <div class="label">Vorhersageprodukte</div>
+        <div id="productbtns">
+          <button class="product" data-prod="meteogram">Meteogramm</button>
+          <button class="product" data-prod="xsection">Cross-Section</button>
+          <button class="product" data-prod="briefing">Briefing</button>
+          <button class="product" data-prod="table">Tabelle (Go/No-Go)</button>
+        </div>
       </div>
     </details>
 
@@ -108,12 +68,13 @@
       <summary>Nowcasting (Satellit &amp; Radar)</summary>
 
       <div class="row ml-playrow">
-        <button id="ml-play" type="button" title="Radar-Schleife der letzten Stunden abspielen">▶ Abspielen</button>
+        <button id="ml-play" type="button" title="Aktive Layer als Schleife der letzten 2 h abspielen">▶ Abspielen</button>
         <span id="ml-play-status" class="mono"></span>
       </div>
       <div class="hint">Radar und Satellit folgen der Masterzeit oben und zeigen die
-        jeweils nächstliegende verfügbare Aufnahme. „Abspielen" lässt die Radar-Schleife
-        der letzten Stunden laufen, ohne die Masterzeit zu verstellen.</div>
+        jeweils nächstliegende verfügbare Aufnahme (Zeiten in <b>loc</b>). „Abspielen"
+        loopt die letzten 2 h — genau die aktiven Layer (nur Radar, nur Satellit oder
+        beide synchron), ohne die Masterzeit zu verstellen.</div>
 
       <div class="ml-section">
         <label class="row">
@@ -179,6 +140,46 @@
           <div class="wind-legend" id="ml-wind-legend"></div>
           <div class="hint mono" id="ml-wind-status"></div>
         </div>
+      </div>
+    </details>
+
+    <details id="settings">
+      <summary>Einstellungen</summary>
+      <label class="row">
+        <span class="label">Modell</span>
+        <select id="set-model">
+          <option value="icon_d2">ICON-D2 (~2,2 km)</option>
+          <option value="icon_eu">ICON-EU (~6,5 km)</option>
+        </select>
+      </label>
+      <div class="grid2">
+        <label>Vorhersage bis (Höhe AGL)
+          <select id="set-maxheight"></select>
+        </label>
+        <label>Zeithorizont
+          <select id="set-days"></select>
+        </label>
+      </div>
+      <div class="grid3">
+        <label>Höhe
+          <select id="set-unitheight">
+            <option value="m">m</option>
+            <option value="ft">ft</option>
+          </select>
+        </label>
+        <label>Wind
+          <select id="set-unitwind">
+            <option value="kmh">km/h</option>
+            <option value="ms">m/s</option>
+            <option value="kt">kt</option>
+          </select>
+        </label>
+        <label>Temp
+          <select id="set-unittemp">
+            <option value="c">°C</option>
+            <option value="f">°F</option>
+          </select>
+        </label>
       </div>
     </details>
 

@@ -231,7 +231,11 @@ async function loadForecast() {
     state.data = { surface, loadedAt: now, wf, modelElevation };
     setMasterRange(); // Zeitfenster auf die echte Zeitreihe verfeinern
     setStatus(`Geladen · ${model.label} · Elevation ${fmtHeight(surface.elevation)}`, "");
+    // Punktvorhersage beim ersten Laden aufklappen; danach die Nutzerwahl
+    // (auf-/zugeklappt) über Neuladen hinweg respektieren.
+    const firstReveal = el("now").hidden;
     el("now").hidden = false;
+    if (firstReveal) el("now").open = true;
     el("products").hidden = false;
     renderNow();
     if (!el("meteogram").hidden) openMeteogram();       // offene Overlays aktualisieren
@@ -284,7 +288,7 @@ async function renderNow() {
   if (gen !== renderNowGen) return; // durch neueren Aufruf überholt
 
   const rows = [];
-  rows.push(`<div class="now-time">Gültig (Modellstunde, loc): ${time}</div>`);
+  rows.push(`<div class="now-time">Gültig (Modellstunde): ${time} loc</div>`);
 
   // Modell-Orographie vs. echtes Gelände: großer Unterschied = lokales
   // Gelände vom Gitter nicht aufgelöst, Wind-auf-Höhe-Werte mit Vorsicht.

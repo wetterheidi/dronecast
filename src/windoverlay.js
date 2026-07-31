@@ -843,7 +843,7 @@ export function initWindOverlay(map) {
     const d = new Date(times[timeIdx] * 1000);
     el("mf-time-display").textContent = `Gültig: ${d.toLocaleString("de-DE", {
       weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
-    })}`;
+    })} loc`;
   }
 
   function renderDensityRadios() {

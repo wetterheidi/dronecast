@@ -114,7 +114,7 @@ function renderLabel() {
   if (lab) {
     lab.textContent = new Date(masterMs).toLocaleString("de-DE", {
       weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
-    });
+    }) + " loc";
   }
   const now = el("master-time-now");
   if (now) now.classList.toggle("active", isNow());
