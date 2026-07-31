@@ -10,8 +10,9 @@ import { evaluate as evaluateGoNoGo } from "./gonogo.js";
 import { renderGoNoGoTable } from "./gonogotable.js";
 import { DRONE_PROFILES } from "./droneProfiles.js";
 import {
-  listProfiles, getProfile, isEditable,
+  listProfiles, getProfile, isEditable, getUserProfiles,
   duplicateProfile, createBlankProfile, updateProfile, deleteProfile,
+  exportUserProfiles, importProfiles,
 } from "./droneProfileStore.js";
 import { renderProfileDetails } from "./droneProfileView.js";
 import { renderProfileEditor } from "./droneProfileEditor.js";
@@ -499,9 +500,10 @@ el("gng-profile").addEventListener("change", (e) => {
   if (!el("gonogo").hidden) openGoNoGo();
 });
 
-// --- Datenbank-Ansicht/-Editor (Stufe 1 + 2) --------------------------------
+// --- Datenbank-Ansicht/-Editor (Stufe 1–3) ----------------------------------
 // "view" = read-only Detailkarte mit Toolbar · "edit" = Formular.
 let profileMode = "view";
+let profileStatus = null; // einmalige Rückmeldung (Import/Export), s. refresh
 
 // Profildetails ein-/ausblenden.
 el("gng-info").addEventListener("click", () => {
@@ -574,11 +576,69 @@ function refreshProfileDetails() {
     profileMode = "edit";
     selectProfile(fresh.id);
   }));
+
+  // Globale Datenbank-Aktionen (rechts): Export/Import der Nutzerprofile.
+  const spacer = document.createElement("span");
+  spacer.className = "dp-spacer";
+  bar.append(spacer);
+  const exportBtn = toolButton("Exportieren", "", exportProfiles);
+  if (getUserProfiles().length === 0) {
+    exportBtn.disabled = true;
+    exportBtn.title = "Keine eigenen Profile zum Exportieren";
+  }
+  bar.append(exportBtn);
+  bar.append(toolButton("Importieren", "", importProfilesFromFile));
   panel.append(bar);
+
+  if (profileStatus) {
+    const s = document.createElement("p");
+    s.className = `dp-status${profileStatus.err ? " err" : ""}`;
+    s.textContent = profileStatus.text;
+    panel.append(s);
+  }
+  profileStatus = null; // nur einmal anzeigen
 
   const content = document.createElement("div");
   renderProfileDetails(content, prof);
   panel.append(content);
+}
+
+// Nutzerprofile als JSON-Datei herunterladen (Herkunft je Profil inklusive).
+function exportProfiles() {
+  const data = exportUserProfiles();
+  if (data.profiles.length === 0) return;
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `droneforecast-drohnenprofile_${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  profileStatus = { text: `${data.profiles.length} Profil(e) exportiert.`, err: false };
+  refreshProfileDetails();
+}
+
+// JSON-Datei einlesen und Profile importieren (als "importiert" gekennzeichnet).
+function importProfilesFromFile() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json,.json";
+  input.addEventListener("change", async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const { added, skipped } = importProfiles(JSON.parse(await file.text()));
+      profileStatus = added
+        ? { text: `${added} Profil(e) importiert${skipped ? `, ${skipped} übersprungen` : ""}.`, err: false }
+        : { text: "Keine gültigen Profile in der Datei gefunden.", err: true };
+      populateProfileSelect();
+      refreshProfileDetails();
+    } catch (e) {
+      profileStatus = { text: `Import fehlgeschlagen: ${e.message || "keine gültige JSON-Datei"}`, err: true };
+      refreshProfileDetails();
+    }
+  });
+  input.click();
 }
 
 function toolButton(text, cls, onClick) {

@@ -173,11 +173,34 @@ anwenden. Bewusst zurückgestellt, um keine unvalidierte Zusatzannahme in die
 Bewertung einzubauen.
 
 ### In-App-Editor für Drohnenprofile
-Aktuell wird ein neues Profil als Objekt in `DRONE_PROFILES`
-([src/droneProfiles.js](src/droneProfiles.js)) ergänzt (Code-Änderung, kein
-Neuladen der App-Logik nötig). Falls das auf Dauer zu umständlich wird: ein
-Formular im Panel, das Profile liest/schreibt (z. B. `localStorage`), statt
-sie im Quellcode zu pflegen.
+**Status:** gebaut (3 Stufen). Die Werksmodelle stehen weiterhin als
+Datenobjekte in [src/droneProfiles.js](src/droneProfiles.js) (jetzt 9 konkrete
+Modelle, `origin: "factory"`). Darüber liegt ein Store
+([src/droneProfileStore.js](src/droneProfileStore.js)), der Nutzerprofile in
+`localStorage` (`droneforecast.profiles.v1`) hält und die effektive Liste
+(Werk + Nutzer) liefert.
+- **Stufe 1 – Ansehen:** read-only Detailkarte mit Herkunft-Zeile
+  ([src/droneProfileView.js](src/droneProfileView.js)), erreichbar über den
+  ℹ-Button in der Go/No-Go-Kopfzeile.
+- **Stufe 2 – Bearbeiten/Neu:** Formular
+  ([src/droneProfileEditor.js](src/droneProfileEditor.js)); Duplizieren,
+  Bearbeiten, Neu, Löschen. Werksmodelle bleiben unveränderlich (Duplikat →
+  `origin: "user"`, `basedOn`, Hersteller-`source` entfernt). IDs mit
+  `user:`-Präfix.
+- **Stufe 3 – Export/Import:** JSON-Umschlag (`droneforecast.profiles/v1`) mit
+  Herkunft je Profil. **Vertrauensgrenze beim Import:** jedes Profil wird
+  zwingend auf `origin: "imported"` gesetzt und bekommt eine frische ID — eine
+  Datei kann sich nie zu Werksdaten erklären oder ein bestehendes Profil
+  überschreiben.
+
+**Datenherkunft der Grenzwerte** (im Kopf von droneProfiles.js dokumentiert):
+herstellerbasiert (Wind/Temp; Regen grob aus IP-Schutzart) vs.
+operationell/regulatorisch (Wolkenbasis/Sicht — VLOS-Platzhalter, für alle
+Modelle gleich). Werte sind recherchierte Richtwerte, keine Freigaben.
+
+**Noch offen (Ausbau):** Import-Vorschau/Konfliktdialog statt stillem Anhängen;
+Bearbeiten von Richtung/Einheit je Parameter (bewusst fix gelassen);
+Cloud-/Geräte-Sync (localStorage ist nur pro Browser).
 
 ## Karte: NWP-Modellgitter als Layer (Wind/Temp/Wolken/Ceiling)
 

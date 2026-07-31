@@ -81,6 +81,7 @@ function originLine(p) {
   } else {
     const extra = [];
     if (p.basedOn) extra.push(`abgeleitet von ${p.basedOn}`);
+    if (p.importedAt) extra.push(`importiert ${fmtDate(p.importedAt)}`);
     if (p.modifiedAt) extra.push(`geändert ${fmtDate(p.modifiedAt)}`);
     else if (p.createdAt) extra.push(`angelegt ${fmtDate(p.createdAt)}`);
     if (extra.length) {

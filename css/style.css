@@ -278,6 +278,13 @@ select, input[type="number"], input[type="text"] {
 .dp-actions { display: flex; gap: 6px; margin-top: 8px; }
 .dp-err { color: #b3261e; font-size: 12px; margin: 2px 0; }
 
+/* Export/Import (Stufe 3) */
+.dp-spacer { flex: 1 1 auto; }
+.dp-toolbar button:disabled { opacity: 0.45; cursor: default; }
+.dp-toolbar button:disabled:hover { background: #fff; }
+.dp-status { font-size: 12px; margin: 0 0 6px; color: #1f6b34; }
+.dp-status.err { color: #b3261e; }
+
 .go-green { background: #dcf2d8; }
 .go-yellow { background: #fdecc2; }
 .go-red { background: #f6cfcd; }

@@ -147,6 +147,61 @@ export function deleteProfile(id) {
   return true;
 }
 
+/** Nur die nutzergenerierten/importierten Profile (nicht die Werksmodelle). */
+export function getUserProfiles() {
+  return userProfiles.slice();
+}
+
+// --- Export / Import (Stufe 3) -----------------------------------------------
+
+const SCHEMA = "droneforecast.profiles/v1";
+
+/**
+ * Serialisiert die Nutzerprofile in einen selbstbeschreibenden Umschlag. Jedes
+ * Profil trägt seine Herkunft (`origin`) mit — der Empfänger sieht damit, dass
+ * es eigene/importierte Werte sind, nicht Herstellerangaben. Werksmodelle
+ * werden bewusst NICHT exportiert (sie liegen ohnehin in jeder App-Instanz).
+ */
+export function exportUserProfiles() {
+  return {
+    schema: SCHEMA,
+    app: "droneforecast",
+    exportedAt: new Date().toISOString(),
+    profiles: userProfiles.map((p) => ({ ...p, limits: cloneLimits(p.limits) })),
+  };
+}
+
+/**
+ * Übernimmt Profile aus einer Import-Datei (Umschlag ODER blankes Array).
+ *
+ * VERTRAUENSGRENZE: Egal was die Datei behauptet — jedes importierte Profil
+ * wird auf origin "imported" gesetzt und bekommt IMMER eine frische ID. Eine
+ * Datei kann sich damit nicht selbst zu Werksdaten erklären und kein
+ * bestehendes (Werks- oder Nutzer-)Profil überschreiben.
+ *
+ * @returns {{ added:number, skipped:number }}
+ * @throws  {Error} wenn die Datei kein erkennbares Profilformat enthält
+ */
+export function importProfiles(data) {
+  const list = Array.isArray(data) ? data
+    : (data && Array.isArray(data.profiles) ? data.profiles : null);
+  if (!list) throw new Error("Kein gültiges Profilformat (weder Umschlag noch Liste).");
+
+  let added = 0, skipped = 0;
+  const now = new Date().toISOString();
+  for (const raw of list) {
+    const norm = normalizeStored(raw);
+    if (!norm) { skipped++; continue; }
+    norm.origin = "imported";     // Datei-Behauptungen zur Herkunft ignorieren
+    norm.id = newId(norm.label);  // immer neu -> nie Kollision/Überschreiben
+    norm.importedAt = now;
+    userProfiles.push(norm);
+    added++;
+  }
+  if (added) save();
+  return { added, skipped };
+}
+
 // --- Persistenz --------------------------------------------------------------
 
 function load() {
@@ -183,6 +238,7 @@ function normalizeStored(p) {
     manufacturer: p.manufacturer || "", category: p.category || "multicopter",
     ipRating: p.ipRating ?? null, marginPct: Number.isFinite(p.marginPct) ? p.marginPct : 0.2,
     basedOn: p.basedOn ?? null, createdAt: p.createdAt || null, modifiedAt: p.modifiedAt || null,
+    importedAt: p.importedAt || null,
     limits,
   };
 }
