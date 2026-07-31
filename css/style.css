@@ -211,6 +211,41 @@ select, input[type="number"], input[type="text"] {
 .gng-daterow .gng-corner, .gng-hourrow .gng-corner { z-index: 3; }
 .gng-conclusion th, .gng-conclusion td { font-weight: 700; }
 
+/* Profildetails (Datenbank-Ansicht, read-only) */
+#gng-info {
+  border: none; background: none; font-size: 15px; color: #52514e;
+  cursor: pointer; padding: 0 4px; line-height: 1;
+}
+#gng-info:hover { color: #0b0b0b; }
+#gng-info[aria-pressed="true"] { color: #1f4e79; }
+#gng-details {
+  flex: 0 0 auto; max-height: 45%; overflow: auto;
+  padding: 8px 12px; border-bottom: 1px solid #eceae4;
+  background: #faf9f6; font-size: 12px;
+}
+#gng-details[hidden] { display: none; }
+.dp-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.dp-head strong { font-size: 13px; }
+.dp-sub { color: #52514e; }
+.dp-origin { margin: 4px 0 2px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dp-origin-detail { color: #52514e; }
+.dp-origin a { color: #1f4e79; }
+.dp-badge {
+  display: inline-block; padding: 1px 7px; border-radius: 10px;
+  font-weight: 600; font-size: 11px; white-space: nowrap;
+}
+.orig-factory  { background: #e7f2e9; color: #1f6b34; }
+.orig-user     { background: #e6eef7; color: #1f4e79; }
+.orig-imported { background: #fbf0dd; color: #8a5a12; }
+.orig-unknown  { background: #fbe6e4; color: #b3261e; }
+.dp-note { margin: 4px 0; color: #3a3a37; }
+.dp-table { border-collapse: collapse; width: 100%; margin: 6px 0 4px; font-variant-numeric: tabular-nums; }
+.dp-table th, .dp-table td { border: 1px solid #eceae4; padding: 3px 8px; text-align: left; }
+.dp-colhead th { background: #f4f3ef; font-weight: 600; }
+.dp-table td:nth-child(2), .dp-table td:nth-child(3), .dp-table td:nth-child(4) { text-align: right; white-space: nowrap; }
+.dp-group td { background: #f0efe9; font-weight: 600; color: #52514e; text-align: left; }
+.dp-disclaimer { margin: 4px 0 0; color: #8a5a12; font-size: 11px; }
+
 .go-green { background: #dcf2d8; }
 .go-yellow { background: #fdecc2; }
 .go-red { background: #f6cfcd; }

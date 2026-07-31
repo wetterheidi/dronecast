@@ -9,6 +9,7 @@ import { buildBriefingHtml, buildBriefingContent } from "./briefing.js";
 import { evaluate as evaluateGoNoGo } from "./gonogo.js";
 import { renderGoNoGoTable } from "./gonogotable.js";
 import { DRONE_PROFILES, getProfile } from "./droneProfiles.js";
+import { renderProfileDetails } from "./droneProfileView.js";
 import * as astro from "./astro.js";
 import { settings, loadSettings, updateSetting, OPTIONS } from "./settings.js";
 import { parseCoordInput } from "./coords.js";
@@ -488,8 +489,24 @@ async function openGoNoGo() {
 el("gng-close").addEventListener("click", () => { el("gonogo").hidden = true; });
 el("gng-profile").addEventListener("change", (e) => {
   updateSetting("droneProfile", e.target.value);
+  refreshProfileDetails();
   if (!el("gonogo").hidden) openGoNoGo();
 });
+
+// Read-only-Profildetails ein-/ausblenden (Datenbank-Ansicht, Stufe 1).
+el("gng-info").addEventListener("click", () => {
+  const panel = el("gng-details");
+  const show = panel.hidden;
+  panel.hidden = !show;
+  el("gng-info").setAttribute("aria-pressed", String(show));
+  if (show) refreshProfileDetails();
+});
+
+function refreshProfileDetails() {
+  const panel = el("gng-details");
+  if (panel.hidden) return;
+  renderProfileDetails(panel, getProfile(settings.droneProfile));
+}
 
 // Maximale mittlere Windgeschwindigkeit (m/s) zwischen hMinM und hMaxM zu
 // einem Zeitpunkt: an ein paar Stützhöhen abgetastet (das WindField ist am
@@ -593,7 +610,9 @@ function initSettings() {
   fillOptions("set-maxheight", OPTIONS.maxHeight, (v) => `${v} m`);
   fillOptions("set-days", OPTIONS.forecastDays, (v) => `${v} ${v === 1 ? "Tag" : "Tage"}`);
   el("gng-profile").innerHTML = DRONE_PROFILES.map((p) => `<option value="${p.id}">${p.label}</option>`).join("");
-  el("gng-profile").value = settings.droneProfile;
+  // getProfile() fällt auf das erste Modell zurück, falls ein früher gespeichertes
+  // Profil (z. B. ein entfernter Platzhalter) nicht mehr existiert -> Select nie leer.
+  el("gng-profile").value = getProfile(settings.droneProfile).id;
 
   el("set-model").value = settings.model;
   el("set-maxheight").value = String(settings.maxHeight);
