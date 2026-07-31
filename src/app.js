@@ -480,7 +480,6 @@ function printBriefing() {
 }
 
 el("brf-close").addEventListener("click", () => { el("briefing").hidden = true; });
-el("brf-pdf").addEventListener("click", printBriefing);
 el("brf-print").addEventListener("click", printBriefing);
 
 // Bei Größenänderung offenes Overlay neu zeichnen (SVG an Container gebunden).
