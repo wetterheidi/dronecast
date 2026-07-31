@@ -15,6 +15,7 @@ import { parseCoordInput } from "./coords.js";
 import { initGeoman } from "./geoman.js";
 import { initMapLayers } from "./maplayers.js";
 import { initWindOverlay } from "./windoverlay.js";
+import { initGustOverlay } from "./gustoverlay.js";
 import {
   fmtHeight, fmtWind, fmtTemp, fmtDirPadded, heightUnit, heightToDisplay,
 } from "./units.js";
@@ -67,6 +68,10 @@ initMapLayers(map);
 // Kartenlayer: Wind 10 m flächig (unterstes Modelllevel, Michaels Instanz) —
 // nach initMapLayers, da der gemeinsame wxOverlays-Pane dort angelegt wird.
 initWindOverlay(map);
+
+// Kartenlayer: Windböen 10 m flächig (Oberfläche, öffentliche Instanz) —
+// Schwesterlayer zum Wind-Overlay, teilt sich den wxOverlays-Pane.
+initGustOverlay(map);
 
 // Masterzeit: die eine Zeitachse für Bedingungen, numerische Felder und
 // Nowcasting. Nach initMapLayers/initWindOverlay verdrahten — die haben sich

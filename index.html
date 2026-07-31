@@ -141,6 +141,30 @@
           <div class="hint mono" id="ml-wind-status"></div>
         </div>
       </div>
+
+      <div class="ml-section">
+        <label class="row">
+          <span class="label"><input type="checkbox" id="ml-gust-on" /> Böen (10 m)</span>
+        </label>
+        <div class="hint warn" id="ml-gust-hint" hidden>Zum Anzeigen bitte näher heranzoomen (ab Zoom 9).</div>
+        <div id="ml-gust-body" class="ml-subsection" hidden>
+          <div class="row">
+            <span class="label">Darstellung</span>
+          </div>
+          <div class="radio-row" id="ml-gust-mode"><!-- Radios: Fläche / Zahlenwerte --></div>
+          <div class="row">
+            <span class="label">Gitterdichte</span>
+          </div>
+          <div class="radio-row" id="ml-gust-density"><!-- Radios aus WIND_OVERLAY_DENSITY_OPTIONS --></div>
+          <div class="row opacity-row" id="ml-gust-opacity-row">
+            <span class="label">Deckkraft Böenfläche</span>
+            <span id="ml-gust-opacity-val" class="mono">50%</span>
+          </div>
+          <input id="ml-gust-opacity" type="range" min="10" max="100" step="5" value="50" />
+          <div class="wind-legend" id="ml-gust-legend"></div>
+          <div class="hint mono" id="ml-gust-status"></div>
+        </div>
+      </div>
     </details>
 
     <details id="settings">

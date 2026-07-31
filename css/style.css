@@ -325,13 +325,24 @@ select, input[type="number"], input[type="text"] {
 .wind-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 6px 0 2px; font-size: 12px; }
 .wind-legend .chip { display: inline-block; width: 14px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
 
-/* Lade-Spinner im Wind-Overlay-Status (setStatus(msg, busy)). */
+/* Lade-Spinner im Overlay-Status (setStatus(msg, busy)). */
 @keyframes ml-spin { to { transform: rotate(360deg); } }
-#ml-wind-status.busy::before {
+#ml-wind-status.busy::before,
+#ml-gust-status.busy::before {
   content: ""; display: inline-block; width: 10px; height: 10px;
   margin-right: 6px; vertical-align: -1px;
   border: 2px solid currentColor; border-right-color: transparent;
   border-radius: 50%; animation: ml-spin 0.7s linear infinite;
+}
+
+/* Böen-Zahlenwerte am Gitterpunkt (gustLayerMode "numbers"): dunkel, fett,
+   mit weißem Halo für Lesbarkeit über OSM/Satellit — analog zu den Fiedern. */
+.gust-num {
+  font: 700 12px/1 system-ui, sans-serif;
+  color: #0b1220;
+  text-align: center;
+  white-space: nowrap;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff, 0 0 1px #fff;
 }
 
 input[type="range"] {

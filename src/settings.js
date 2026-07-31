@@ -29,6 +29,13 @@ const DEFAULTS = {
   windLayerOpacity: 0.5,
   windLayerDensity: WIND_OVERLAY_DEFAULT_DENSITY,
   windLayerHeightIdx: 0, // Index ins Level-Band (0 = unterstes Level, ~10 m AGL)
+  // Böen-Layer (Oberfläche, 10 m; wind_gusts_10m von der öffentlichen Instanz).
+  // Anders als Wind ohne Höhenband/Level; „mode" schaltet zwischen Farbfläche
+  // und Zahlenwerten am Gitterpunkt um.
+  gustLayerOn: false,
+  gustLayerMode: "fill", // "fill" = Farbfläche | "numbers" = Zahlenwerte
+  gustLayerOpacity: 0.5,
+  gustLayerDensity: WIND_OVERLAY_DEFAULT_DENSITY,
 };
 
 export const settings = { ...DEFAULTS };

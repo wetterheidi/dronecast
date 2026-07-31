@@ -124,6 +124,20 @@ export const WIND_OVERLAY_DEFAULT_DENSITY = "fine";
 // leicht darunter für eine dichte, aber noch lesbare Darstellung bei "1×".
 export const WIND_OVERLAY_BASE_TARGET_PX = 40;
 
+// Böen-Layer (gustoverlay.js): eigene, deutlich sparsamere Last-Parameter, weil
+// er — anders als der Wind-Layer — die ÖFFENTLICHE Open-Meteo-Instanz trifft
+// (Michaels Instanz liefert wind_gusts_10m nur als NULL). Diese Instanz ist
+// gemetert (Rate-Limit nach Locations × Variablen × Tagen, HTTP 429); daher
+// kleineres Punktebudget und geringe Parallelität. POINTS_PER_REQUEST bündelt
+// viele Locations in einen Request (weniger HTTP-Requests). Bei 429 pausiert
+// der Layer und wartet Retry-After ab (siehe gustoverlay.js).
+export const GUST_OVERLAY_MAX_POINTS = 500;
+export const GUST_OVERLAY_POINTS_PER_REQUEST = 100;
+export const GUST_OVERLAY_MAX_CONCURRENCY = 2;
+export const GUST_OVERLAY_CHUNK_RETRIES = 2;
+// Fallback-Wartezeit nach einem 429 ohne (brauchbaren) Retry-After-Header.
+export const GUST_OVERLAY_RATE_LIMIT_COOLDOWN_MS = 30 * 1000;
+
 // Höhenschieber: Die nativen ICON-Level haben keine feste Meterhöhe — ihre
 // Höhe AGL steht pro Punkt/Zeit in `height_agl_level{l}`. Beim Aktivieren des
 // Layers wird daher einmal je Modell an einem Sondierpunkt (Kartenmitte) die
