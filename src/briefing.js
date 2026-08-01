@@ -11,6 +11,7 @@
  */
 
 import { sampleColumnAtHeight } from "./column.js";
+import { cloudFraction, cloudLayers } from "./clouds.js";
 import {
   windToDisplay, tempToDisplay, heightToDisplay,
   windUnit, tempUnit, heightUnit,
@@ -117,7 +118,7 @@ export function buildBriefingContent({ surface, col, point, modelLabel, maxHeigh
         <td>${metarDir(dir)}</td>
         <td>${fmtNum(windToDisplay(spdMs), 1)}</td>
         <td>${fmtNum(s.rh, 0)}</td>
-        <td>${fmtNum(cloudPct(s.rh), 0)}</td>
+        <td>${fmtNum(cloudFraction(s.rh, hM) * 100, 0)}</td>
       </tr>`;
     }
     html += `</tbody></table>`;
@@ -197,50 +198,24 @@ function windGust(spdKmh, gustKmh) {
 }
 
 /**
- * METAR-Wolkenzeile für eine Stunde aus dem Modell-RH-Profil (native Level,
- * bis 6000 m AGL): FEW/SCT/BKN/OVC mit Basis in Anzeigeeinheit, max. 3
- * Schichten, nur nach oben zunehmende Bedeckung — analog zum DZMaster.
+ * METAR-nahe Wolkenzeile für eine Stunde: ALLE Schichten (tief, mittelhoch,
+ * hoch) aus dem Modell-RH-Profil via clouds.js `cloudLayers` — nicht nur die
+ * unterste, und ohne den früheren „nur zunehmende Bedeckung"-Filter, damit eine
+ * dünnere hohe Schicht über einer tieferen nicht verschluckt wird. Format
+ * `FEW 900ft, BKN 4000ft` in Anzeigeeinheit, „SKC" wenn frei.
  */
 function metarCloudsForHour(col, i) {
-  const order = { FEW: 1, SCT: 2, BKN: 3, OVC: 4 };
-  const layers = [];
-  let last = null;
-  for (let k = 0; k < col.nLevels; k++) {
-    const h = col.h[k][i];
-    if (!Number.isFinite(h) || h > 6000) continue;
-    const cat = metarCategory(cloudPct(col.rh[k][i]));
-    if (!cat || layers.length >= 3) continue;
-    if (!last || order[cat] > order[last]) {
-      layers.push({ cover: cat, base: h });
-      last = cat;
-    }
-  }
+  const layers = cloudLayers(col, i);
   if (!layers.length) return "SKC";
   return layers.map((l) => {
     const disp = heightUnit() === "ft"
-      ? Math.round(heightToDisplay(l.base) / 100) * 100
-      : Math.round(l.base / 50) * 50;
+      ? Math.round(heightToDisplay(l.baseM) / 100) * 100
+      : Math.round(l.baseM / 50) * 50;
     return `${l.cover} ${disp}${heightUnit()}`;
   }).join(", ");
 }
 
-function metarCategory(cc) {
-  if (cc <= 5) return null;
-  if (cc <= 25) return "FEW";
-  if (cc <= 50) return "SCT";
-  if (cc <= 87) return "BKN";
-  return "OVC";
-}
-
 // --- physikalische Helfer ---------------------------------------------------
-
-/** Wolkenbedeckung (%) aus relativer Feuchte – gleiche Heuristik wie die
- *  Cross-Section (column.js `cloudFrac`). */
-function cloudPct(rh) {
-  if (!Number.isFinite(rh) || rh < 65) return 0;
-  if (rh < 85) return (rh - 65) / 20 * 50;
-  return Math.min(100, 50 + (rh - 85) / 15 * 50);
-}
 
 /** Taupunkt (°C) aus RH (%) und T (°C) via Magnus (über Wasser). */
 function dewFromRhT(rh, tC) {

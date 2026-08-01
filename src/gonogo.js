@@ -23,10 +23,15 @@ const KMH_TO_MS = 1 / 3.6;
  * @param profile      Eintrag aus DRONE_PROFILES
  * @param opHeightM    Geplante Flughöhe AGL (i. d. R. settings.maxHeight) —
  *                     Wolkenbasis muss darüber liegen, Bandmaximum bis dorthin
+ * @param cloudCeilingArr Optionales Array parallel zu surface.time: Wolken-
+ *                     untergrenze (m AGL) aus dem Modell-RH-Profil
+ *                     (clouds.js `cloudCeiling`), null wo keine tiefe BKN-
+ *                     Schicht liegt. Fehlt es ganz (Säule nicht geladen),
+ *                     fällt die Wolkenbasis-Zeile auf die LCL-Schätzung zurück.
  * @returns { time, rows: [{id,label,kind,cells:[{status,value|text}]}],
  *            conclusion: [{status, limitingId}] }
  */
-export function evaluate(surface, windBandMax, profile, opHeightM) {
+export function evaluate(surface, windBandMax, profile, opHeightM, cloudCeilingArr = null) {
   const time = surface.time;
   const v = surface.vars;
   const T = v.temperature_2m, Td = v.dew_point_2m, ccLow = v.cloud_cover_low;
@@ -42,7 +47,7 @@ export function evaluate(surface, windBandMax, profile, opHeightM) {
     numericRow("windBandMax", `Wind Maximum (10 m–${fmtHeight(opHeightM)})`, "wind", L.windBandMax, profile.marginPct,
       time.map((_, i) => windBandMax?.[i] ?? null)),
     numericRow("cloudBase", "Wolkenbasis", "height", scaledMinLimit(L.cloudBase, opHeightM), profile.marginPct,
-      time.map((_, i) => cloudBaseAgl(T?.[i], Td?.[i], ccLow?.[i])),
+      time.map((_, i) => (cloudCeilingArr ? cloudCeilingArr[i] : cloudBaseAgl(T?.[i], Td?.[i], ccLow?.[i]))),
       { nullIsGreen: true }),
     numericRow("visibility", "Sicht", "vis", L.visibility, profile.marginPct,
       time.map((_, i) => (visArr ? visArr[i] ?? null : null))),

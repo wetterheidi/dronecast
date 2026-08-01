@@ -11,41 +11,25 @@ Schwellenwertlogik, …) genau funktionieren, steht in [METHODIK.md](METHODIK.md
 
 ## Wolkenbasis: Ceiling-Höhe aus dem Modell-RH-Profil
 
-**Status:** gebaut ([src/column.js](src/column.js) `lowestSaturatedHeight`,
-[src/clouds.js](src/clouds.js) `refineCloudBase`, verdrahtet in
-[src/app.js](src/app.js) `openMeteogram`/[src/meteogram.js](src/meteogram.js)
-`drawBaseVis`) · **Motivation:** die bis dahin schwächste Größe im
-Meteogramm war die *Höhe* der Wolkenbasis.
+**Status:** **gebaut & abgelöst durch die gemeinsame CF-Kurve** — die frühere
+Einzellösung (`lowestSaturatedHeight` mit fester 85-%-Schwelle) ist ersetzt
+durch `cloudCeiling(col, i)` in [src/clouds.js](src/clouds.js), das denselben
+Sundqvist-CF nutzt wie Cross-Section und Briefing (siehe Abschnitt
+„Wolkenfraktion" unten und [METHODIK.md](METHODIK.md) Abschnitt 4). Verdrahtet
+im Meteogramm (`refineCloudBase`, [src/app.js](src/app.js) `openMeteogram`)
+**und** in der Go/No-Go-Tabelle (`cloudBase`-Zeile über `cloudCeilingArr`).
 
-### Umsetzung (abweichend von der ursprünglichen Skizze)
-Statt eine neue `WindField`-`metExtras`-Methode zu bauen (Skizze unten):
-`relative_humidity_level{l}` wird bereits **unconditional** von
-`fetchColumn()` ([src/column.js](src/column.js)) für alle Level geladen —
-dieselbe Säule, die Cross-Section/Briefing ohnehin brauchen
-(`ensureColumn()` in app.js, gecacht in `state.data.col`). Kein neuer
-Request-Pfad nötig, nur eine neue Auswertefunktion auf vorhandenen Daten.
+**Politik-Änderung:** `cloud_cover_low` ist **nicht mehr Trigger**, sondern nur
+noch Konfidenz-Signal (`> 50 %` → durchgezogene statt gestrichelter Linie im
+Meteogramm) — die Höhe bestimmt das RH-Profil. Ceiling = unterste Höhe mit
+`CF ≥ 0.5` (BKN, Luftfahrt-Konvention), Low-Band-Kappe 3000 m. LCL bleibt reiner
+Fallback, wenn keine Säule geladen ist.
 
-- `lowestSaturatedHeight(col, i, rhThreshold=85, capM=2500)`: unterste Höhe
-  (m AGL, zwischen Levels linear interpoliert), an der RH die Schwelle
-  erreicht — `null`, wenn nichts Gesättigtes im Low-Band (≤ `capM`) liegt.
-- `refineCloudBase(tC, tdC, ccLowPct, rhCeilingM)`: `cloud_cover_low` bleibt
-  der Trigger; existiert ein RH-Kandidat, ersetzt dessen Höhe die LCL-
-  Schätzung. `confident: true` nur wenn **beide** Signale übereinstimmen
-  (Bedeckung > 50 % **und** RH-Kandidat vorhanden) → Linienstil im
-  Meteogramm: durchgezogen (sicher) vs. gestrichelt (nur ein Signal) statt
-  der bisherigen reinen Bedeckungsgrad-Kodierung.
-- **Kosten:** `openMeteogram()` ist jetzt async und löst beim ersten Öffnen
-  `ensureColumn()` aus, falls noch nicht geschehen (sonst nur beim
-  Cross-Section/Briefing-Öffnen) — ein zusätzlicher, größerer Request beim
-  ersten Meteogramm-Öffnen. Schlägt der Abruf fehl, fällt das Panel sauber
-  auf die reine LCL-Schätzung zurück (kein Hard-Fail).
-
-**Noch offen:** ob/wie diese Verfeinerung auch in die Go/No-Go-Tabelle
-(`cloudBase`-Zeile) einfließen soll — bewusst zurückgestellt, siehe
-„Go/No-Go-Tabelle: Ausbaustufe 2" unten. Brainstorming dazu, das dort
-einfließen soll: Bedeckungsgrad nicht vernachlässigen, Verschneidung mit der
-Sicht-Zeile (v. a. Low Stratus/Nebel), eine eigene Gelb-Definition für
-Wolken, möglicherweise auch Verschneidung mit `weather_code` (ww).
+**Noch offen:** das **numerische Kartenprodukt** (Ceiling je Gitterpunkt) —
+bewusst zuletzt, weil es eine Säule PRO Zelle braucht (viele Open-Meteo-
+Requests, 429-Risiko wie in Commit `721b956`) und auf der noch zurückgestellten
+NWP-Layer-Infra aufsetzt (siehe „Karte: NWP-Modellgitter als Layer" unten).
+Realistisch: grobes Gitter, On-Demand, Batching/Rate-Limit.
 
 ### Ursprüngliche Skizze (Referenz)
 Drei unabhängige Signale:
@@ -64,17 +48,21 @@ BKN 5–7 · OVC 8.
 
 ---
 
-## Wolkenfraktion (Cross-Section): höhenabhängige kritische RH
+## Wolkenfraktion: höhenabhängige kritische RH (Sundqvist)
 
-**Status:** zurückgestellt · **Betrifft:** Bewölkungs-Panel der Cross-Section.
+**Status:** **gebaut** — jetzt die gemeinsame Kurve für ALLE abgeleiteten
+Wolkengrößen. [src/clouds.js](src/clouds.js) `criticalRH(z)` +
+`cloudFraction(rh, z)` (`RH_crit` 70→90 % über 0–3000 m, benannte Konstanten),
+`oktaCategory`, `cloudLayers`, `cloudCeiling`. Konsumenten: Cross-Section-
+Heatmap ([src/column.js](src/column.js) `buildField`), Meteogramm-Ceiling,
+Go/No-Go-`cloudBase`-Zeile, Briefing-METAR. Details: [METHODIK.md](METHODIK.md)
+Abschnitt 4. Die frühere feste Kennlinie (`cloudFrac`, `< 65 / 65–85 / 85–100`)
+und die getrennte 85-%-Ceiling-Schwelle (`lowestSaturatedHeight`) sind ersetzt.
 
-### Aktueller Stand
-Bewölkung wird aus der Level-Feuchte über eine **feste, stückweise lineare
-Kennlinie** diagnostiziert ([src/column.js](src/column.js), `cloudFrac`):
-`< 65 %` frei · `65–85 %` → 0…0,5 (FEW/SCT) · `85–100 %` → 0,5…1,0 (BKN/OVC).
-Reine Visualisierungs-Heuristik, feste Schwelle über alle Höhen.
+**Noch offen:** `RH_crit`-Anker (70/90 %/3000 m) sind Startwerte — je Modell
+(ICON-D2 vs. ICON-EU) an METAR-Fällen kalibrieren. Optional σ=p/p₀ statt Höhe.
 
-### Idee: RH_crit mit Höhe/Druck variieren (Sundqvist-Typ)
+### Ursprüngliche Idee: RH_crit mit Höhe/Druck variieren (Sundqvist-Typ)
 Echte Wolkenschemata nutzen keine feste Schwelle, sondern eine **kritische
 relative Feuchte `RH_crit(p)`**, ab der Wolke gebildet wird — sie ist in der
 Grenzschicht niedriger (Wolken entstehen dort schon bei geringerer RH) und in

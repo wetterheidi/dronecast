@@ -6,6 +6,7 @@
  */
 
 import { API_BASE, MODELS } from "./config.js";
+import { cloudFraction } from "./clouds.js";
 
 const KMH_TO_MS = 1 / 3.6;
 
@@ -80,7 +81,7 @@ export function buildField(col, capM = 8000, nTarget = 44, grid = "log") {
       dir[k][i] = (Math.atan2(-uu, -vv) * 180 / Math.PI + 360) % 360;
       temp[k][i] = tt;
       rhc[k][i] = rr;
-      cloud[k][i] = cloudFrac(rr);
+      cloud[k][i] = cloudFraction(rr, targetH[k]);
     }
     // Nullgradgrenze: unterster Übergang T ≥ 0 → < 0 nach oben.
     freezing[i] = zeroCrossing(hi, t, i);
@@ -108,31 +109,6 @@ export function sampleColumnAtHeight(col, i, ht) {
   return { h: ht, u: val(col.u), v: val(col.v), t: val(col.t), rh: val(col.rh), p };
 }
 
-/**
- * Höhe (m AGL) des untersten Levels, an dem die relative Feuchte einen
- * Sättigungs-Schwellwert erreicht (Kandidat für eine reale Wolkenbasis aus
- * dem Modell-Feuchteprofil statt der reinen LCL-Schätzung) — begrenzt auf das
- * "Low-Band" bis capM, um nicht versehentlich eine Mittel-/Hochwolke als
- * tiefe Basis zu melden. null, wenn im Band kein gesättigtes Level existiert.
- */
-export function lowestSaturatedHeight(col, i, rhThreshold = 85, capM = 2500) {
-  const L = col.nLevels;
-  for (let k = 0; k < L; k++) {
-    const h = col.h[k][i];
-    if (!Number.isFinite(h) || h > capM) return null;
-    const rh = col.rh[k][i];
-    if (!Number.isFinite(rh)) continue;
-    if (rh >= rhThreshold) {
-      if (k === 0) return h;
-      const hPrev = col.h[k - 1][i], rhPrev = col.rh[k - 1][i];
-      if (!Number.isFinite(hPrev) || !Number.isFinite(rhPrev) || rhPrev >= rhThreshold) return h;
-      const f = (rhThreshold - rhPrev) / (rh - rhPrev);
-      return hPrev + f * (h - hPrev);
-    }
-  }
-  return null;
-}
-
 // --- Helfer ----------------------------------------------------------------
 
 function bracket(hi, ht) {
@@ -157,14 +133,6 @@ function zeroCrossing(hi, tByLevel, i) {
     }
   }
   return NaN; // durchweg über oder unter 0 im Fenster
-}
-
-// Wolkenfraktion aus relativer Feuchte (Schwellen: <65 % frei, 65–85 % FEW/SCT
-// bis 0.5, 85–100 % BKN/OVC bis 1.0). Reine Visualisierungs-Heuristik.
-function cloudFrac(rh) {
-  if (!Number.isFinite(rh) || rh < 65) return 0;
-  if (rh < 85) return (rh - 65) / 20 * 0.5;
-  return Math.min(1, 0.5 + (rh - 85) / 15 * 0.5);
 }
 
 function logspace(a, b, n) {

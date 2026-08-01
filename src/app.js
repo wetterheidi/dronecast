@@ -3,7 +3,8 @@ import { WindField } from "./windfield.js";
 import { fetchSurface, nearestIndex } from "./weather.js";
 import { initTimeControls, setRange, getMasterMs, subscribe as subscribeTime } from "./timeController.js";
 import { renderMeteogram } from "./meteogram.js";
-import { fetchColumn, buildField, lowestSaturatedHeight } from "./column.js";
+import { fetchColumn, buildField } from "./column.js";
+import { cloudCeiling } from "./clouds.js";
 import { renderCrossSection } from "./crosssection.js";
 import { buildBriefingHtml, buildBriefingContent } from "./briefing.js";
 import { evaluate as evaluateGoNoGo } from "./gonogo.js";
@@ -381,7 +382,9 @@ async function openMeteogram() {
   try {
     const col = await ensureColumn();
     if (col.time.length === surface.time.length) {
-      rhCeiling = surface.time.map((_, i) => lowestSaturatedHeight(col, i));
+      const ccLow = surface.vars.cloud_cover_low;
+      rhCeiling = surface.time.map((_, i) =>
+        cloudCeiling(col, i, { ccLowPct: ccLow?.[i] })?.baseM ?? null);
     }
   } catch { /* Säule nicht verfügbar -> Meteogramm bleibt bei reiner LCL-Schätzung */ }
 
@@ -488,8 +491,21 @@ async function openGoNoGo() {
       return;
     }
   }
+  // Wolkenuntergrenze aus dem Modell-RH-Profil (dieselbe Säule wie Cross-
+  // Section/Briefing, gecacht). Scheitert der Abruf, bleibt cloudCeiling null →
+  // die Tabelle fällt auf die LCL-Schätzung zurück (kein Hard-Fail).
+  if (state.data.cloudCeiling === undefined) {
+    try {
+      const col = await ensureColumn();
+      const ccLow = state.data.surface.vars.cloud_cover_low;
+      state.data.cloudCeiling = col.time.length === state.data.surface.time.length
+        ? state.data.surface.time.map((_, i) => cloudCeiling(col, i, { ccLowPct: ccLow?.[i] })?.baseM ?? null)
+        : null;
+    } catch { state.data.cloudCeiling = null; }
+  }
   renderGoNoGoTable(el("gng-body"), evaluateGoNoGo(
     state.data.surface, state.data.windBandMax, getProfile(settings.droneProfile), settings.maxHeight,
+    state.data.cloudCeiling ?? null,
   ));
 }
 el("gng-close").addEventListener("click", () => { el("gonogo").hidden = true; });
@@ -787,6 +803,7 @@ function refreshViews() {
   if (!el("gonogo").hidden && state.data?.windBandMax) {
     renderGoNoGoTable(el("gng-body"), evaluateGoNoGo(
       state.data.surface, state.data.windBandMax, getProfile(settings.droneProfile), settings.maxHeight,
+      state.data.cloudCeiling ?? null,
     ));
   }
   if (!el("briefing").hidden && state.data?.col) {

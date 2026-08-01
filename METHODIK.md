@@ -77,59 +77,72 @@ verwendet, aber Teil derselben Datenkette (`needs.t`/`needs.p` in
 
 ---
 
-## 4. Wolkenbasis / Ceiling
+## 4. Wolkenbasis / Ceiling / Wolkenschichten
 
-Mehrstufiger Ansatz, drei Signale kombiniert statt eines:
+**Eine gemeinsame Kurve für alles.** [src/clouds.js](src/clouds.js) ist die
+Single Source of Truth: aus dem Modell-RH-Profil (native Level von Michael)
+wird EINE höhenabhängige Wolkenfraktion abgeleitet, aus der sich Cross-Section,
+Meteogramm-Ceiling, Go/No-Go-Tabelle und Briefing-METAR speisen — statt der
+früheren drei getrennten, festen RH-Schwellen.
 
-### 4.1 LCL nach Espy (Basisschätzung)
-[src/clouds.js](src/clouds.js), `cloudBaseAgl()`:
-`Basis ≈ 125 · (T₂ₘ − Td₂ₘ)` m AGL — nur wenn `cloud_cover_low ≥ 25 %`
-(sonst `null`, keine relevante tiefe Bewölkung). Espy ist eine
-**Bodenpaket-Näherung**: gut für konvektive Quellwolken (Cumulus), die aus
-einem aufsteigenden Bodenpaket entstehen; **ungenau für Schichtwolken**
-(Stratus) oder Advektionsnebel, die nicht aus lokaler Konvektion stammen.
+### 4.1 Wolkenfraktion mit höhenabhängiger kritischer Feuchte (Sundqvist)
+`cloudFraction(rh, z)` + `criticalRH(z)`: Wolke bildet sich nicht erst bei
+100 % RH, sondern ab einer **kritischen Feuchte** `RH_crit(z)`, die mit der
+Höhe steigt — in der Grenzschicht niedriger (Subskalen-Variabilität), in der
+freien Troposphäre höher:
 
-### 4.2 RH-Profil-Kandidat (Höhen-Verfeinerung)
-[src/column.js](src/column.js), `lowestSaturatedHeight(col, i, rhThreshold=85,
-capM=2500)`: unterste Höhe (zwischen zwei Modell-Leveln linear
-interpoliert), an der die relative Feuchte die Schwelle **85 %** erreicht —
-begrenzt auf das „Low-Band" bis 2500 m AGL, damit nicht versehentlich eine
-Mittel-/Hochwolke als tiefe Basis gemeldet wird. `null`, wenn im Band nichts
-Gesättigtes liegt.
+```
+RH_crit(z) = 70 % + (90 % − 70 %) · min(1, z / 3000 m)
+CF(rh, z)  = clamp( 1 − √( max(0, (100 − rh) / (100 − RH_crit(z))) ), 0, 1 )
+```
 
-**Die 85-%-Schwelle ist ein ungeprüfter Platzhalter**, nicht modellspezifisch
-kalibriert (ICON-D2 vs. ICON-EU können unterschiedliche RH-Charakteristik
-haben). METAR-Referenz für die grobe Einordnung: SKC 0/8 · FEW 1–2/8 ·
-SCT 3–4/8 · BKN 5–7/8 · OVC 8/8.
+**Startkalibrierung** (`RH_CRIT_SURF=70`, `RH_CRIT_TOP=90`, `RH_CRIT_Z_REF=3000`,
+benannte Konstanten in clouds.js) — noch nicht modellspezifisch geprüft
+(ICON-D2 vs. ICON-EU können unterschiedliche RH-Charakteristik haben).
 
-### 4.3 Kombination
-[src/clouds.js](src/clouds.js), `refineCloudBase()`:
-- `cloud_cover_low` bleibt der **Trigger** — das Wolkenschema des Modells
-  fängt Subskalen-Effekte ab, die eine reine RH-Schwelle verpassen würde.
-- Existiert ein RH-Kandidat (4.2), **ersetzt dessen Höhe die LCL-Schätzung**
-  (4.1); sonst bleibt die LCL-Schätzung als Fallback.
-- `confident: true` **nur wenn beide Signale übereinstimmen**
-  (`cloud_cover_low > 50 %` **und** ein RH-Kandidat existiert) — im
-  Meteogramm: durchgezogene Linie bei hoher Konfidenz, gestrichelt bei nur
-  einem Signal.
+### 4.2 Bedeckungskategorien (Okta)
+`oktaCategory(cf)` bildet CF auf METAR-nahe Stufen ab. **BKN beginnt bei
+`CF = 0.5`** — dieselbe Schwelle, die die Ceiling-Definition nutzt:
+`CF_FEW=0.10 · CF_SCT=0.25 · CF_BKN=0.50 · CF_OVC=0.90`. METAR-Referenz:
+FEW 1–2/8 · SCT 3–4/8 · BKN 5–7/8 · OVC 8/8.
 
-Verwendet in `openMeteogram()` ([src/app.js](src/app.js)): lädt dafür beim
-ersten Öffnen die volle Modell-Säule nach (`ensureColumn()`, dieselbe Quelle
-wie Cross-Section/Briefing) — schlägt das fehl, fällt das Panel sauber auf
-die reine LCL-Schätzung (4.1) zurück.
+### 4.3 Ceiling / Wolkenuntergrenze
+`cloudCeiling(col, i, {coverThresh=0.5, capM=3000, ccLowPct})`: unterste Höhe
+(auf CF zwischen zwei Leveln interpoliert), an der die Wolkenfraktion die
+**BKN-Schwelle** (`CF ≥ 0.5`, Luftfahrt-Ceiling-Konvention) erreicht —
+begrenzt auf das Low-Band (`capM`), damit nicht eine Mittel-/Hochwolke als
+tiefe Basis gemeldet wird. `null`, wenn im Band keine BKN-Schicht liegt.
 
-**Aktuell nicht** in die Go/No-Go-Tabelle eingeflossen — die `cloudBase`-
-Zeile dort nutzt weiterhin nur die reine LCL-Schätzung (4.1). Siehe
-IDEEN.md, „Go/No-Go-Tabelle: Ausbaustufe 2" für die offene Diskussion, wie
-Bedeckungsgrad, Sicht und `weather_code` dort zusätzlich einfließen sollen.
+`cloud_cover_low` **gatet die Existenz NICHT** (anders als früher), sondern
+liefert nur die **Konfidenz** (`> 50 %` → `confident: true`) — es fängt
+Subskalen-Effekte ab, ohne die Höhe zu diktieren.
 
-### 4.4 Wolkenfraktion (nur Cross-Section-Heatmap — andere Verwendung!)
-[src/column.js](src/column.js), `cloudFrac(rh)`: `< 65 %` → 0 (frei),
-`65–85 %` → linear 0…0,5 (FEW/SCT), `85–100 %` → linear 0,5…1,0 (BKN/OVC).
-**Reine Visualisierungsheuristik** für die Bewölkungs-Heatmap der
-Cross-Section — anders als 4.1–4.3 keine „Basishöhe", sondern ein
-kontinuierlicher Bedeckungsgrad je Höhenband. Nicht Teil der
-Meteogramm- oder Go/No-Go-Bewertung.
+**Meteogramm** (`refineCloudBase()`, verdrahtet in `openMeteogram()`,
+[src/app.js](src/app.js)): liegt ein Modell-Ceiling vor, bestimmt DAS die Höhe
+(durchgezogen bei hoher Konfidenz, gestrichelt sonst); fehlt es, Fallback auf
+die LCL-Schätzung (4.5). Die Säule wird beim ersten Öffnen nachgeladen
+(`ensureColumn()`) — schlägt das fehl, bleibt es sauber bei der LCL-Schätzung.
+
+**Go/No-Go-Tabelle** (`evaluate(..., cloudCeilingArr)`,
+[src/gonogo.js](src/gonogo.js)): die `cloudBase`-Zeile nutzt das Ceiling-Array
+(in app.js aus der Säule vorberechnet, parallel zu `windBandMax`). Ist die
+Säule nicht verfügbar, fällt die Zeile auf die LCL-Schätzung (4.5) zurück.
+
+### 4.4 Wolkenschichten (Briefing, METAR-nah)
+`cloudLayers(col, i, {capM=12000, maxLayers=4})`: liefert **alle** Schichten
+(tief, mittelhoch, hoch) als `{baseM, cover, cf}` von unten nach oben — eine
+Schicht ist ein zusammenhängender Levelblock mit `CF ≥ CF_FEW`, Basis =
+interpolierte Höhe des Schwellenübergangs, Bedeckung = CF-Maximum im Block.
+Bis 12 km (damit auch Cirrus erscheint), **ohne** den früheren „nur zunehmende
+Bedeckung"-Filter (eine dünnere hohe Schicht über einer tieferen wird nicht
+mehr verschluckt). Genutzt in der METAR-Zeile des Briefings
+([src/briefing.js](src/briefing.js) `metarCloudsForHour`).
+
+### 4.5 LCL nach Espy (Fallback)
+`cloudBaseAgl()`: `Basis ≈ 125 · (T₂ₘ − Td₂ₘ)` m AGL — nur wenn
+`cloud_cover_low ≥ 25 %`. Reine **Bodenpaket-Näherung** (gut für konvektive
+Cumulus, ungenau für Schichtwolken/Advektionsnebel), dient nur noch als
+Rückfall, wenn keine Modell-Säule vorliegt.
 
 ---
 
@@ -243,9 +256,10 @@ definiert — pro Parameter im Profil überschreibbar, sonst gilt
 Ein `null`/`NaN`-Rohwert wird als eigener Status **`"na"`** geführt, **nie**
 stillschweigend als grün gewertet (Sicherheitsprinzip: fehlende Daten dürfen
 keine Go-Entscheidung vortäuschen). Einzige Ausnahme:
-`cloudBase` bei fehlendem Trigger (`cloud_cover_low < 25 %`, also `null` von
-`cloudBaseAgl()`) — das ist **kein fehlender Messwert**, sondern die
-Aussage „keine relevante tiefe Bewölkung", also tatsächlich grün.
+`cloudBase` ohne tiefe BKN-Schicht (`null` von `cloudCeiling()`, bzw. bei
+fehlender Säule `cloud_cover_low < 25 %` von `cloudBaseAgl()`) — das ist
+**kein fehlender Messwert**, sondern die Aussage „keine relevante tiefe
+Bewölkung", also tatsächlich grün.
 
 ### 6.3 Gesamtbewertung (`conclusionAt`)
 Priorität über alle Zeilen einer Stunde: **rot > „keine Daten" > gelb >
@@ -285,10 +299,9 @@ vereinfachende Annahme steckt:
 
 | Größe | Annahme/Schwäche |
 |---|---|
-| LCL (4.1) | Bodenpaket-Näherung, ungenau bei Schichtwolken |
-| RH-Ceiling-Schwelle (4.2) | 85 % ungeprüft, nicht modellkalibriert |
+| RH_crit-Kalibrierung (4.1) | 70→90 % über 0–3000 m, Startwert, nicht modellkalibriert |
+| LCL-Fallback (4.5) | Bodenpaket-Näherung, ungenau bei Schichtwolken |
 | Wind-Bandmaximum (1) | Stützstellen-Sampling, kein exaktes Profilmaximum |
 | Böen (1) | nur am Boden, keine Hochrechnung auf Flughöhe |
 | Go/No-Go-Schwellenwerte | Platzhalterprofil, keine geprüften Herstellerwerte |
-| Go/No-Go Wolkenbasis-Zeile | nutzt noch reine LCL, nicht die RH-Verfeinerung |
 | Vereisung, Turbulenz | in der Go/No-Go-Tabelle noch nicht abgebildet |
