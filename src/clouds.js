@@ -2,47 +2,124 @@
  * Gemeinsames Wolkenmodul — Single Source of Truth für alle abgeleiteten
  * Wolkengrößen (Cross-Section-Heatmap, Meteogramm-Ceiling, Go/No-Go-Tabelle,
  * Briefing-METAR). Kern ist EINE höhenabhängige Wolkenfraktions-Kurve
- * (Sundqvist-Typ) statt bisher dreier driftender fester RH-Schwellen.
+ * (Sundqvist-Typ) mit Eis-Korrektur und Vertikalwind-Dynamik.
  *
- * Physik: Wolke bildet sich nicht erst bei 100 % RH, sondern ab einer
- * KRITISCHEN Feuchte RH_crit(z) — in der Grenzschicht niedriger (Subskalen-
- * Variabilität), in der freien Troposphäre höher. Die Wolkenfraktion steigt
- * von RH_crit bis Sättigung von 0 auf 1.
+ * Ablauf je Level:
+ *  1. Feuchte-Referenz aus der spezifischen Feuchte q_v (prognostisch, ohne
+ *     Referenz-Annahme): Dampfdruck e aus (q, p), daraus effektive RH über die
+ *     Mischphase (Wasser→Eis, unter −35 °C reines Eis). Macht Cirren sichtbar.
+ *     Fehlt q, Rückfall auf die Modell-RH (die unter 0 °C bereits eis-
+ *     referenziert ist — per q-Validierung bestätigt).
+ *  2. RH_crit: höhenabhängig (Grenzschicht niedriger, frei höher), im Eisast
+ *     eis-referenziert abgesenkt, plus Vertikalwind-Modifikation (Aufwind senkt,
+ *     Absinken hebt die kritische Feuchte).
+ *  3. CF = Sundqvist(RH_eff, RH_crit).
+ *  4. Vertikales Clustering → Schichten, Ceiling und unterste Basis.
  */
 
-// --- Kalibrierung (Startwerte, später ggf. je Modell) -----------------------
-const RH_SAT = 100;          // % — Sättigung → CF = 1
-const RH_CRIT_SURF = 70;     // % — kritische RH am Boden
-const RH_CRIT_TOP = 90;      // % — kritische RH in der Höhe
-const RH_CRIT_Z_REF = 3000;  // m AGL — ab hier gilt RH_CRIT_TOP
+// --- Kalibrierung (Startwerte, später ggf. je Modell / an METAR) ------------
+const RH_SAT = 100;          // % — Sättigung (in der jeweiligen Referenz) → CF = 1
+const RH_CRIT_SURF = 72;     // % — kritische RH in der Grenzschicht (wasser-ref.)
+const RH_CRIT_MID = 85;      // % — kritische RH in der freien Troposphäre (wasser-ref.)
+const RH_CRIT_Z_REF = 1500;  // m AGL — Höhe, ab der RH_CRIT_MID gilt
+const RH_CRIT_ICE = 72;      // % — kritische RH im Eisast (eis-referenziert)
+const ICE_T_FULL = -35;      // °C — darunter reine Eisphase (RH_i)
 
-// Bedeckungsgrad-Schwellen (CF → Okta-Kategorie). BKN beginnt bei CF = 0.5 —
-// dieselbe Schwelle, die die Ceiling-/Wolkenuntergrenzen-Definition nutzt
-// (Luftfahrt-Konvention: „Ceiling" = unterste BKN/OVC-Schicht).
+// Vertikalwind-Dynamik (Punkt 3). PLATZHALTER — die Schwellen kalibriert der
+// Nutzer separat: W_SCALE = w-Skala des tanh (m/s), CRIT_W_MAX = maximale
+// crit-Absenkung/-Anhebung (%-Punkte).
+const W_SCALE = 0.1;         // m/s
+const CRIT_W_MAX = 8;        // %-Punkte
+
+// Bedeckungsgrad-Schwellen (CF → Okta). BKN beginnt bei CF = 0.5 — dieselbe
+// Schwelle wie die (ICAO-)Ceiling-Definition. FEW = unterste markante Schicht.
 export const CF_FEW = 0.10, CF_SCT = 0.25, CF_BKN = 0.50, CF_OVC = 0.90;
 
-/** Höhenabhängige kritische relative Feuchte (%), linear von RH_CRIT_SURF am
- *  Boden auf RH_CRIT_TOP bei RH_CRIT_Z_REF, darüber konstant. */
-export function criticalRH(zAgl) {
+const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+
+// --- Feuchte-Referenz (aus q_v, Eis-Korrektur) ------------------------------
+
+const EPS = 0.622; // R_d/R_v — Molmassenverhältnis Wasserdampf/trockene Luft
+
+/** Sättigungsdampfdruck über Wasser (hPa), Magnus/WMO. */
+function esatWater(tC) { return 6.112 * Math.exp((17.62 * tC) / (243.12 + tC)); }
+/** Sättigungsdampfdruck über Eis (hPa), WMO. */
+function esatIce(tC) { return 6.112 * Math.exp((22.46 * tC) / (272.62 + tC)); }
+
+/** Wasserdampf-Partialdruck (hPa) aus spezifischer Feuchte q (kg/kg) und
+ *  Luftdruck p (hPa): `e = q·p / (ε + q·(1−ε))`. */
+export function vaporPressure(qKgKg, pHpa) {
+  if (!Number.isFinite(qKgKg) || !Number.isFinite(pHpa) || qKgKg <= 0) return NaN;
+  return (qKgKg * pHpa) / (EPS + qKgKg * (1 - EPS));
+}
+
+/** Eisanteil der Mischphase: 0 bei ≥ 0 °C (nur Wasser), 1 bei ≤ −35 °C (nur
+ *  Eis), linear dazwischen. */
+export function iceFraction(tC) {
+  if (!Number.isFinite(tC) || tC >= 0) return 0;
+  return clamp((0 - tC) / (0 - ICE_T_FULL), 0, 1);
+}
+
+/**
+ * Effektive relative Feuchte (%) als Wolken-Referenz — vorzugsweise aus der
+ * spezifischen Feuchte q_v (prognostisch, ohne Referenz-Annahme): Dampfdruck e
+ * aus (q, p), bezogen auf einen über die Mischphase geblendeten Sättigungsdampf-
+ * druck (Wasser→Eis, stetig, bei α = 1 reines Eis). Fehlt q, Rückfall auf die
+ * modellseitige RH `rhModel` (die unter 0 °C bereits eis-referenziert ist — per
+ * q-Validierung an Michaels Instanz bestätigt), OHNE zusätzlichen Boost, damit
+ * nicht doppelt korrigiert wird.
+ * @param hum { q?: kg/kg, p?: hPa, rh?: % } — Feuchte-Eingänge des Levels
+ */
+export function effectiveRH(hum, tC) {
+  const e = vaporPressure(hum?.q, hum?.p);
+  if (!Number.isFinite(e) || !Number.isFinite(tC)) {
+    return Number.isFinite(hum?.rh) ? hum.rh : NaN; // Fallback: Modell-RH roh
+  }
+  const a = iceFraction(tC);
+  const eMix = (1 - a) * esatWater(tC) + a * esatIce(tC);
+  return eMix > 0 ? 100 * e / eMix : NaN;
+}
+
+// --- kritische Feuchte + Wolkenfraktion -------------------------------------
+
+/** Wasser-referenzierte kritische RH (%) nach Höhe: RH_CRIT_SURF am Boden,
+ *  linear auf RH_CRIT_MID bei RH_CRIT_Z_REF, darüber konstant. */
+function critWarm(zAgl) {
   const z = Number.isFinite(zAgl) ? Math.max(0, zAgl) : 0;
-  const f = Math.min(1, z / RH_CRIT_Z_REF);
-  return RH_CRIT_SURF + (RH_CRIT_TOP - RH_CRIT_SURF) * f;
+  return RH_CRIT_SURF + (RH_CRIT_MID - RH_CRIT_SURF) * Math.min(1, z / RH_CRIT_Z_REF);
 }
 
-/** Wolkenfraktion 0…1 aus relativer Feuchte (%) auf Höhe z (m AGL), Sundqvist:
- *  `CF = 1 − √(max(0, (RH_sat − RH)/(RH_sat − RH_crit(z))))`. 0 unterhalb der
- *  kritischen Feuchte, 1 bei/über Sättigung. */
-export function cloudFraction(rh, zAgl) {
-  if (!Number.isFinite(rh)) return 0;
-  const rhc = criticalRH(zAgl);
-  if (rh <= rhc) return 0;
-  const cf = 1 - Math.sqrt(Math.max(0, (RH_SAT - rh) / (RH_SAT - rhc)));
-  return Math.max(0, Math.min(1, cf));
+/**
+ * Kritische relative Feuchte (%) für die Wolkenbildung auf Höhe z, in DERSELBEN
+ * Referenz wie `effectiveRH` (im Eisast eis-referenziert). Die Eisabsenkung
+ * folgt der Temperatur (α = `iceFraction`), nicht einer festen Höhe — greift
+ * daher im Winter korrekt schon tiefer. Vertikalwind `w` (m/s, positiv aufwärts)
+ * senkt (Aufwind) bzw. hebt (Absinken) die Schwelle.
+ */
+export function criticalRH(zAgl, tC, w) {
+  const a = iceFraction(tC);
+  let crit = (1 - a) * critWarm(zAgl) + a * RH_CRIT_ICE;
+  if (Number.isFinite(w)) crit -= CRIT_W_MAX * Math.tanh(w / W_SCALE);
+  return crit;
 }
 
-/** Okta-nahe Bedeckungskategorie aus einer Wolkenfraktion, oder null (< FEW,
- *  praktisch wolkenfrei). METAR-Referenz: FEW 1–2/8 · SCT 3–4/8 · BKN 5–7/8 ·
- *  OVC 8/8. */
+/**
+ * Wolkenfraktion 0…1 (Sundqvist). `hum` bündelt die Feuchte-Eingänge des Levels
+ * ({ q, p, t, rh }); q_v ist die bevorzugte Basis (siehe `effectiveRH`), t die
+ * Temperatur (°C). Bündelt Feuchte-Referenz/Eis-Korrektur (1), phasen-/
+ * windabhängiges RH_crit (2) und Sundqvist (3). z in m AGL, w optional (m/s).
+ */
+export function cloudFraction(hum, zAgl, w) {
+  const tC = hum?.t;
+  const rhEff = effectiveRH(hum, tC);
+  if (!Number.isFinite(rhEff)) return 0;
+  const rhc = criticalRH(zAgl, tC, w);
+  if (rhEff <= rhc || rhc >= RH_SAT) return 0;
+  const cf = 1 - Math.sqrt(Math.max(0, (RH_SAT - rhEff) / (RH_SAT - rhc)));
+  return clamp(cf, 0, 1);
+}
+
+/** Okta-nahe Bedeckungskategorie aus einer Wolkenfraktion, oder null (< FEW). */
 export function oktaCategory(cf) {
   if (!Number.isFinite(cf) || cf < CF_FEW) return null;
   if (cf < CF_SCT) return "FEW";
@@ -51,16 +128,69 @@ export function oktaCategory(cf) {
   return "OVC";
 }
 
+// CF eines Levels aus der Säule (bündelt den Zugriff auf q/p/T und w).
+function cfAt(col, k, i) {
+  const hum = { q: col.q?.[k]?.[i], p: col.p?.[k]?.[i], t: col.t?.[k]?.[i], rh: col.rh?.[k]?.[i] };
+  return cloudFraction(hum, col.h[k][i], col.w?.[k]?.[i]);
+}
+// Höhe, in der CF (linear zwischen zwei Leveln) den Schwellwert kreuzt.
+function crossHeight(h0, cf0, h1, cf1, thr) {
+  if (cf1 === cf0) return h0;
+  return h0 + (thr - cf0) / (cf1 - cf0) * (h1 - h0);
+}
+
+// --- Ceiling / Basis / Schichten --------------------------------------------
+
 /**
- * Wolkenschichten zur Stunde `i` aus dem Modell-RH-Profil (native Level), als
- * METAR-nahe Liste `{ baseM, cover, cf }` von unten nach oben. Eine Schicht ist
- * ein zusammenhängender Levelblock mit `CF ≥ CF_FEW`; ihre Basis ist die
- * (zwischen Leveln interpolierte) Höhe, an der CF diese Schwelle von unten
- * erreicht, ihre Bedeckung das CF-Maximum im Block. Bis `capM` (Standard 12 km,
- * damit auch hohe Bewölkung/Cirrus erscheint), höchstens `maxLayers` (die
- * untersten) — anders als früher OHNE „nur zunehmende Bedeckung"-Filter, damit
- * eine weniger bedeckte mittelhohe/hohe Schicht über einer tieferen nicht
- * verschluckt wird.
+ * Unterste Höhe (m AGL), an der die Wolkenfraktion `thr` von unten erreicht —
+ * über das GESAMTE Profil interpoliert, oder null. Basis für beide Ceiling-
+ * Ausgaben (kein harter Höhen-Cutoff, ICAO-konform).
+ */
+function lowestCrossing(col, i, thr) {
+  let prevH = null, prevCf = null;
+  for (let k = 0; k < col.nLevels; k++) {
+    const h = col.h[k][i];
+    if (!Number.isFinite(h)) continue;
+    const cf = cfAt(col, k, i);
+    if (cf >= thr) {
+      return (prevCf != null && prevCf < thr && prevH != null)
+        ? crossHeight(prevH, prevCf, h, cf, thr) : h;
+    }
+    prevH = h; prevCf = cf;
+  }
+  return null;
+}
+
+/**
+ * Operationelles Ceiling (ICAO) zur Stunde `i`: unterste Höhe im gesamten
+ * Profil mit `CF ≥ CF_BKN` (BKN/OVC), ohne Höhen-Cutoff. `cloud_cover_low`
+ * (`ccLowPct`) gatet NICHT, sondern liefert nur die Konfidenz. null, wenn
+ * nirgends BKN erreicht wird.
+ * @returns {{ baseM: number, confident: boolean } | null}
+ */
+export function cloudCeiling(col, i, { coverThresh = CF_BKN, ccLowPct = null } = {}) {
+  const baseM = lowestCrossing(col, i, coverThresh);
+  if (baseM == null) return null;
+  return { baseM, confident: Number.isFinite(ccLowPct) && ccLowPct > 50 };
+}
+
+/**
+ * Untergrenze der untersten markanten Wolkenschicht (m AGL): unterstes
+ * `CF ≥ CF_FEW` im Profil (auch FEW/SCT) — für Situationsbild/Briefing. null,
+ * wenn das Profil praktisch wolkenfrei ist.
+ */
+export function lowestCloudBase(col, i) {
+  return lowestCrossing(col, i, CF_FEW);
+}
+
+/**
+ * Wolkenschichten zur Stunde `i` als METAR-nahe Liste `{ baseM, cover, cf }`
+ * von unten nach oben. Eine Schicht ist ein zusammenhängender Levelblock mit
+ * `CF ≥ CF_FEW`; Basis = interpolierte Höhe des Schwellenübertritts, Bedeckung =
+ * CF-Maximum im Block. Bis `capM` (12 km, damit auch Cirrus erscheint),
+ * höchstens `maxLayers` (die untersten) — OHNE „nur zunehmende Bedeckung"-
+ * Filter, damit eine dünnere hohe Schicht über einer tieferen nicht verschluckt
+ * wird.
  */
 export function cloudLayers(col, i, { capM = 12000, maxLayers = 4 } = {}) {
   const layers = [];
@@ -69,7 +199,7 @@ export function cloudLayers(col, i, { capM = 12000, maxLayers = 4 } = {}) {
     const h = col.h[k][i];
     if (!Number.isFinite(h)) continue;
     if (h > capM) break;
-    const cf = cloudFraction(col.rh[k][i], h);
+    const cf = cfAt(col, k, i);
     if (cf >= CF_FEW) {
       if (!inLayer) {
         baseM = (prevCf != null && prevCf < CF_FEW && prevH != null)
@@ -87,44 +217,11 @@ export function cloudLayers(col, i, { capM = 12000, maxLayers = 4 } = {}) {
   return layers.slice(0, maxLayers);
 }
 
-/**
- * Wolkenuntergrenze/Ceiling (m AGL) zur Stunde `i`: unterste Höhe, an der die
- * Wolkenfraktion die BKN-Schwelle (Standard `coverThresh = CF_BKN = 0.5`)
- * erreicht — begrenzt auf das Low-Band (`capM`), um nicht eine Mittel-/
- * Hochwolke als tiefe Basis zu melden. Abgeleitet aus derselben CF-Kurve wie
- * Cross-Section und Briefing. `cloud_cover_low` (`ccLowPct`) gatet die Existenz
- * NICHT, sondern erhöht nur die Konfidenz (`confident`). Rückgabe `null`, wenn
- * im Band keine BKN-Schicht liegt.
- * @returns {{ baseM: number, cover: string, confident: boolean } | null}
- */
-export function cloudCeiling(col, i, { coverThresh = CF_BKN, capM = 3000, ccLowPct = null } = {}) {
-  let prevH = null, prevCf = null;
-  for (let k = 0; k < col.nLevels; k++) {
-    const h = col.h[k][i];
-    if (!Number.isFinite(h)) continue;
-    if (h > capM) break;
-    const cf = cloudFraction(col.rh[k][i], h);
-    if (cf >= coverThresh) {
-      const baseM = (prevCf != null && prevCf < coverThresh && prevH != null)
-        ? crossHeight(prevH, prevCf, h, cf, coverThresh) : h;
-      return { baseM, cover: oktaCategory(cf), confident: Number.isFinite(ccLowPct) && ccLowPct > 50 };
-    }
-    prevH = h; prevCf = cf;
-  }
-  return null;
-}
-
-// Höhe, in der CF (linear zwischen zwei Leveln) den Schwellwert kreuzt.
-function crossHeight(h0, cf0, h1, cf1, thr) {
-  if (cf1 === cf0) return h0;
-  return h0 + (thr - cf0) / (cf1 - cf0) * (h1 - h0);
-}
-
 // --- LCL-Fallback (Bodenpaket) ---------------------------------------------
 
 /** Wolkenbasis nach Espy (m AGL) aus 2-m-Feldern, oder null bei fehlender
- *  tiefer Bewölkung (`cloud_cover_low < 25 %`) bzw. fehlenden Daten. Reine
- *  Bodenpaket-Näherung — Fallback, wenn keine Modell-Säule vorliegt. */
+ *  tiefer Bewölkung (`cloud_cover_low < 25 %`). Reine Bodenpaket-Näherung —
+ *  Fallback, wenn keine Modell-Säule vorliegt. */
 export function cloudBaseAgl(tC, tdC, ccLowPct) {
   const cc = ccLowPct ?? 0;
   if (cc < 25 || !Number.isFinite(tC) || !Number.isFinite(tdC)) return null;
@@ -133,11 +230,10 @@ export function cloudBaseAgl(tC, tdC, ccLowPct) {
 
 /**
  * Kombiniert Modell-Ceiling und LCL-Fallback für die Meteogramm-Wolkenbasis.
- * Liegt ein Modell-Ceiling (`rhCeilingM`, aus `cloudCeiling`) vor, bestimmt DER
- * die Höhe — `cloud_cover_low` gatet das NICHT mehr, sondern liefert nur die
- * Konfidenz (`confident`, > 50 % → durchgezogene statt gestrichelter Linie).
- * Fehlt ein Modell-Ceiling, fällt es auf die reine LCL-Schätzung zurück (die
- * ihrerseits tiefe Bewölkung als Trigger braucht). null, wenn beides fehlt.
+ * Liegt ein Modell-Ceiling (`rhCeilingM`, aus `cloudCeiling`) vor, bestimmt DAS
+ * die Höhe — `cloud_cover_low` gatet das NICHT, sondern liefert nur die
+ * Konfidenz (> 50 % → durchgezogene statt gestrichelter Linie). Fehlt es, greift
+ * die LCL-Schätzung. null, wenn beides fehlt.
  */
 export function refineCloudBase(tC, tdC, ccLowPct, rhCeilingM) {
   if (Number.isFinite(rhCeilingM)) {

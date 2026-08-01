@@ -85,20 +85,36 @@ wird EINE höhenabhängige Wolkenfraktion abgeleitet, aus der sich Cross-Section
 Meteogramm-Ceiling, Go/No-Go-Tabelle und Briefing-METAR speisen — statt der
 früheren drei getrennten, festen RH-Schwellen.
 
-### 4.1 Wolkenfraktion mit höhenabhängiger kritischer Feuchte (Sundqvist)
-`cloudFraction(rh, z)` + `criticalRH(z)`: Wolke bildet sich nicht erst bei
-100 % RH, sondern ab einer **kritischen Feuchte** `RH_crit(z)`, die mit der
-Höhe steigt — in der Grenzschicht niedriger (Subskalen-Variabilität), in der
-freien Troposphäre höher:
+### 4.1 Wolkenfraktion: Eis-Korrektur + höhen-/windabhängige kritische Feuchte
+`cloudFraction(rhW, T, z, w)`. Vier Schritte je Level:
 
-```
-RH_crit(z) = 70 % + (90 % − 70 %) · min(1, z / 3000 m)
-CF(rh, z)  = clamp( 1 − √( max(0, (100 − rh) / (100 − RH_crit(z))) ), 0, 1 )
-```
+**(a) Feuchte-Referenz aus q_v (Eis-Korrektur, ohne Annahme).** Basis ist die
+**spezifische Feuchte** `q_v` (prognostisch, `specific_humidity_level{l}`, g/kg):
+`vaporPressure()` rechnet den Dampfdruck `e = q·p/(ε + q(1−ε))`, `effectiveRH()`
+bezieht ihn über die Mischphase auf einen geblendeten Sättigungsdampfdruck
+(Wasser→Eis, `iceFraction()` linearer Ramp 0…−35 °C, darunter reines Eis).
+Wirkung: bei −20 °C liefert schon geringe Feuchte Eissättigung — **macht Cirren
+sichtbar**. Fehlt `q`, Rückfall auf die modellseitige RH **roh** (kein Boost).
 
-**Startkalibrierung** (`RH_CRIT_SURF=70`, `RH_CRIT_TOP=90`, `RH_CRIT_Z_REF=3000`,
-benannte Konstanten in clouds.js) — noch nicht modellspezifisch geprüft
-(ICON-D2 vs. ICON-EU können unterschiedliche RH-Charakteristik haben).
+*Warum q_v statt Modell-RH:* Direktvergleich an Michaels Instanz zeigte, dass
+die Modell-`relative_humidity` unter 0 °C **bereits über Eis** referenziert ist
+(z. B. −22 °C: RH_model 61 % = RH_i, nicht RH_w 49 %). Die Feuchte aus `q_v`
+selbst zu rechnen vermeidet die dadurch drohende **Doppelkorrektur** und braucht
+keine Referenz-Annahme mehr. Sättigungsdrücke via Magnus/WMO (Wasser & Eis).
+
+**(b) Kritische Feuchte `criticalRH(z, T, w)`.** Wolke bildet sich ab `RH_crit`,
+nicht erst bei Sättigung — in der Grenzschicht niedriger, frei höher:
+`72 %` (Boden) → `85 %` (ab 1500 m). Im Eisast (α = `iceFraction`) auf `~72 %`
+**eis-referenziert** abgesenkt (folgt der Nullgradgrenze, nicht einer festen
+Höhe). **Vertikalwind** `w` (m/s, nativ `wind_w_level{l}`): Aufwind senkt,
+Absinken hebt `RH_crit` — `−CRIT_W_MAX · tanh(w / W_SCALE)`.
+
+**(c) Sundqvist:** `CF = clamp(1 − √(max(0, (100 − RH_eff)/(100 − RH_crit))), 0, 1)`.
+
+**Startkalibrierung** (benannte Konstanten in clouds.js): `RH_CRIT_SURF=72`,
+`RH_CRIT_MID=85`, `RH_CRIT_Z_REF=1500`, `RH_CRIT_ICE=72`, `ICE_T_FULL=−35`;
+w-Dynamik `W_SCALE=0.1 m/s`, `CRIT_W_MAX=8 %` (**Platzhalter**, w-Schwellen noch
+zu kalibrieren). Noch nicht modellspezifisch geprüft (ICON-D2 vs. ICON-EU).
 
 ### 4.2 Bedeckungskategorien (Okta)
 `oktaCategory(cf)` bildet CF auf METAR-nahe Stufen ab. **BKN beginnt bei
@@ -106,16 +122,19 @@ benannte Konstanten in clouds.js) — noch nicht modellspezifisch geprüft
 `CF_FEW=0.10 · CF_SCT=0.25 · CF_BKN=0.50 · CF_OVC=0.90`. METAR-Referenz:
 FEW 1–2/8 · SCT 3–4/8 · BKN 5–7/8 · OVC 8/8.
 
-### 4.3 Ceiling / Wolkenuntergrenze
-`cloudCeiling(col, i, {coverThresh=0.5, capM=3000, ccLowPct})`: unterste Höhe
-(auf CF zwischen zwei Leveln interpoliert), an der die Wolkenfraktion die
-**BKN-Schwelle** (`CF ≥ 0.5`, Luftfahrt-Ceiling-Konvention) erreicht —
-begrenzt auf das Low-Band (`capM`), damit nicht eine Mittel-/Hochwolke als
-tiefe Basis gemeldet wird. `null`, wenn im Band keine BKN-Schicht liegt.
+### 4.3 Ceiling / Wolkenuntergrenze (zwei Ausgaben, ICAO-konform)
+Zwei getrennte Größen statt eines harten Höhen-Cutoffs:
+- **`cloudCeiling(col, i, {ccLowPct})`** — operationelles Ceiling (ICAO):
+  unterste Höhe im **gesamten** Profil mit `CF ≥ 0.5` (BKN/OVC), **kein**
+  Höhen-Cutoff. Geht ins Meteogramm und in die Go/No-Go-Tabelle. `null`, wenn
+  nirgends BKN erreicht wird.
+- **`lowestCloudBase(col, i)`** — Untergrenze der untersten markanten Schicht
+  (`CF ≥ 0.10`, auch FEW/SCT), fürs Situationsbild.
 
-`cloud_cover_low` **gatet die Existenz NICHT** (anders als früher), sondern
-liefert nur die **Konfidenz** (`> 50 %` → `confident: true`) — es fängt
-Subskalen-Effekte ab, ohne die Höhe zu diktieren.
+Beide über die CF-Kurve zwischen zwei Leveln interpoliert. `cloud_cover_low`
+**gatet die Existenz NICHT** (anders als früher), sondern liefert nur die
+**Konfidenz** (`> 50 %` → `confident: true`) — fängt Subskalen-Effekte ab, ohne
+die Höhe zu diktieren.
 
 **Meteogramm** (`refineCloudBase()`, verdrahtet in `openMeteogram()`,
 [src/app.js](src/app.js)): liegt ein Modell-Ceiling vor, bestimmt DAS die Höhe
@@ -299,7 +318,9 @@ vereinfachende Annahme steckt:
 
 | Größe | Annahme/Schwäche |
 |---|---|
-| RH_crit-Kalibrierung (4.1) | 70→90 % über 0–3000 m, Startwert, nicht modellkalibriert |
+| RH_crit-Kalibrierung (4.1) | 72→85 % / Eis 72 % / w-Dynamik — Startwerte, nicht modellkalibriert |
+| Feuchte-Basis (4.1) | aus `q_v` (annahmefrei); Fallback auf Modell-RH nur wenn q fehlt |
+| w-Schwellen (4.1) | `W_SCALE`/`CRIT_W_MAX` Platzhalter, noch nicht kalibriert |
 | LCL-Fallback (4.5) | Bodenpaket-Näherung, ungenau bei Schichtwolken |
 | Wind-Bandmaximum (1) | Stützstellen-Sampling, kein exaktes Profilmaximum |
 | Böen (1) | nur am Boden, keine Hochrechnung auf Flughöhe |

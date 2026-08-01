@@ -19,7 +19,7 @@ export async function fetchColumn(lat, lon, modelKey, forecastDays, fetchImpl = 
   for (let l = 1; l <= model.nLevels; l++) {
     vars.push(`wind_u_component_level${l}`, `wind_v_component_level${l}`,
       `temperature_level${l}`, `height_agl_level${l}`, `relative_humidity_level${l}`,
-      `pressure_level${l}`);
+      `pressure_level${l}`, `wind_w_level${l}`, `specific_humidity_level${l}`);
   }
   const params = new URLSearchParams({
     latitude: round5(lat), longitude: round5(lon),
@@ -37,7 +37,10 @@ export async function fetchColumn(lat, lon, modelKey, forecastDays, fetchImpl = 
 
   const H = data.hourly, time = H.time, T = time.length;
   // Level von unten (l = nLevels, ~10 m) nach oben (l = 1) einsortieren.
-  const h = [], u = [], v = [], t = [], rh = [], p = [];
+  // wind_w (Vertikalgeschwindigkeit) kommt nativ in m/s (Faktor 1), anders als
+  // u/v in km/h. specific_humidity q_v kommt in g/kg → kg/kg (Faktor 0.001) für
+  // die Dampfdruck-/Feuchterechnung (clouds.js). Beide für die Wolken-Diagnose.
+  const h = [], u = [], v = [], t = [], rh = [], p = [], w = [], q = [];
   for (let l = model.nLevels; l >= 1; l--) {
     h.push(toArr(H[`height_agl_level${l}`], T, 1));
     u.push(toArr(H[`wind_u_component_level${l}`], T, KMH_TO_MS));
@@ -45,8 +48,10 @@ export async function fetchColumn(lat, lon, modelKey, forecastDays, fetchImpl = 
     t.push(toArr(H[`temperature_level${l}`], T, 1));
     rh.push(toArr(H[`relative_humidity_level${l}`], T, 1));
     p.push(toArr(H[`pressure_level${l}`], T, 1));
+    w.push(toArr(H[`wind_w_level${l}`], T, 1));
+    q.push(toArr(H[`specific_humidity_level${l}`], T, 1e-3));
   }
-  return { time, h, u, v, t, rh, p, nLevels: h.length, elevation: data.elevation };
+  return { time, h, u, v, t, rh, p, w, q, nLevels: h.length, elevation: data.elevation };
 }
 
 /**
@@ -57,7 +62,7 @@ export async function fetchColumn(lat, lon, modelKey, forecastDays, fetchImpl = 
  *            temp[k][i] (°C), freezing[i] (m AGL | null) }
  */
 export function buildField(col, capM = 8000, nTarget = 44, grid = "log") {
-  const { time, h, u, v, t, rh } = col;
+  const { time, h, u, v, t, rh, w, p, q } = col;
   const T = time.length;
   const hMin = Math.max(10, firstFinite(h[0]) || 10);
   const targetH = grid === "lin" ? linspace(hMin, capM, nTarget) : logspace(hMin, capM, nTarget);
@@ -76,12 +81,14 @@ export function buildField(col, capM = 8000, nTarget = 44, grid = "log") {
     for (let k = 0; k < nTarget; k++) {
       const br = bracket(hi, targetH[k]);
       const uu = lerp(u, br, i), vv = lerp(v, br, i), tt = lerp(t, br, i), rr = lerp(rh, br, i);
+      const ww = w ? lerp(w, br, i) : NaN;
+      const pp = p ? lerp(p, br, i) : NaN, qq = q ? lerp(q, br, i) : NaN;
       uc[k][i] = uu; vc[k][i] = vv;
       spd[k][i] = Math.hypot(uu, vv);
       dir[k][i] = (Math.atan2(-uu, -vv) * 180 / Math.PI + 360) % 360;
       temp[k][i] = tt;
       rhc[k][i] = rr;
-      cloud[k][i] = cloudFraction(rr, targetH[k]);
+      cloud[k][i] = cloudFraction({ q: qq, p: pp, t: tt, rh: rr }, targetH[k], ww);
     }
     // Nullgradgrenze: unterster Übergang T ≥ 0 → < 0 nach oben.
     freezing[i] = zeroCrossing(hi, t, i);
@@ -106,7 +113,7 @@ export function sampleColumnAtHeight(col, i, ht) {
       ? Math.exp(Math.log(a) + br.f * (Math.log(b) - Math.log(a)))
       : lerp(col.p, br, i);
   }
-  return { h: ht, u: val(col.u), v: val(col.v), t: val(col.t), rh: val(col.rh), p };
+  return { h: ht, u: val(col.u), v: val(col.v), t: val(col.t), rh: val(col.rh), p, w: val(col.w), q: val(col.q) };
 }
 
 // --- Helfer ----------------------------------------------------------------

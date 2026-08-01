@@ -21,9 +21,10 @@ im Meteogramm (`refineCloudBase`, [src/app.js](src/app.js) `openMeteogram`)
 
 **Politik-Änderung:** `cloud_cover_low` ist **nicht mehr Trigger**, sondern nur
 noch Konfidenz-Signal (`> 50 %` → durchgezogene statt gestrichelter Linie im
-Meteogramm) — die Höhe bestimmt das RH-Profil. Ceiling = unterste Höhe mit
-`CF ≥ 0.5` (BKN, Luftfahrt-Konvention), Low-Band-Kappe 3000 m. LCL bleibt reiner
-Fallback, wenn keine Säule geladen ist.
+Meteogramm) — die Höhe bestimmt das RH-Profil. **Zwei Ausgaben (ICAO-konform,
+kein Höhen-Cutoff):** `cloudCeiling` = unterste Höhe mit `CF ≥ 0.5` (BKN) im
+gesamten Profil; `lowestCloudBase` = unterste markante Schicht (`CF ≥ 0.10`).
+LCL bleibt reiner Fallback, wenn keine Säule geladen ist.
 
 **Noch offen:** das **numerische Kartenprodukt** (Ceiling je Gitterpunkt) —
 bewusst zuletzt, weil es eine Säule PRO Zelle braucht (viele Open-Meteo-
@@ -50,17 +51,26 @@ BKN 5–7 · OVC 8.
 
 ## Wolkenfraktion: höhenabhängige kritische RH (Sundqvist)
 
-**Status:** **gebaut** — jetzt die gemeinsame Kurve für ALLE abgeleiteten
-Wolkengrößen. [src/clouds.js](src/clouds.js) `criticalRH(z)` +
-`cloudFraction(rh, z)` (`RH_crit` 70→90 % über 0–3000 m, benannte Konstanten),
-`oktaCategory`, `cloudLayers`, `cloudCeiling`. Konsumenten: Cross-Section-
-Heatmap ([src/column.js](src/column.js) `buildField`), Meteogramm-Ceiling,
-Go/No-Go-`cloudBase`-Zeile, Briefing-METAR. Details: [METHODIK.md](METHODIK.md)
-Abschnitt 4. Die frühere feste Kennlinie (`cloudFrac`, `< 65 / 65–85 / 85–100`)
-und die getrennte 85-%-Ceiling-Schwelle (`lowestSaturatedHeight`) sind ersetzt.
+**Status:** **gebaut, inkl. q_v-Feuchtebasis, Eis-Korrektur und Vertikalwind-
+Dynamik** — jetzt die gemeinsame Kurve für ALLE abgeleiteten Wolkengrößen.
+[src/clouds.js](src/clouds.js): `cloudFraction(hum, z, w)` bündelt (a) Feuchte
+aus **spezifischer Feuchte `q_v`** (`vaporPressure`/`effectiveRH`: Dampfdruck aus
+q,p → Mischphasen-Blend Wasser/Eis, unter −35 °C reines Eis — macht Cirren
+sichtbar; Fallback auf Modell-RH roh, wenn q fehlt), (b) phasen-/höhen-/
+windabhängiges `criticalRH(z, T, w)` (72→85 %, Eisast 72 %, Aufwind senkt /
+Absinken hebt via `tanh`), (c) Sundqvist. Dazu `oktaCategory`, `cloudLayers`,
+`cloudCeiling` (ICAO) + `lowestCloudBase`. `wind_w` (m/s) und
+`specific_humidity` (g/kg) werden in `fetchColumn` mitgeladen. Konsumenten:
+Cross-Section, Meteogramm, Go/No-Go, Briefing. Details:
+[METHODIK.md](METHODIK.md) Abschnitt 4.
 
-**Noch offen:** `RH_crit`-Anker (70/90 %/3000 m) sind Startwerte — je Modell
-(ICON-D2 vs. ICON-EU) an METAR-Fällen kalibrieren. Optional σ=p/p₀ statt Höhe.
+**Erledigt per q_v:** die frühere „RH-über-Wasser?"-Verifikation — Direktabfrage
+zeigte, dass das Modell RH unter 0 °C über Eis meldet; das Rechnen aus q_v macht
+die Annahme (und die drohende Doppelkorrektur) gegenstandslos.
+
+**Noch offen:** (1) **w-Schwellen** `W_SCALE`/`CRIT_W_MAX` sind Platzhalter — der
+Nutzer kalibriert die kritischen w-Werte separat. (2) `RH_crit`-Anker je Modell
+(ICON-D2 vs. ICON-EU) an METAR-Fällen prüfen. (3) Optional σ=p/p₀ statt Höhe.
 
 ### Ursprüngliche Idee: RH_crit mit Höhe/Druck variieren (Sundqvist-Typ)
 Echte Wolkenschemata nutzen keine feste Schwelle, sondern eine **kritische
