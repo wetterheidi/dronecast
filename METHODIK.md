@@ -175,6 +175,25 @@ Bedeckung"-Filter (eine dünnere hohe Schicht über einer tieferen wird nicht
 mehr verschluckt). Genutzt in der METAR-Zeile des Briefings
 ([src/briefing.js](src/briefing.js) `metarCloudsForHour`).
 
+### 4.4b Kartenlayer (Bedeckungsgrad + Ceiling, flächig)
+`src/cloudoverlay.js` (Schwesterlayer zu Wind-/Böenlayer): dieselbe Methodik
+wie oben, nur räumlich statt am Operationspunkt — je Gitterpunkt eine
+Mini-Säule (`h/t/p/rh/q/w` je Level) aus dem gecachten Level-Band, ausgewertet
+mit denselben `cloudCeiling()`/`bandCoverage()`. Zwei unabhängig zuschaltbare
+Darstellungen aus EINEM Fetch:
+- **Bedeckungsgrad**: `bandCoverage()` (neu, auf `cloudLayers()` aufgesetzt)
+  bündelt alle Schichten je Stockwerk (tief `< 2000 m`, mittel, hoch
+  `> 6500 m` AGL — `CLOUD_BAND_LOW_MAX_M`/`CLOUD_BAND_HIGH_MIN_M`, Startwerte)
+  zum jeweiligen CF-Maximum. Als graue Fläche, Deckkraft ~ CF — ein
+  Stockwerk zur Zeit (Umschalter), damit sich nichts überlagert.
+- **Ceiling**: `cloudCeiling()` unverändert, wie im Meteogramm — als
+  Farbfläche (Höhe → Farbskala) oder Zahlenwerte am Gitterpunkt.
+
+Anders als der Wind-Layer ist das geladene Level-Band NICHT an
+`settings.maxHeight` gekoppelt, sondern reicht immer bis
+`CLOUD_OVERLAY_CAP_M` (12 km, wie `cloudLayers()`s `capM`-Default) — eine
+hohe Schicht ist fürs Bedeckungsbild relevant, auch über der Flughöhe.
+
 ### 4.5 LCL nach Espy (Fallback)
 `cloudBaseAgl()`: `Basis ≈ 125 · (T₂ₘ − Td₂ₘ)` m AGL — nur wenn
 `cloud_cover_low ≥ 25 %`. Reine **Bodenpaket-Näherung** (gut für konvektive

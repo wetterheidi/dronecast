@@ -36,6 +36,18 @@ const DEFAULTS = {
   gustLayerMode: "fill", // "fill" = Farbfläche | "numbers" = Zahlenwerte
   gustLayerOpacity: 0.5,
   gustLayerDensity: WIND_OVERLAY_DEFAULT_DENSITY,
+  // Wolken-Layer (cloudoverlay.js): EIN Fetch (volles Level-Band bis
+  // CLOUD_OVERLAY_CAP_M) speist zwei unabhängig ein-/ausschaltbare
+  // Darstellungen — Bedeckungsgrad (Graufläche, ein Stockwerk zur Zeit) und
+  // Ceiling (Fläche ODER Zahlen, wie beim Böen-Layer).
+  cloudLayerOn: false,
+  cloudLayerDensity: "medium",
+  cloudCoverOn: true,
+  cloudCoverBand: "low", // "low" | "mid" | "high"
+  cloudCoverOpacity: 0.5,
+  cloudCeilingOn: true,
+  cloudCeilingMode: "fill", // "fill" = Farbfläche | "numbers" = Zahlenwerte
+  cloudCeilingOpacity: 0.5,
 };
 
 export const settings = { ...DEFAULTS };

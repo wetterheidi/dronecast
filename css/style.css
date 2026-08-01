@@ -399,10 +399,23 @@ select, input[type="number"], input[type="text"] {
 .wind-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 6px 0 2px; font-size: 12px; }
 .wind-legend .chip { display: inline-block; width: 14px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
 
+/* Bedeckungsgrad-Legende (cloudoverlay.js): kontinuierlicher Gradient statt
+   Farbklassen-Chips, weil die Fläche die Bedeckung in Deckkraft codiert. */
+.cloud-cover-gradient {
+  display: inline-block;
+  width: 90px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: middle;
+  background: linear-gradient(to right, rgba(90, 92, 100, 0), rgba(90, 92, 100, 0.86));
+}
+
 /* Lade-Spinner im Overlay-Status (setStatus(msg, busy)). */
 @keyframes ml-spin { to { transform: rotate(360deg); } }
 #ml-wind-status.busy::before,
-#ml-gust-status.busy::before {
+#ml-gust-status.busy::before,
+#ml-cloud-status.busy::before {
   content: ""; display: inline-block; width: 10px; height: 10px;
   margin-right: 6px; vertical-align: -1px;
   border: 2px solid currentColor; border-right-color: transparent;
@@ -411,7 +424,8 @@ select, input[type="number"], input[type="text"] {
 
 /* Böen-Zahlenwerte am Gitterpunkt (gustLayerMode "numbers"): dunkel, fett,
    mit weißem Halo für Lesbarkeit über OSM/Satellit — analog zu den Fiedern. */
-.gust-num {
+.gust-num,
+.cloud-num {
   font: 700 12px/1 system-ui, sans-serif;
   color: #0b1220;
   text-align: center;

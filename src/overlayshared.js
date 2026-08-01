@@ -56,6 +56,22 @@ export function fillBlock(data, width, height, px, py, step, rgb) {
   }
 }
 
+// Wie fillBlock, aber mit variablem Alpha (0…255) statt fix 255 — für
+// Größen, die kontinuierlich in Deckkraft codiert werden (z. B. Bedeckungsgrad
+// als graue Fläche: 0 % CF = unsichtbar, 100 % CF = volle Deckkraft), statt in
+// diskrete Farbklassen wie bei Wind/Böen. Der globale Opacity-Regler des
+// Layers wirkt zusätzlich (CSS-Opacity auf dem Canvas), unabhängig davon.
+export function fillBlockAlpha(data, width, height, px, py, step, rgb, alpha) {
+  const maxY = Math.min(py + step, height);
+  const maxX = Math.min(px + step, width);
+  for (let y = py; y < maxY; y++) {
+    let idx = (y * width + px) * 4;
+    for (let x = px; x < maxX; x++, idx += 4) {
+      data[idx] = rgb[0]; data[idx + 1] = rgb[1]; data[idx + 2] = rgb[2]; data[idx + 3] = alpha;
+    }
+  }
+}
+
 // -- Grid-Geometrie -----------------------------------------------------------
 // Kleinste Zweierpotenz, mit der `gridDeg` mal Stride mal km/Grad die
 // Zielweite (km) erreicht oder überschreitet.

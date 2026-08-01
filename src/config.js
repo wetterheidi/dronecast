@@ -147,3 +147,22 @@ export const GUST_OVERLAY_RATE_LIMIT_COOLDOWN_MS = 30 * 1000;
 // großzügig, damit auch die höchste maxHeight (2000 m) sicher abgedeckt ist
 // (30 Level reichen bei ICON-D2 bis ~3150 m, bei ICON-EU bis ~5500 m).
 export const WIND_OVERLAY_PROBE_LEVELS = 30;
+
+// Wolken-Layer (cloudoverlay.js): Bedeckungsgrad tief/mittel/hoch + Ceiling,
+// aus derselben clouds.js-Methodik wie Meteogramm/Briefing (siehe dort). Im
+// Unterschied zum Wind-Layer kein Höhenschieber und keine Kopplung an
+// `maxHeight` — Wolken über der Flughöhe sind fürs Bedeckungsbild trotzdem
+// relevant (z. B. Cirrus über einem 300-m-Limit). Das geladene Level-Band
+// reicht daher IMMER bis CLOUD_OVERLAY_CAP_M (wie `cloudLayers()`s
+// `capM`-Default), unabhängig von settings.maxHeight.
+export const CLOUD_OVERLAY_CAP_M = 12000;
+// Pro Punkt werden (anders als beim Wind-Layer mit 2 Comps) 6 Comps
+// (Höhe/Temperatur/Druck/Feuchte×2/Vertikalwind) über ein ggf. sehr tiefes
+// Level-Band geladen — das `hourly`-Variablenarray je Request ist dadurch
+// deutlich länger als bei Wind/Böen. Punktebudget bewusst kleiner als beim
+// Wind-Layer, um Request-/Antwortgröße im Rahmen zu halten (Startwerte,
+// noch nicht gegen die echte API kalibriert).
+export const CLOUD_OVERLAY_MAX_POINTS = 400;
+export const CLOUD_OVERLAY_POINTS_PER_REQUEST = 40;
+export const CLOUD_OVERLAY_MAX_CONCURRENCY = 3;
+export const CLOUD_OVERLAY_CHUNK_RETRIES = 2;

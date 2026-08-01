@@ -251,6 +251,32 @@ export function cloudBaseAgl(tC, tdC, ccLowPct) {
   return Math.max(0, 125 * (tC - tdC));
 }
 
+// --- Bedeckungsgrad nach Stockwerk (Kartenlayer) ----------------------------
+
+// Grenzen tief/mittel/hoch (m AGL) — Startwerte nach gängiger synoptischer
+// Konvention (tief < 2 km, hoch > 6,5 km), noch nicht an METAR validiert.
+export const CLOUD_BAND_LOW_MAX_M = 2000;
+export const CLOUD_BAND_HIGH_MIN_M = 6500;
+
+/**
+ * Bedeckungsgrad je Stockwerk (tief/mittel/hoch, CF 0…1) zur Stunde `i` —
+ * für die flächige Kartendarstellung (Graustufen je Stockwerk). Baut auf
+ * `cloudLayers()` auf (SINGLE SOURCE OF TRUTH, s. o.): je Stockwerk das
+ * CF-Maximum ALLER dort liegenden Schichten. `maxLayers` bewusst groß, damit
+ * eine hohe Schicht nicht von mehreren tieferen aus der Liste verdrängt wird
+ * (anders als das METAR-nahe `cloudLayers()`-Default `maxLayers=4`).
+ */
+export function bandCoverage(col, i, { capM = 12000 } = {}) {
+  const layers = cloudLayers(col, i, { capM, maxLayers: 20 });
+  let low = 0, mid = 0, high = 0;
+  for (const l of layers) {
+    if (l.baseM < CLOUD_BAND_LOW_MAX_M) low = Math.max(low, l.cf);
+    else if (l.baseM < CLOUD_BAND_HIGH_MIN_M) mid = Math.max(mid, l.cf);
+    else high = Math.max(high, l.cf);
+  }
+  return { low, mid, high };
+}
+
 /**
  * Kombiniert Modell-Ceiling und LCL-Fallback für die Meteogramm-Wolkenbasis.
  * Liegt ein Modell-Ceiling (`rhCeilingM`, aus `cloudCeiling`) vor, bestimmt DAS

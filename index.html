@@ -165,6 +165,43 @@
           <div class="hint mono" id="ml-gust-status"></div>
         </div>
       </div>
+
+      <div class="ml-section">
+        <label class="row">
+          <span class="label"><input type="checkbox" id="ml-cloud-on" /> Wolken (Modelllevel)</span>
+        </label>
+        <div class="hint warn" id="ml-cloud-hint" hidden>Zum Anzeigen bitte näher heranzoomen (ab Zoom 9).</div>
+        <div id="ml-cloud-body" class="ml-subsection" hidden>
+          <div class="row">
+            <span class="label">Gitterdichte</span>
+          </div>
+          <div class="radio-row" id="ml-cloud-density"><!-- Radios aus WIND_OVERLAY_DENSITY_OPTIONS --></div>
+
+          <label class="row">
+            <span class="label"><input type="checkbox" id="ml-cloud-cover-on" /> Bedeckungsgrad</span>
+          </label>
+          <div class="radio-row" id="ml-cloud-cover-band"><!-- Radios: tief/mittel/hoch --></div>
+          <div class="row opacity-row" id="ml-cloud-cover-opacity-row">
+            <span class="label">Deckkraft Bedeckungsgrad</span>
+            <span id="ml-cloud-cover-opacity-val" class="mono">50%</span>
+          </div>
+          <input id="ml-cloud-cover-opacity" type="range" min="10" max="100" step="5" value="50" />
+          <div class="wind-legend" id="ml-cloud-cover-legend"></div>
+
+          <label class="row">
+            <span class="label"><input type="checkbox" id="ml-cloud-ceiling-on" /> Ceiling</span>
+          </label>
+          <div class="radio-row" id="ml-cloud-ceiling-mode"><!-- Radios: Fläche / Zahlenwerte --></div>
+          <div class="row opacity-row" id="ml-cloud-ceiling-opacity-row">
+            <span class="label">Deckkraft Ceilingfläche</span>
+            <span id="ml-cloud-ceiling-opacity-val" class="mono">50%</span>
+          </div>
+          <input id="ml-cloud-ceiling-opacity" type="range" min="10" max="100" step="5" value="50" />
+          <div class="wind-legend" id="ml-cloud-ceiling-legend"></div>
+
+          <div class="hint mono" id="ml-cloud-status"></div>
+        </div>
+      </div>
     </details>
 
     <details id="settings">

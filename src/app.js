@@ -24,6 +24,7 @@ import { initGeoman } from "./geoman.js";
 import { initMapLayers } from "./maplayers.js";
 import { initWindOverlay } from "./windoverlay.js";
 import { initGustOverlay } from "./gustoverlay.js";
+import { initCloudOverlay } from "./cloudoverlay.js";
 import {
   fmtHeight, fmtWind, fmtTemp, fmtDirPadded, heightUnit, heightToDisplay,
 } from "./units.js";
@@ -80,6 +81,11 @@ initWindOverlay(map);
 // Kartenlayer: Windböen 10 m flächig (Oberfläche, öffentliche Instanz) —
 // Schwesterlayer zum Wind-Overlay, teilt sich den wxOverlays-Pane.
 initGustOverlay(map);
+
+// Kartenlayer: Bedeckungsgrad (tief/mittel/hoch) + Ceiling, flächig —
+// dieselbe clouds.js-Methodik wie Meteogramm/Briefing, hier räumlich statt
+// am Operationspunkt. Datenquelle wie Wind: Michaels Instanz.
+initCloudOverlay(map);
 
 // Masterzeit: die eine Zeitachse für Bedingungen, numerische Felder und
 // Nowcasting. Nach initMapLayers/initWindOverlay verdrahten — die haben sich
