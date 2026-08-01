@@ -53,7 +53,7 @@ export const SURFACE_OPTIONAL = [
 ];
 
 // Vorhersage-Obergrenze (max. Flughöhe AGL) – Auswahl fürs Settings-Panel.
-export const MAX_HEIGHT_OPTIONS = [120, 300, 500, 1000, 2000]; // m AGL
+export const MAX_HEIGHT_OPTIONS = [120, 300, 500, 1000, 2000, 6000]; // m AGL
 export const DEFAULT_MAX_HEIGHT = 300;
 
 // Vorhersage-Zeithorizont in Tagen.

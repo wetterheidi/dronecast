@@ -215,6 +215,28 @@ const BUILTIN_PROFILES = [
       ...OPERATIONAL_LIMITS,
     },
   },
+  {
+    id: "meteomatics-mm670m",
+    label: "Meteomatics Meteodrone MM-670M",
+    manufacturer: "Meteomatics",
+    category: "multicopter",
+    ipRating: null, // Hersteller nennt kein IP-Rating, aber "waterproof", ausgelegt für Regen/Schnee
+    marginPct: 0.2,
+    source: "https://www.meteomatics.com/en/meteodrones-weather-drones/",
+    notes: "Hexacopter für Vertikalsondierungen bis 6000 m AMSL (BVLOS-zertifiziert), kein klassischer Nutzlast-Copter. " +
+      "Max. Windgeschwindigkeit 92 km/h (25,6 m/s, Herstellerangabe); Betrieb bis −45 °C; werkseitig \"waterproof\", " +
+      "für Flug in Regen/Schnee freigegeben (kein mm/h-Grenzwert angegeben, konservativ geschätzt); Propeller-Enteisung an Bord. " +
+      "Obergrenze der Betriebstemperatur nicht herstellerseitig spezifiziert — Schätzwert, vor Einsatz verifizieren.",
+    limits: {
+      windSurface: { direction: "max", value: 25.6, unit: "m/s" },
+      windBandMax: { direction: "max", value: 25.6, unit: "m/s" },
+      gustSurface: { direction: "max", value: 25.6, unit: "m/s" },
+      precipitation: { direction: "max", value: 10, unit: "mm/h" }, // "waterproof", Regen/Schnee freigegeben, mm/h grob geschätzt
+      tempMin: { direction: "min", value: -45, unit: "°C" },
+      tempMax: { direction: "max", value: 40, unit: "°C", marginPct: 0.1 }, // nicht herstellerseitig spezifiziert, Schätzwert
+      ...OPERATIONAL_LIMITS,
+    },
+  },
 ];
 
 export const DRONE_PROFILES = BUILTIN_PROFILES.map((p) => ({ origin: "factory", ...p }));
