@@ -284,11 +284,13 @@ function drawBaseVis(g, m, x, yTop, yBot) {
   // Wolkenbasis: LCL (Espy) verfeinert mit dem Modell-Feuchteprofil, falls
   // vorhanden (siehe clouds.js/column.js). Trigger bleibt cloud_cover_low.
   const refined = m.time.map((t, i) => refineCloudBase(T[i], Td[i], lo[i], m.rhCeiling ? m.rhCeiling[i] : null));
-  const base = refined.map((r) => (r ? r.baseM : null));
-  const confident = refined.map((r) => (r ? r.confident : false));
   // y-Achse deckt immer die Vorhersagehöhe ab, expandiert bei Bedarf für eine
-  // höhere tiefe Basis, gedeckelt auf das tiefe Stockwerk (~2500 m AGL).
+  // höhere tiefe Basis, gedeckelt auf das tiefe Stockwerk (~2500 m AGL). Höhere
+  // Ceilings (z. B. Cirrus-BKN) gehören nicht in dieses Tief-Panel → nicht
+  // zeichnen (das ICAO-Ceiling ohne Cutoff bleibt für Go/No-Go erhalten).
   const LOW_TOP_M = 2500;
+  const base = refined.map((r) => (r && r.baseM <= LOW_TOP_M ? r.baseM : null));
+  const confident = refined.map((r) => (r ? r.confident : false));
   let maxBaseM = 0;
   for (const v of base) if (Number.isFinite(v) && v > maxBaseM) maxBaseM = v;
   const topM = Math.min(LOW_TOP_M, Math.max(m.maxHeightM || 300, maxBaseM, 300));
@@ -303,8 +305,24 @@ function drawBaseVis(g, m, x, yTop, yBot) {
   polyline(g, m.time, visKm, (v) => yR(v), x, COL.vis, 1.6);
   // Basislinie segmentweise: durchgezogen, wenn Bedeckung UND Feuchteprofil
   // übereinstimmen (hohe Konfidenz), sonst gestrichelt (nur ein Signal).
-  styledLine(g, m.time, base, (v) => yL(heightToDisplay(v)), x, COL.base, 1.8,
-    (i) => (confident[i] && confident[i + 1] ? null : "4 3"));
+  // Über große Basissprünge (verschiedene Stockwerke) NICHT verbinden — sonst
+  // täuscht eine Scheinlinie einen kontinuierlichen Basisverlauf vor. Punkte an
+  // jeder gültigen Basis, damit isolierte Werte sichtbar bleiben.
+  const JUMP_M = 400; // m AGL — darüber gilt es als anderes Stockwerk
+  const yB = (v) => yL(heightToDisplay(v));
+  for (let i = 0; i < m.time.length - 1; i++) {
+    const a = base[i], b = base[i + 1];
+    if (!Number.isFinite(a) || !Number.isFinite(b) || Math.abs(a - b) > JUMP_M) continue;
+    const dash = confident[i] && confident[i + 1] ? null : "4 3";
+    g.append(mk("path", {
+      d: `M${x(m.time[i]).toFixed(1)} ${yB(a).toFixed(1)} L${x(m.time[i + 1]).toFixed(1)} ${yB(b).toFixed(1)}`,
+      fill: "none", stroke: COL.base, "stroke-width": 1.8, "stroke-linecap": "round",
+      ...(dash ? { "stroke-dasharray": dash } : {}),
+    }));
+  }
+  for (let i = 0; i < m.time.length; i++) {
+    if (Number.isFinite(base[i])) g.append(mk("circle", { cx: x(m.time[i]).toFixed(1), cy: yB(base[i]).toFixed(1), r: 1.6, fill: COL.base }));
+  }
 
   // Legende mit Linienstilen (durchgezogen = hohe Konfidenz, gestrichelt = ein Signal).
   const ly = yBot - 6; let lx = M.l + 4;
@@ -356,20 +374,6 @@ function polyline(g, time, arr, yFn, x, color, w, dash) {
     pen = true;
   }
   if (dPath) g.append(mk("path", { d: dPath, fill: "none", stroke: color, "stroke-width": w, ...(dash ? { "stroke-dasharray": dash } : {}), "stroke-linejoin": "round" }));
-}
-
-// Linie segmentweise mit wechselndem Stil (dashOf(i) -> dash-Array oder null).
-function styledLine(g, time, arr, yFn, x, color, w, dashOf) {
-  for (let i = 0; i < time.length - 1; i++) {
-    const a = arr[i], b = arr[i + 1];
-    if (a == null || b == null || !Number.isFinite(a) || !Number.isFinite(b)) continue;
-    const dash = dashOf(i);
-    g.append(mk("path", {
-      d: `M${x(time[i]).toFixed(1)} ${yFn(a).toFixed(1)} L${x(time[i + 1]).toFixed(1)} ${yFn(b).toFixed(1)}`,
-      fill: "none", stroke: color, "stroke-width": w, "stroke-linecap": "round",
-      ...(dash ? { "stroke-dasharray": dash } : {}),
-    }));
-  }
 }
 
 function areaUnder(g, time, arr, yFn, x, yBase, fill) {

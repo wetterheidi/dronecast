@@ -35,6 +35,15 @@ const CRIT_W_MAX = 8;        // %-Punkte
 // Schwelle wie die (ICAO-)Ceiling-Definition. FEW = unterste markante Schicht.
 export const CF_FEW = 0.10, CF_SCT = 0.25, CF_BKN = 0.50, CF_OVC = 0.90;
 
+// Bodennaher Dunst-/Nebel-Guard. In den untersten Z_SURF_M ist hohe RH meist
+// nur optischer Dunst, keine Wolke → RH_crit dort auf RH_CRIT_SURF_GUARD
+// anheben (RH < ~90 % ⇒ CF = 0). Gesättigte Schichten mit Basis < FOG_BASE_M
+// berühren den Boden = Nebel: aus Wolken-Layern/Ceiling ausgenommen, getragen
+// von der Modell-Sicht + weather_code (siehe METHODIK.md 4).
+const Z_SURF_M = 150;            // m AGL — Dicke der bodennahen Dunstschicht
+const RH_CRIT_SURF_GUARD = 90;   // % — Mindest-RH_crit direkt am Boden
+const FOG_BASE_M = 30;           // m AGL — darunter gilt eine Basis als Nebel
+
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 
 // --- Feuchte-Referenz (aus q_v, Eis-Korrektur) ------------------------------
@@ -99,6 +108,14 @@ function critWarm(zAgl) {
 export function criticalRH(zAgl, tC, w) {
   const a = iceFraction(tC);
   let crit = (1 - a) * critWarm(zAgl) + a * RH_CRIT_ICE;
+  // Bodennaher Dunst-Guard: RH_crit von RH_CRIT_SURF_GUARD am Boden linear auf
+  // das normale Profil bei Z_SURF_M — bodennah erst nahe Sättigung „Wolke",
+  // sonst nur optischer Dunst (verhindert Phantom-„Cloud 0 m").
+  const z = Number.isFinite(zAgl) ? Math.max(0, zAgl) : 0;
+  if (z < Z_SURF_M) {
+    const guard = RH_CRIT_SURF_GUARD + (critWarm(Z_SURF_M) - RH_CRIT_SURF_GUARD) * (z / Z_SURF_M);
+    crit = Math.max(crit, guard);
+  }
   if (Number.isFinite(w)) crit -= CRIT_W_MAX * Math.tanh(w / W_SCALE);
   return crit;
 }
@@ -142,19 +159,22 @@ function crossHeight(h0, cf0, h1, cf1, thr) {
 // --- Ceiling / Basis / Schichten --------------------------------------------
 
 /**
- * Unterste Höhe (m AGL), an der die Wolkenfraktion `thr` von unten erreicht —
- * über das GESAMTE Profil interpoliert, oder null. Basis für beide Ceiling-
- * Ausgaben (kein harter Höhen-Cutoff, ICAO-konform).
+ * Unterste Höhe (m AGL) ≥ `minBaseM`, an der die Wolkenfraktion `thr` von unten
+ * erreicht — über das GESAMTE Profil interpoliert, oder null. Kein harter
+ * Höhen-Cutoff (ICAO-konform); `minBaseM` überspringt eine bodenberührende
+ * (Nebel-)Schicht und sucht die nächste Schicht darüber.
  */
-function lowestCrossing(col, i, thr) {
+function lowestCrossing(col, i, thr, minBaseM = 0) {
   let prevH = null, prevCf = null;
   for (let k = 0; k < col.nLevels; k++) {
     const h = col.h[k][i];
     if (!Number.isFinite(h)) continue;
     const cf = cfAt(col, k, i);
-    if (cf >= thr) {
-      return (prevCf != null && prevCf < thr && prevH != null)
-        ? crossHeight(prevH, prevCf, h, cf, thr) : h;
+    if (cf >= thr && prevCf != null && prevCf < thr && prevH != null) {
+      const base = crossHeight(prevH, prevCf, h, cf, thr);
+      if (base >= minBaseM) return base;        // sonst: Nebel überspringen, weiter suchen
+    } else if (cf >= thr && prevCf == null && h >= minBaseM) {
+      return h; // unterstes Level bereits gesättigt und über der Nebel-Grenze
     }
     prevH = h; prevCf = cf;
   }
@@ -169,18 +189,18 @@ function lowestCrossing(col, i, thr) {
  * @returns {{ baseM: number, confident: boolean } | null}
  */
 export function cloudCeiling(col, i, { coverThresh = CF_BKN, ccLowPct = null } = {}) {
-  const baseM = lowestCrossing(col, i, coverThresh);
+  const baseM = lowestCrossing(col, i, coverThresh, FOG_BASE_M);
   if (baseM == null) return null;
   return { baseM, confident: Number.isFinite(ccLowPct) && ccLowPct > 50 };
 }
 
 /**
  * Untergrenze der untersten markanten Wolkenschicht (m AGL): unterstes
- * `CF ≥ CF_FEW` im Profil (auch FEW/SCT) — für Situationsbild/Briefing. null,
- * wenn das Profil praktisch wolkenfrei ist.
+ * `CF ≥ CF_FEW` im Profil (auch FEW/SCT), über der Nebel-Grenze — für
+ * Situationsbild/Briefing. null, wenn das Profil praktisch wolkenfrei ist.
  */
 export function lowestCloudBase(col, i) {
-  return lowestCrossing(col, i, CF_FEW);
+  return lowestCrossing(col, i, CF_FEW, FOG_BASE_M);
 }
 
 /**
@@ -194,6 +214,9 @@ export function lowestCloudBase(col, i) {
  */
 export function cloudLayers(col, i, { capM = 12000, maxLayers = 4 } = {}) {
   const layers = [];
+  // Bodenberührende Schichten (Basis < FOG_BASE_M) sind Nebel, keine gemeldete
+  // Wolkenschicht — sie tragen die Sicht/weather_code, nicht die Wolken-Spalte.
+  const push = (baseM, cf) => { if (baseM >= FOG_BASE_M) layers.push({ baseM, cover: oktaCategory(cf), cf }); };
   let inLayer = false, baseM = null, maxCf = 0, prevH = null, prevCf = null;
   for (let k = 0; k < col.nLevels; k++) {
     const h = col.h[k][i];
@@ -207,13 +230,13 @@ export function cloudLayers(col, i, { capM = 12000, maxLayers = 4 } = {}) {
         inLayer = true; maxCf = cf;
       } else if (cf > maxCf) { maxCf = cf; }
     } else if (inLayer) {
-      layers.push({ baseM, cover: oktaCategory(maxCf), cf: maxCf });
+      push(baseM, maxCf);
       inLayer = false;
       if (layers.length >= maxLayers) return layers;
     }
     prevH = h; prevCf = cf;
   }
-  if (inLayer) layers.push({ baseM, cover: oktaCategory(maxCf), cf: maxCf });
+  if (inLayer) push(baseM, maxCf);
   return layers.slice(0, maxLayers);
 }
 

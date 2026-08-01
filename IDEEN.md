@@ -57,11 +57,14 @@ Dynamik** — jetzt die gemeinsame Kurve für ALLE abgeleiteten Wolkengrößen.
 aus **spezifischer Feuchte `q_v`** (`vaporPressure`/`effectiveRH`: Dampfdruck aus
 q,p → Mischphasen-Blend Wasser/Eis, unter −35 °C reines Eis — macht Cirren
 sichtbar; Fallback auf Modell-RH roh, wenn q fehlt), (b) phasen-/höhen-/
-windabhängiges `criticalRH(z, T, w)` (72→85 %, Eisast 72 %, Aufwind senkt /
-Absinken hebt via `tanh`), (c) Sundqvist. Dazu `oktaCategory`, `cloudLayers`,
-`cloudCeiling` (ICAO) + `lowestCloudBase`. `wind_w` (m/s) und
-`specific_humidity` (g/kg) werden in `fetchColumn` mitgeladen. Konsumenten:
-Cross-Section, Meteogramm, Go/No-Go, Briefing. Details:
+windabhängiges `criticalRH(z, T, w)` (72→85 %, Eisast 72 %, **bodennaher Dunst-
+Guard 90 %** in den untersten 150 m, Aufwind senkt / Absinken hebt via `tanh`),
+(c) Sundqvist. Dazu `oktaCategory`, `cloudLayers`, `cloudCeiling` (ICAO) +
+`lowestCloudBase`. **Nebel** (bodenberührende Sättigung, Basis < 30 m) wird aus
+Ceiling/Layern ausgenommen und über Modell-Sicht + `weather_code` getragen.
+`wind_w` (m/s) und `specific_humidity` (g/kg) werden in `fetchColumn` mitgeladen.
+Konsumenten: Cross-Section, Meteogramm (Tief-Panel deckelt bei 2500 m, keine
+Scheinlinie über Stockwerke), Go/No-Go, Briefing. Details:
 [METHODIK.md](METHODIK.md) Abschnitt 4.
 
 **Erledigt per q_v:** die frühere „RH-über-Wasser?"-Verifikation — Direktabfrage

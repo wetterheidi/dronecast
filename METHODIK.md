@@ -109,12 +109,19 @@ nicht erst bei Sättigung — in der Grenzschicht niedriger, frei höher:
 Höhe). **Vertikalwind** `w` (m/s, nativ `wind_w_level{l}`): Aufwind senkt,
 Absinken hebt `RH_crit` — `−CRIT_W_MAX · tanh(w / W_SCALE)`.
 
+**(b′) Bodennaher Dunst-Guard.** In den untersten `Z_SURF_M = 150 m` wird
+`RH_crit` von `RH_CRIT_SURF_GUARD = 90 %` am Boden linear auf das normale Profil
+angehoben. Grund: bodennah ist hohe RH (72–90 %) meist **optischer Dunst**, keine
+Wolke — ohne den Guard entstünde eine Phantom-Bewölkung mit „Basis 0 m". Echte
+Bodensättigung (RH ≳ 90 %) bleibt erhalten und wird als Nebel behandelt (4.3).
+
 **(c) Sundqvist:** `CF = clamp(1 − √(max(0, (100 − RH_eff)/(100 − RH_crit))), 0, 1)`.
 
 **Startkalibrierung** (benannte Konstanten in clouds.js): `RH_CRIT_SURF=72`,
-`RH_CRIT_MID=85`, `RH_CRIT_Z_REF=1500`, `RH_CRIT_ICE=72`, `ICE_T_FULL=−35`;
-w-Dynamik `W_SCALE=0.1 m/s`, `CRIT_W_MAX=8 %` (**Platzhalter**, w-Schwellen noch
-zu kalibrieren). Noch nicht modellspezifisch geprüft (ICON-D2 vs. ICON-EU).
+`RH_CRIT_MID=85`, `RH_CRIT_Z_REF=1500`, `RH_CRIT_ICE=72`, `ICE_T_FULL=−35`,
+`Z_SURF_M=150`, `RH_CRIT_SURF_GUARD=90`; w-Dynamik `W_SCALE=0.1 m/s`,
+`CRIT_W_MAX=8 %` (**Platzhalter**, w-Schwellen noch zu kalibrieren). Noch nicht
+modellspezifisch geprüft (ICON-D2 vs. ICON-EU).
 
 ### 4.2 Bedeckungskategorien (Okta)
 `oktaCategory(cf)` bildet CF auf METAR-nahe Stufen ab. **BKN beginnt bei
@@ -136,11 +143,22 @@ Beide über die CF-Kurve zwischen zwei Leveln interpoliert. `cloud_cover_low`
 **Konfidenz** (`> 50 %` → `confident: true`) — fängt Subskalen-Effekte ab, ohne
 die Höhe zu diktieren.
 
+**Nebel statt „Cloud 0 m":** bodenberührende Sättigung (Basis `< FOG_BASE_M =
+30 m`) wird von Ceiling **und** unterster Basis **übersprungen** (`minBaseM` in
+`lowestCrossing`) und die nächste Schicht darüber gesucht. Eine Wolke am Boden
+ist Nebel — getragen von der Modell-**Sicht** und `weather_code` (Briefing-Wetter
+zeigt FG/FZFG, Go/No-Go über die Sicht-/Hazard-Zeile), nicht als Wolkenschicht.
+Das verhindert zugleich ein Phantom-„NoGo" der Go/No-Go-Wolkenbasiszeile bei
+bloß feuchter (aber sichtiger) Bodenluft.
+
 **Meteogramm** (`refineCloudBase()`, verdrahtet in `openMeteogram()`,
 [src/app.js](src/app.js)): liegt ein Modell-Ceiling vor, bestimmt DAS die Höhe
 (durchgezogen bei hoher Konfidenz, gestrichelt sonst); fehlt es, Fallback auf
 die LCL-Schätzung (4.5). Die Säule wird beim ersten Öffnen nachgeladen
 (`ensureColumn()`) — schlägt das fehl, bleibt es sauber bei der LCL-Schätzung.
+Das Tief-Panel zeichnet die Basis nur bis `~2500 m` (höhere Ceilings, z. B.
+Cirrus-BKN, gehören nicht ins Tief-Panel) und **verbindet nicht über große
+Basissprünge** (> 400 m = anderes Stockwerk → Lücke statt Scheinlinie).
 
 **Go/No-Go-Tabelle** (`evaluate(..., cloudCeilingArr)`,
 [src/gonogo.js](src/gonogo.js)): die `cloudBase`-Zeile nutzt das Ceiling-Array
@@ -318,8 +336,9 @@ vereinfachende Annahme steckt:
 
 | Größe | Annahme/Schwäche |
 |---|---|
-| RH_crit-Kalibrierung (4.1) | 72→85 % / Eis 72 % / w-Dynamik — Startwerte, nicht modellkalibriert |
+| RH_crit-Kalibrierung (4.1) | 72→85 % / Eis 72 % / Boden-Guard 90 % / w — Startwerte, nicht kalibriert |
 | Feuchte-Basis (4.1) | aus `q_v` (annahmefrei); Fallback auf Modell-RH nur wenn q fehlt |
+| Nebel-Grenze (4.3) | Basis < 30 m = Nebel (Sicht/ww statt Wolke); Schwelle heuristisch |
 | w-Schwellen (4.1) | `W_SCALE`/`CRIT_W_MAX` Platzhalter, noch nicht kalibriert |
 | LCL-Fallback (4.5) | Bodenpaket-Näherung, ungenau bei Schichtwolken |
 | Wind-Bandmaximum (1) | Stützstellen-Sampling, kein exaktes Profilmaximum |
