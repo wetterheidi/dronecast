@@ -80,13 +80,34 @@ verwendet, aber Teil derselben Datenkette (`needs.t`/`needs.p` in
 ## 4. Wolkenbasis / Ceiling / Wolkenschichten
 
 **Eine gemeinsame Kurve für alles.** [src/clouds.js](src/clouds.js) ist die
-Single Source of Truth: aus dem Modell-RH-Profil (native Level von Michael)
-wird EINE höhenabhängige Wolkenfraktion abgeleitet, aus der sich Cross-Section,
+Single Source of Truth: aus den Modell-Leveln (native Level von Michael) wird
+EINE höhenabhängige Wolkenfraktion abgeleitet, aus der sich Cross-Section,
 Meteogramm-Ceiling, Go/No-Go-Tabelle und Briefing-METAR speisen — statt der
 früheren drei getrennten, festen RH-Schwellen.
 
-### 4.1 Wolkenfraktion: Eis-Korrektur + höhen-/windabhängige kritische Feuchte
-`cloudFraction(rhW, T, z, w)`. Vier Schritte je Level:
+### 4.1 Wolkenfraktion: dreistufig nach bester verfügbarer Quelle
+`cloudFraction(hum, z, w)` wählt je Level die beste verfügbare Eingangsgröße
+(`hum` bündelt `clc`/`qw`/`qi`/`q`/`p`/`t`/`rh`):
+
+**Stufe 1 — `clc` (Modell-Bedeckungsgrad).** `cloud_cover_level{l}` (%) ist
+Michaels direktes ICON-Level-Output — die Diagnose, die die Sundqvist-Kurve
+(Stufe 3) bislang nur nachzubilden versuchte, inkl. Subskalen-Bewölkung.
+Vorhanden ⇒ `CF = clc / 100`, unmittelbar. Kein Dunst-Guard nötig (der existiert
+nur gegen RH-Proxy-Artefakte); die Nebel-Behandlung (4.3, Basis `< FOG_BASE_M`)
+bleibt unverändert nachgeschaltet.
+
+**Stufe 2 — `qw`/`qi` (Wolkenwasser/-eis), wenn `clc` fehlt.**
+`cloud_water_level{l}`/`cloud_ice_level{l}` (g/kg) sind das tatsächliche
+Kondensat. `CF = 1 − exp(−(qw+qi)/QCOND_SCALE)` (`QCOND_SCALE = 1e-5 kg/kg`,
+**Platzhalter**) — gröber als CLC (Grid-Mittel, keine Subskalen-Wolken, steilerer
+Übergang klar/bedeckt), aber physikalisch direkter als die reine RH-Schätzung.
+
+**Stufe 3 — Sundqvist-Fallback aus der Feuchte, wenn beides fehlt.** Der
+ursprüngliche, weiterhin unveränderte Algorithmus — greift automatisch, wenn
+Michaels Instanz `clc`/`qw`/`qi` (noch) nicht führt (`fetchColumn()` in
+[src/column.js](src/column.js) fällt bei einem fehlgeschlagenen Request mit den
+optionalen Feldern auf einen zweiten Request nur mit den Kernvariablen zurück —
+Muster wie `SURFACE_OPTIONAL` in `weather.js`). Vier Schritte je Level:
 
 **(a) Feuchte-Referenz aus q_v (Eis-Korrektur, ohne Annahme).** Basis ist die
 **spezifische Feuchte** `q_v` (prognostisch, `specific_humidity_level{l}`, g/kg):
@@ -122,6 +143,11 @@ Bodensättigung (RH ≳ 90 %) bleibt erhalten und wird als Nebel behandelt (4.3)
 `Z_SURF_M=150`, `RH_CRIT_SURF_GUARD=90`; w-Dynamik `W_SCALE=0.1 m/s`,
 `CRIT_W_MAX=8 %` (**Platzhalter**, w-Schwellen noch zu kalibrieren). Noch nicht
 modellspezifisch geprüft (ICON-D2 vs. ICON-EU).
+
+**Kalibrierungs-Dividende:** Sobald `clc` durchgängig verfügbar ist, liefert es
+kostenlos die Referenz, um Stufe 3 zu kalibrieren (Vergleich CF_Sundqvist vs.
+CLC über viele Stunden/Orte) — die Platzhalter-Konstanten oben werden dadurch
+besser, nicht nur als Rückfall konserviert.
 
 ### 4.2 Bedeckungskategorien (Okta)
 `oktaCategory(cf)` bildet CF auf METAR-nahe Stufen ab. **BKN beginnt bei

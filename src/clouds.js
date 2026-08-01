@@ -1,20 +1,24 @@
 /**
  * Gemeinsames Wolkenmodul — Single Source of Truth für alle abgeleiteten
  * Wolkengrößen (Cross-Section-Heatmap, Meteogramm-Ceiling, Go/No-Go-Tabelle,
- * Briefing-METAR). Kern ist EINE höhenabhängige Wolkenfraktions-Kurve
- * (Sundqvist-Typ) mit Eis-Korrektur und Vertikalwind-Dynamik.
- *
- * Ablauf je Level:
- *  1. Feuchte-Referenz aus der spezifischen Feuchte q_v (prognostisch, ohne
- *     Referenz-Annahme): Dampfdruck e aus (q, p), daraus effektive RH über die
- *     Mischphase (Wasser→Eis, unter −35 °C reines Eis). Macht Cirren sichtbar.
- *     Fehlt q, Rückfall auf die Modell-RH (die unter 0 °C bereits eis-
- *     referenziert ist — per q-Validierung bestätigt).
- *  2. RH_crit: höhenabhängig (Grenzschicht niedriger, frei höher), im Eisast
- *     eis-referenziert abgesenkt, plus Vertikalwind-Modifikation (Aufwind senkt,
- *     Absinken hebt die kritische Feuchte).
- *  3. CF = Sundqvist(RH_eff, RH_crit).
- *  4. Vertikales Clustering → Schichten, Ceiling und unterste Basis.
+ * Briefing-METAR). Kern ist EINE höhenabhängige Wolkenfraktion `cloudFraction()`,
+ * dreistufig nach bester verfügbarer Quelle (`cfAt`/`buildField` bündeln die
+ * Eingänge je Level):
+ *  1. `clc` (ICONs Modell-Bedeckungsgrad, direktes Level-Output von Michael) —
+ *     wird 1:1 übernommen, wenn vorhanden.
+ *  2. `qw`/`qi` (Wolkenwasser/-eis) — Kondensat-basiertes CF, wenn `clc` fehlt.
+ *  3. Sonst der ursprüngliche Sundqvist-Fallback aus der Feuchte (q_v/RH):
+ *     a. Feuchte-Referenz aus der spezifischen Feuchte q_v (prognostisch, ohne
+ *        Referenz-Annahme): Dampfdruck e aus (q, p), daraus effektive RH über
+ *        die Mischphase (Wasser→Eis, unter −35 °C reines Eis). Macht Cirren
+ *        sichtbar. Fehlt q, Rückfall auf die Modell-RH (die unter 0 °C bereits
+ *        eis-referenziert ist — per q-Validierung bestätigt).
+ *     b. RH_crit: höhenabhängig (Grenzschicht niedriger, frei höher), im
+ *        Eisast eis-referenziert abgesenkt, plus Vertikalwind-Modifikation
+ *        (Aufwind senkt, Absinken hebt die kritische Feuchte).
+ *     c. CF = Sundqvist(RH_eff, RH_crit).
+ *  4. Vertikales Clustering → Schichten, Ceiling und unterste Basis (stufen-
+ *     unabhängig, arbeitet nur auf der fertigen CF-Kurve).
  */
 
 // --- Kalibrierung (Startwerte, später ggf. je Modell / an METAR) ------------
@@ -43,6 +47,12 @@ export const CF_FEW = 0.10, CF_SCT = 0.25, CF_BKN = 0.50, CF_OVC = 0.90;
 const Z_SURF_M = 150;            // m AGL — Dicke der bodennahen Dunstschicht
 const RH_CRIT_SURF_GUARD = 90;   // % — Mindest-RH_crit direkt am Boden
 const FOG_BASE_M = 30;           // m AGL — darunter gilt eine Basis als Nebel
+
+// Kondensat-Schwelle für die QW/QI-Stufe (Stufe 2, s. u.): Skala für
+// „nennenswerte" Wolkenwasser-/eis-Konzentration in kg/kg. PLATZHALTER — bis
+// eine CLC-Kalibrierung vorliegt, an typischen Cirrus-/Stratus-Werten (~1e-5…
+// 1e-4 kg/kg) orientiert.
+const QCOND_SCALE = 1e-5; // kg/kg
 
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 
@@ -121,12 +131,26 @@ export function criticalRH(zAgl, tC, w) {
 }
 
 /**
- * Wolkenfraktion 0…1 (Sundqvist). `hum` bündelt die Feuchte-Eingänge des Levels
- * ({ q, p, t, rh }); q_v ist die bevorzugte Basis (siehe `effectiveRH`), t die
- * Temperatur (°C). Bündelt Feuchte-Referenz/Eis-Korrektur (1), phasen-/
- * windabhängiges RH_crit (2) und Sundqvist (3). z in m AGL, w optional (m/s).
+ * Wolkenfraktion 0…1 eines Levels, dreistufig — beste verfügbare Quelle:
+ *  1. `clc` (Modell-Bedeckungsgrad, % — Michaels direktes Level-Output):
+ *     `CF = clc / 100`. ICONs eigene Diagnose inkl. Subskalen-Bewölkung,
+ *     schlägt jede Feuchte-Heuristik — wird 1:1 übernommen.
+ *  2. `qw`/`qi` (Wolkenwasser/-eis, kg/kg, ohne `clc`): `CF` aus dem
+ *     Kondensatgehalt (`1 − exp(−(qw+qi)/QCOND_SCALE)`) — gröber als CLC
+ *     (Grid-Mittel, keine Subskalen-Wolken), aber physikalisch direkter als
+ *     die RH-Schätzung.
+ *  3. Sonst Sundqvist-Fallback (Startkalibrierung, unverändert): `hum`
+ *     bündelt die Feuchte-Eingänge ({ q, p, t, rh }); q_v ist die bevorzugte
+ *     Basis (siehe `effectiveRH`), t die Temperatur (°C). Feuchte-Referenz/
+ *     Eis-Korrektur (1), phasen-/windabhängiges RH_crit (2), Sundqvist (3).
+ * z in m AGL, w optional (m/s, nur für Stufe 3 relevant).
  */
 export function cloudFraction(hum, zAgl, w) {
+  if (Number.isFinite(hum?.clc)) return clamp(hum.clc / 100, 0, 1);
+  const qCond = (hum?.qw || 0) + (hum?.qi || 0);
+  if (Number.isFinite(hum?.qw) || Number.isFinite(hum?.qi)) {
+    return clamp(1 - Math.exp(-qCond / QCOND_SCALE), 0, 1);
+  }
   const tC = hum?.t;
   const rhEff = effectiveRH(hum, tC);
   if (!Number.isFinite(rhEff)) return 0;
@@ -145,9 +169,13 @@ export function oktaCategory(cf) {
   return "OVC";
 }
 
-// CF eines Levels aus der Säule (bündelt den Zugriff auf q/p/T und w).
+// CF eines Levels aus der Säule (bündelt den Zugriff auf q/p/T/RH sowie die
+// optionalen Stufe-1/2-Felder qw/qi/clc und w).
 function cfAt(col, k, i) {
-  const hum = { q: col.q?.[k]?.[i], p: col.p?.[k]?.[i], t: col.t?.[k]?.[i], rh: col.rh?.[k]?.[i] };
+  const hum = {
+    q: col.q?.[k]?.[i], p: col.p?.[k]?.[i], t: col.t?.[k]?.[i], rh: col.rh?.[k]?.[i],
+    qw: col.qw?.[k]?.[i], qi: col.qi?.[k]?.[i], clc: col.clc?.[k]?.[i],
+  };
   return cloudFraction(hum, col.h[k][i], col.w?.[k]?.[i]);
 }
 // Höhe, in der CF (linear zwischen zwei Leveln) den Schwellwert kreuzt.

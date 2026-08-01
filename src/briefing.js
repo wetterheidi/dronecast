@@ -118,7 +118,7 @@ export function buildBriefingContent({ surface, col, point, modelLabel, maxHeigh
         <td>${metarDir(dir)}</td>
         <td>${fmtNum(windToDisplay(spdMs), 1)}</td>
         <td>${fmtNum(s.rh, 0)}</td>
-        <td>${fmtNum(cloudFraction({ q: s.q, p: s.p, t: s.t, rh: s.rh }, hM, s.w) * 100, 0)}</td>
+        <td>${fmtNum(cloudFraction({ q: s.q, p: s.p, t: s.t, rh: s.rh, qw: s.qw, qi: s.qi, clc: s.clc }, hM, s.w) * 100, 0)}</td>
       </tr>`;
     }
     html += `</tbody></table>`;

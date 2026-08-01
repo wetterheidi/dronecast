@@ -10,17 +10,25 @@ import { cloudFraction } from "./clouds.js";
 
 const KMH_TO_MS = 1 / 3.6;
 
-/** Rohe Säule (Level von unten nach oben) am Punkt über den Vorhersagehorizont. */
-export async function fetchColumn(lat, lon, modelKey, forecastDays, fetchImpl = fetch.bind(globalThis)) {
-  const model = MODELS[modelKey];
-  if (!model) throw new Error(`Unbekanntes Modell: ${modelKey}`);
-
+// Kern-Level-Variablen (immer verfügbar) vs. optionale Wolken-Diagnose-Felder
+// (cloud_water/ice/cover_level{l} — Michaels direktes Modell-Output, erst seit
+// 2026 auf beiden Instanzen live). Scheitert der Request mit den optionalen
+// Feldern, wird einmalig ohne sie wiederholt (Muster wie SURFACE_OPTIONAL in
+// weather.js) — der Sundqvist-Fallback in clouds.js greift dann automatisch.
+function levelVars(nLevels, includeCloudDiag) {
   const vars = [];
-  for (let l = 1; l <= model.nLevels; l++) {
+  for (let l = 1; l <= nLevels; l++) {
     vars.push(`wind_u_component_level${l}`, `wind_v_component_level${l}`,
       `temperature_level${l}`, `height_agl_level${l}`, `relative_humidity_level${l}`,
       `pressure_level${l}`, `wind_w_level${l}`, `specific_humidity_level${l}`);
+    if (includeCloudDiag) {
+      vars.push(`cloud_water_level${l}`, `cloud_ice_level${l}`, `cloud_cover_level${l}`);
+    }
   }
+  return vars;
+}
+
+async function tryFetchColumn(lat, lon, model, forecastDays, vars, fetchImpl) {
   const params = new URLSearchParams({
     latitude: round5(lat), longitude: round5(lon),
     hourly: vars.join(","), models: model.apiModel,
@@ -30,17 +38,34 @@ export async function fetchColumn(lat, lon, modelKey, forecastDays, fetchImpl = 
   const resp = await fetchImpl(`${API_BASE}/v1/forecast?${params}`);
   const body = await resp.text();
   let data;
-  try { data = JSON.parse(body); } catch { throw new Error(`Serverfehler: ${body.slice(0, 150)}`); }
+  try { data = JSON.parse(body); } catch { return { error: `Serverfehler: ${body.slice(0, 150)}` }; }
   if (!resp.ok || data.error) {
-    throw new Error(data.reason ? `API: ${data.reason.slice(0, 150)}` : `API-Fehler ${resp.status}`);
+    return { error: data.reason ? `API: ${data.reason.slice(0, 150)}` : `API-Fehler ${resp.status}` };
   }
+  return { data };
+}
+
+/** Rohe Säule (Level von unten nach oben) am Punkt über den Vorhersagehorizont. */
+export async function fetchColumn(lat, lon, modelKey, forecastDays, fetchImpl = fetch.bind(globalThis)) {
+  const model = MODELS[modelKey];
+  if (!model) throw new Error(`Unbekanntes Modell: ${modelKey}`);
+
+  let result = await tryFetchColumn(lat, lon, model, forecastDays, levelVars(model.nLevels, true), fetchImpl);
+  if (result.error) {
+    result = await tryFetchColumn(lat, lon, model, forecastDays, levelVars(model.nLevels, false), fetchImpl);
+  }
+  if (result.error) throw new Error(result.error);
+  const data = result.data;
 
   const H = data.hourly, time = H.time, T = time.length;
   // Level von unten (l = nLevels, ~10 m) nach oben (l = 1) einsortieren.
   // wind_w (Vertikalgeschwindigkeit) kommt nativ in m/s (Faktor 1), anders als
-  // u/v in km/h. specific_humidity q_v kommt in g/kg → kg/kg (Faktor 0.001) für
-  // die Dampfdruck-/Feuchterechnung (clouds.js). Beide für die Wolken-Diagnose.
-  const h = [], u = [], v = [], t = [], rh = [], p = [], w = [], q = [];
+  // u/v in km/h. specific_humidity q_v sowie cloud_water/ice (QW/QI) kommen in
+  // g/kg → kg/kg (Faktor 0.001) für die Dampfdruck-/Kondensatrechnung
+  // (clouds.js). cloud_cover (CLC) bleibt in % wie relative_humidity. Alle für
+  // die Wolken-Diagnose — QW/QI/CLC fehlen (NaN), wenn die Instanz sie (noch)
+  // nicht führt; clouds.js fällt dann automatisch auf die RH-Heuristik zurück.
+  const h = [], u = [], v = [], t = [], rh = [], p = [], w = [], q = [], qw = [], qi = [], clc = [];
   for (let l = model.nLevels; l >= 1; l--) {
     h.push(toArr(H[`height_agl_level${l}`], T, 1));
     u.push(toArr(H[`wind_u_component_level${l}`], T, KMH_TO_MS));
@@ -50,8 +75,11 @@ export async function fetchColumn(lat, lon, modelKey, forecastDays, fetchImpl = 
     p.push(toArr(H[`pressure_level${l}`], T, 1));
     w.push(toArr(H[`wind_w_level${l}`], T, 1));
     q.push(toArr(H[`specific_humidity_level${l}`], T, 1e-3));
+    qw.push(toArr(H[`cloud_water_level${l}`], T, 1e-3));
+    qi.push(toArr(H[`cloud_ice_level${l}`], T, 1e-3));
+    clc.push(toArr(H[`cloud_cover_level${l}`], T, 1));
   }
-  return { time, h, u, v, t, rh, p, w, q, nLevels: h.length, elevation: data.elevation };
+  return { time, h, u, v, t, rh, p, w, q, qw, qi, clc, nLevels: h.length, elevation: data.elevation };
 }
 
 /**
@@ -62,7 +90,7 @@ export async function fetchColumn(lat, lon, modelKey, forecastDays, fetchImpl = 
  *            temp[k][i] (°C), freezing[i] (m AGL | null) }
  */
 export function buildField(col, capM = 8000, nTarget = 44, grid = "log") {
-  const { time, h, u, v, t, rh, w, p, q } = col;
+  const { time, h, u, v, t, rh, w, p, q, qw, qi, clc } = col;
   const T = time.length;
   const hMin = Math.max(10, firstFinite(h[0]) || 10);
   const targetH = grid === "lin" ? linspace(hMin, capM, nTarget) : logspace(hMin, capM, nTarget);
@@ -83,12 +111,14 @@ export function buildField(col, capM = 8000, nTarget = 44, grid = "log") {
       const uu = lerp(u, br, i), vv = lerp(v, br, i), tt = lerp(t, br, i), rr = lerp(rh, br, i);
       const ww = w ? lerp(w, br, i) : NaN;
       const pp = p ? lerp(p, br, i) : NaN, qq = q ? lerp(q, br, i) : NaN;
+      const qwq = qw ? lerp(qw, br, i) : NaN, qiq = qi ? lerp(qi, br, i) : NaN;
+      const clcq = clc ? lerp(clc, br, i) : NaN;
       uc[k][i] = uu; vc[k][i] = vv;
       spd[k][i] = Math.hypot(uu, vv);
       dir[k][i] = (Math.atan2(-uu, -vv) * 180 / Math.PI + 360) % 360;
       temp[k][i] = tt;
       rhc[k][i] = rr;
-      cloud[k][i] = cloudFraction({ q: qq, p: pp, t: tt, rh: rr }, targetH[k], ww);
+      cloud[k][i] = cloudFraction({ q: qq, p: pp, t: tt, rh: rr, qw: qwq, qi: qiq, clc: clcq }, targetH[k], ww);
     }
     // Nullgradgrenze: unterster Übergang T ≥ 0 → < 0 nach oben.
     freezing[i] = zeroCrossing(hi, t, i);
@@ -113,7 +143,10 @@ export function sampleColumnAtHeight(col, i, ht) {
       ? Math.exp(Math.log(a) + br.f * (Math.log(b) - Math.log(a)))
       : lerp(col.p, br, i);
   }
-  return { h: ht, u: val(col.u), v: val(col.v), t: val(col.t), rh: val(col.rh), p, w: val(col.w), q: val(col.q) };
+  return {
+    h: ht, u: val(col.u), v: val(col.v), t: val(col.t), rh: val(col.rh), p, w: val(col.w), q: val(col.q),
+    qw: val(col.qw), qi: val(col.qi), clc: val(col.clc),
+  };
 }
 
 // --- Helfer ----------------------------------------------------------------
