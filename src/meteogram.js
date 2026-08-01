@@ -10,10 +10,13 @@
  *             precipitation, weather_code, cloud_cover_low/mid/high,
  *             wind_gusts_10m (km/h), visibility (m) },
  *     units: {},
- *     rhCeiling?: (number|null)[] }  // Höhe der untersten gesättigten
+ *     rhCeiling?: (number|null)[],  // Höhe der untersten gesättigten
  *       Modell-Schicht je Stunde (m AGL, aus column.js), verfeinert die
  *       LCL-Schätzung der Wolkenbasis — optional, fehlt z. B. wenn die
  *       Säule (noch) nicht geladen ist (dann reine LCL-Schätzung).
+ *     groundFog?: ({fog,freezing}|null)[] }  // physikalischer Nebelnachweis
+ *       aus QW/QI je Stunde (clouds.js `groundFog`) — optional, ergänzt (ODER-
+ *       verknüpft) die `weather_code`-Nebelerkennung im Bewölkungs-Panel.
  * Wind wird aus den 10-m-Bodenfeldern gezeichnet (Höhenwinde -> Cross-Section).
  */
 
@@ -139,8 +142,9 @@ function setupHover(svg, m, ctx) {
       `Wolken t ${pct(V.cloud_cover_low[i])} · m ${pct(V.cloud_cover_mid[i])} · h ${pct(V.cloud_cover_high[i])}`,
       `Basis ${base ? fmtHeight(base.baseM) : "–"} · Sicht ${F(V.visibility[i], (v) => `${(v / 1000).toFixed(1)} km`)}`,
     ];
-    const ww = wwCat(V.weather_code[i]);
-    if (ww) lines.splice(1, 0, `Wetter: ${ww.label}`);
+    const physFog = m.groundFog ? m.groundFog[i] : null;
+    const ww = wwCat(V.weather_code[i]) || (physFog?.fog ? WW_TYPES.find((w) => w.key === "fog") : null);
+    if (ww) lines.splice(1, 0, `Wetter: ${ww.label}${physFog?.freezing ? " (gefrierend)" : ""}`);
     drawTip(ov, px, py, lines, W, H);
   });
   svg.addEventListener("pointerleave", clearOv);
@@ -175,7 +179,8 @@ function drawMoonRow(g, m, x, yTop, yBot) {
 }
 
 // Signifikantes Wetter (WMO ww) pro Stunde als farbige Zellen — auch für
-// Erscheinungen ohne Niederschlagsmenge (Nebel, Gewitter).
+// Erscheinungen ohne Niederschlagsmenge (Nebel, Gewitter). Nebel: weather_code
+// ODER physikalischer Nachweis aus der Säule (m.groundFog, s. drawCloud).
 function drawWeatherRibbon(g, m, x, yTop, yBot) {
   const WC = m.vars.weather_code;
   frame(g, yTop, yBot, x, "Wetter (ww)");
@@ -183,7 +188,8 @@ function drawWeatherRibbon(g, m, x, yTop, yBot) {
   const cy0 = yTop + 16, ch = yBot - cy0 - 3;
   const present = new Set();
   m.time.forEach((t, i) => {
-    const cat = wwCat(WC[i]);
+    const physFog = m.groundFog ? m.groundFog[i] : null;
+    const cat = wwCat(WC[i]) || (physFog?.fog ? WW_TYPES.find((w) => w.key === "fog") : null);
     if (!cat) return;
     present.add(cat.key);
     g.append(mk("rect", { x: x(t) - cellW / 2, y: cy0, width: cellW, height: ch, fill: cat.color }));
@@ -268,10 +274,13 @@ function drawCloud(g, m, x, yTop, yBot) {
   areaUnder(g, m.time, hi, (v) => y(v), x, yBot - 6, COL.cloudHigh);
   areaUnder(g, m.time, mi, (v) => y(v), x, yBot - 6, COL.cloudMid);
   areaUnder(g, m.time, lo, (v) => y(v), x, yBot - 6, COL.cloudLow);
-  // Nebel als orange Marker am Boden.
+  // Nebel als orange Marker am Boden: weather_code ODER physikalischer
+  // Nachweis aus der Säule (m.groundFog, additiv — andere Instanz als die
+  // Oberflächen-API).
   const bw = Math.max(1.5, (x(m.time[1]) - x(m.time[0])) * 0.9);
   m.time.forEach((t, i) => {
-    if (WC[i] === 45 || WC[i] === 48) {
+    const physFog = m.groundFog ? m.groundFog[i] : null;
+    if (WC[i] === 45 || WC[i] === 48 || physFog?.fog) {
       g.append(mk("rect", { x: x(t) - bw / 2, y: yBot - 10, width: bw, height: 8, fill: COL.fog }));
     }
   });

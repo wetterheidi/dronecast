@@ -28,10 +28,14 @@ const KMH_TO_MS = 1 / 3.6;
  *                     (clouds.js `cloudCeiling`), null wo keine tiefe BKN-
  *                     Schicht liegt. Fehlt es ganz (Säule nicht geladen),
  *                     fällt die Wolkenbasis-Zeile auf die LCL-Schätzung zurück.
+ * @param groundFogArr Optionales Array parallel zu surface.time:
+ *                     `{fog, freezing} | null` aus der Säule (clouds.js
+ *                     `groundFog`) — physikalischer Nebelnachweis aus QW/QI,
+ *                     ergänzt (nicht ersetzt) die `weather_code`-Erkennung.
  * @returns { time, rows: [{id,label,kind,cells:[{status,value|text}]}],
  *            conclusion: [{status, limitingId}] }
  */
-export function evaluate(surface, windBandMax, profile, opHeightM, cloudCeilingArr = null) {
+export function evaluate(surface, windBandMax, profile, opHeightM, cloudCeilingArr = null, groundFogArr = null) {
   const time = surface.time;
   const v = surface.vars;
   const T = v.temperature_2m, Td = v.dew_point_2m, ccLow = v.cloud_cover_low;
@@ -55,7 +59,7 @@ export function evaluate(surface, windBandMax, profile, opHeightM, cloudCeilingA
       time.map((_, i) => (precipArr ? precipArr[i] ?? null : null))),
     rangeRow("temperature", "Temperatur", "temp", L.tempMin, L.tempMax, profile.marginPct,
       time.map((_, i) => (T ? T[i] ?? null : null))),
-    hazardRow(time, wc, visArr),
+    hazardRow(time, wc, visArr, groundFogArr),
   ];
 
   const conclusion = time.map((_, i) => conclusionAt(rows, i));
@@ -87,17 +91,22 @@ function rangeRow(id, label, kind, minLimit, maxLimit, defaultMarginPct, valuesR
   return { id, label, kind, cells };
 }
 
-// Gewitter/gefrierender Niederschlag aus weather_code -> rot. Nebel nur dann
-// als eigene Warnung, wenn die Sicht-Zeile die Lage nicht ohnehin numerisch
-// abdeckt (Modell liefert `visibility` an diesem Zeitpunkt nicht).
-function hazardRow(time, wc, visArr) {
+// Gewitter/gefrierender Niederschlag aus weather_code -> rot. Nebel: aus
+// weather_code (45/48) ODER dem physikalischen Nachweis aus der Säule
+// (groundFogArr, clouds.js `groundFog` — andere/genauere Instanz als die
+// Oberflächen-API, daher additiv, nicht ersetzend). Als eigene Warnung nur,
+// wenn die Sicht-Zeile die Lage nicht ohnehin numerisch abdeckt (Modell
+// liefert `visibility` an diesem Zeitpunkt nicht).
+function hazardRow(time, wc, visArr, groundFogArr) {
   const cells = time.map((_, i) => {
     const code = wc?.[i];
     if (code === 95 || code === 96 || code === 99) return { status: "red", text: "Gewitter" };
     if (code === 56 || code === 57 || code === 66 || code === 67) return { status: "red", text: "gefr. Niederschlag" };
-    if (code === 45 || code === 48) {
+    const physFog = groundFogArr ? groundFogArr[i] : null;
+    if (code === 45 || code === 48 || physFog?.fog) {
       const visKnown = visArr ? visArr[i] != null : false;
-      return { status: visKnown ? "green" : "yellow", text: "Nebel" };
+      const freezing = code === 48 || physFog?.freezing;
+      return { status: visKnown ? "green" : "yellow", text: freezing ? "Gefr. Nebel" : "Nebel" };
     }
     return { status: "green", text: "–" };
   });

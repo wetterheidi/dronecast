@@ -11,7 +11,7 @@
  */
 
 import { sampleColumnAtHeight } from "./column.js";
-import { cloudFraction, cloudLayers } from "./clouds.js";
+import { cloudFraction, cloudLayers, groundFog } from "./clouds.js";
 import {
   windToDisplay, tempToDisplay, heightToDisplay,
   windUnit, tempUnit, heightUnit,
@@ -80,13 +80,14 @@ export function buildBriefingContent({ surface, col, point, modelLabel, maxHeigh
     const sec = surface.time[i];
     const ci = colIdxByTime.get(sec);
     const clouds = ci != null ? metarCloudsForHour(col, ci) : "N/A";
+    const physFog = ci != null ? groundFog(col, ci) : null;
     html += `<tr>
       <td>${ymdUTC(sec)}</td>
       <td>${hhmmZ(sec)}</td>
       <td>${metarDir(at("wind_direction_10m", i))}</td>
       <td>${windGust(at("wind_speed_10m", i), at("wind_gusts_10m", i))}</td>
       <td>${metarVis(at("visibility", i))}</td>
-      <td>${metarWeather(at("weather_code", i))}</td>
+      <td>${metarWeather(at("weather_code", i), physFog)}</td>
       <td>${clouds}</td>
       <td>${fmtNum(tempToDisplay(at("temperature_2m", i)), 0)}</td>
     </tr>`;
@@ -166,9 +167,19 @@ const WMO_TO_TAF = {
   80: "-SHRA", 81: "SHRA", 82: "+SHRA", 83: "-SHRASN", 85: "-SHSN", 86: "SHSN",
   95: "TSRA", 96: "TSGR", 99: "+TSGR",
 };
-function metarWeather(code) {
+/**
+ * METAR-nahes Wettersymbol aus `weather_code` — korrigiert um den
+ * physikalischen Nebelnachweis aus der Säule (`physFog`, clouds.js
+ * `groundFog`): meldet weather_code KEIN signifikantes Wetter, bestätigt die
+ * Säule (andere/genauere Instanz) aber Nebel, wird FG/FZFG ergänzt. Zeigt
+ * weather_code bereits etwas Schwereres (Gewitter, Niederschlag), bleibt das
+ * unverändert — Nebel wird nicht darübergestülpt.
+ */
+function metarWeather(code, physFog = null) {
   const c = parseInt(code, 10);
-  return Number.isNaN(c) ? "N/A" : (WMO_TO_TAF[c] || "N/A");
+  const w = Number.isNaN(c) ? "N/A" : (WMO_TO_TAF[c] || "N/A");
+  if (physFog?.fog && (w === "NSW" || w === "N/A")) return physFog.freezing ? "FZFG" : "FG";
+  return w;
 }
 
 /** Windrichtung METAR: auf 10° gerundet, 360 für Nord, dreistellig. */

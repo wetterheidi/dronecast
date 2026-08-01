@@ -4,7 +4,7 @@ import { fetchSurface, nearestIndex } from "./weather.js";
 import { initTimeControls, setRange, getMasterMs, subscribe as subscribeTime } from "./timeController.js";
 import { renderMeteogram } from "./meteogram.js";
 import { fetchColumn, buildField } from "./column.js";
-import { cloudCeiling } from "./clouds.js";
+import { cloudCeiling, groundFog } from "./clouds.js";
 import { renderCrossSection } from "./crosssection.js";
 import { buildBriefingHtml, buildBriefingContent } from "./briefing.js";
 import { evaluate as evaluateGoNoGo } from "./gonogo.js";
@@ -384,13 +384,14 @@ async function openMeteogram() {
   // Cross-Section/Briefing gebraucht und hier mitgenutzt (gecacht in
   // state.data.col). Schlägt der Abruf fehl, zeichnet drawBaseVis einfach
   // mit der reinen LCL-Schätzung weiter (kein Hard-Fail fürs Meteogramm).
-  let rhCeiling = null;
+  let rhCeiling = null, mgGroundFog = null;
   try {
     const col = await ensureColumn();
     if (col.time.length === surface.time.length) {
       const ccLow = surface.vars.cloud_cover_low;
       rhCeiling = surface.time.map((_, i) =>
         cloudCeiling(col, i, { ccLowPct: ccLow?.[i] })?.baseM ?? null);
+      mgGroundFog = surface.time.map((_, i) => groundFog(col, i));
     }
   } catch { /* Säule nicht verfügbar -> Meteogramm bleibt bei reiner LCL-Schätzung */ }
 
@@ -402,6 +403,7 @@ async function openMeteogram() {
     moon: { events },
     maxHeightM: settings.maxHeight,
     rhCeiling,
+    groundFog: mgGroundFog,
   });
 }
 
@@ -497,21 +499,26 @@ async function openGoNoGo() {
       return;
     }
   }
-  // Wolkenuntergrenze aus dem Modell-RH-Profil (dieselbe Säule wie Cross-
-  // Section/Briefing, gecacht). Scheitert der Abruf, bleibt cloudCeiling null →
-  // die Tabelle fällt auf die LCL-Schätzung zurück (kein Hard-Fail).
+  // Wolkenuntergrenze + Nebel aus der Säule (dieselbe wie Cross-
+  // Section/Briefing, gecacht). Scheitert der Abruf, bleiben beide null →
+  // die Tabelle fällt auf LCL-Schätzung bzw. reine weather_code-Erkennung
+  // zurück (kein Hard-Fail).
   if (state.data.cloudCeiling === undefined) {
     try {
       const col = await ensureColumn();
       const ccLow = state.data.surface.vars.cloud_cover_low;
-      state.data.cloudCeiling = col.time.length === state.data.surface.time.length
+      const sameLength = col.time.length === state.data.surface.time.length;
+      state.data.cloudCeiling = sameLength
         ? state.data.surface.time.map((_, i) => cloudCeiling(col, i, { ccLowPct: ccLow?.[i] })?.baseM ?? null)
         : null;
-    } catch { state.data.cloudCeiling = null; }
+      state.data.groundFog = sameLength
+        ? state.data.surface.time.map((_, i) => groundFog(col, i))
+        : null;
+    } catch { state.data.cloudCeiling = null; state.data.groundFog = null; }
   }
   renderGoNoGoTable(el("gng-body"), evaluateGoNoGo(
     state.data.surface, state.data.windBandMax, getProfile(settings.droneProfile), settings.maxHeight,
-    state.data.cloudCeiling ?? null,
+    state.data.cloudCeiling ?? null, state.data.groundFog ?? null,
   ));
 }
 el("gng-close").addEventListener("click", () => { el("gonogo").hidden = true; });
@@ -809,7 +816,7 @@ function refreshViews() {
   if (!el("gonogo").hidden && state.data?.windBandMax) {
     renderGoNoGoTable(el("gng-body"), evaluateGoNoGo(
       state.data.surface, state.data.windBandMax, getProfile(settings.droneProfile), settings.maxHeight,
-      state.data.cloudCeiling ?? null,
+      state.data.cloudCeiling ?? null, state.data.groundFog ?? null,
     ));
   }
   if (!el("briefing").hidden && state.data?.col) {

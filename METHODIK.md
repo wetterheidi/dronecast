@@ -172,10 +172,32 @@ die Höhe zu diktieren.
 **Nebel statt „Cloud 0 m":** bodenberührende Sättigung (Basis `< FOG_BASE_M =
 30 m`) wird von Ceiling **und** unterster Basis **übersprungen** (`minBaseM` in
 `lowestCrossing`) und die nächste Schicht darüber gesucht. Eine Wolke am Boden
-ist Nebel — getragen von der Modell-**Sicht** und `weather_code` (Briefing-Wetter
-zeigt FG/FZFG, Go/No-Go über die Sicht-/Hazard-Zeile), nicht als Wolkenschicht.
-Das verhindert zugleich ein Phantom-„NoGo" der Go/No-Go-Wolkenbasiszeile bei
-bloß feuchter (aber sichtiger) Bodenluft.
+ist Nebel — nicht als Wolkenschicht geführt. Das verhindert zugleich ein
+Phantom-„NoGo" der Go/No-Go-Wolkenbasiszeile bei bloß feuchter (aber
+sichtiger) Bodenluft.
+
+**`groundFog(col, i)` — physikalischer Nebelnachweis aus QW/QI.** Bislang trug
+die reine Sicht + `weather_code` der Oberflächen-API (einer *anderen* Instanz
+als Michaels Modell-Level) die gesamte Nebelerkennung. Mit `qw`/`qi` steht ein
+direkter Nachweis von Flüssigwasser/Eis am Boden zur Verfügung: prüft die Level
+unterhalb `FOG_QW_CHECK_M = 50 m` (von unten) auf `qw + qi > FOG_QW_MIN`
+(**Platzhalter**, wie `QCOND_SCALE`). Rückgabe `{fog, freezing}` — `freezing`
+(T ≤ 0 °C im Nebel-Level, unterkühlter Nebel, vereist auf Oberflächen inkl.
+Rotorblättern) — oder `null`, wenn die Instanz `qw`/`qi` (noch) nicht führt.
+
+*Additiv, nicht ersetzend:* wo `groundFog` ein Ergebnis liefert, wird es per
+ODER mit der `weather_code`-Erkennung verknüpft (nie stillschweigend
+überschrieben — beide Quellen können Nebel unabhängig erkennen):
+- **Go/No-Go** (`gonogo.js` `hazardRow`): `groundFogArr` (aus `app.js`
+  vorberechnet, parallel zu `cloudCeilingArr`) ergänzt die 45/48-Prüfung;
+  `freezing` (oder Code 48) beschriftet die Zelle „Gefr. Nebel" statt „Nebel".
+- **Meteogramm** (`meteogram.js` `drawCloud`/`drawWeatherRibbon`/Tooltip):
+  derselbe `groundFog`-Marker wie im Go/No-Go, zusätzlich zum
+  `weather_code`-Marker; Tooltip ergänzt „(gefrierend)".
+- **Briefing** (`briefing.js` `metarWeather`): bestätigt `groundFog` Nebel,
+  meldet `weather_code` aber **kein** signifikantes Wetter (`NSW`/`N/A`), wird
+  FG/FZFG ergänzt. Zeigt `weather_code` bereits Schwereres (Gewitter,
+  Niederschlag), bleibt das unverändert — Nebel wird nicht darübergestülpt.
 
 **Meteogramm** (`refineCloudBase()`, verdrahtet in `openMeteogram()`,
 [src/app.js](src/app.js)): liegt ein Modell-Ceiling vor, bestimmt DAS die Höhe

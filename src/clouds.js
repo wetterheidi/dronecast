@@ -19,6 +19,10 @@
  *     c. CF = Sundqvist(RH_eff, RH_crit).
  *  4. Vertikales Clustering → Schichten, Ceiling und unterste Basis (stufen-
  *     unabhängig, arbeitet nur auf der fertigen CF-Kurve).
+ *
+ * Daneben `groundFog()`: physikalische Nebelerkennung direkt aus QW/QI am
+ * Boden (unabhängig von der CF-Kurve), Ersatz/Ergänzung für die bisherige
+ * Sicht-/`weather_code`-Erkennung.
  */
 
 // --- Kalibrierung (Startwerte, später ggf. je Modell / an METAR) ------------
@@ -43,10 +47,18 @@ export const CF_FEW = 0.10, CF_SCT = 0.25, CF_BKN = 0.50, CF_OVC = 0.90;
 // nur optischer Dunst, keine Wolke → RH_crit dort auf RH_CRIT_SURF_GUARD
 // anheben (RH < ~90 % ⇒ CF = 0). Gesättigte Schichten mit Basis < FOG_BASE_M
 // berühren den Boden = Nebel: aus Wolken-Layern/Ceiling ausgenommen, getragen
-// von der Modell-Sicht + weather_code (siehe METHODIK.md 4).
+// von der Modell-Sicht + weather_code — bzw., wo verfügbar, von `groundFog()`
+// (s. u., physikalisch aus QW/QI) — siehe METHODIK.md 4.3.
 const Z_SURF_M = 150;            // m AGL — Dicke der bodennahen Dunstschicht
 const RH_CRIT_SURF_GUARD = 90;   // % — Mindest-RH_crit direkt am Boden
 const FOG_BASE_M = 30;           // m AGL — darunter gilt eine Basis als Nebel
+
+// Physikalische Nebelerkennung (`groundFog()`, s. u.): nennenswertes Kondensat
+// (QW+QI) an einem bodennahen Level unterhalb FOG_QW_CHECK_M gilt als Nebel —
+// direkter als die RH-Heuristik, die bodennah nur über den Dunst-Guard
+// zwischen Dunst und Wolke unterscheidet. PLATZHALTER, wie QCOND_SCALE.
+const FOG_QW_CHECK_M = 50;  // m AGL — Level-Reichweite der Nebelprüfung
+const FOG_QW_MIN = 1e-5;    // kg/kg — Kondensat-Schwelle für „Nebel vorhanden"
 
 // Kondensat-Schwelle für die QW/QI-Stufe (Stufe 2, s. u.): Skala für
 // „nennenswerte" Wolkenwasser-/eis-Konzentration in kg/kg. PLATZHALTER — bis
@@ -229,6 +241,39 @@ export function cloudCeiling(col, i, { coverThresh = CF_BKN, ccLowPct = null } =
  */
 export function lowestCloudBase(col, i) {
   return lowestCrossing(col, i, CF_FEW, FOG_BASE_M);
+}
+
+/**
+ * Physikalische Nebelerkennung zur Stunde `i`: prüft die Level unterhalb
+ * `FOG_QW_CHECK_M` (von unten nach oben) auf nennenswertes Kondensat
+ * (`qw + qi > FOG_QW_MIN`). Anders als die CF-Kurve (die bodennah RH-basiert
+ * zwischen Dunst und Wolke unterscheidet, `RH_CRIT_SURF_GUARD`) ist das ein
+ * direkter Nachweis von Flüssigwasser/Eis am Boden — Nebel im physikalischen
+ * Sinn, unabhängig vom Sundqvist-Fallback.
+ *
+ * `freezing`: unterkühlter Nebel (T ≤ 0 °C im Nebel-Level) — friert auf
+ * Oberflächen (Rotorblätter!) auf, relevanter Hazard über die reine
+ * Sichtbehinderung hinaus.
+ *
+ * @returns {{ fog: boolean, freezing: boolean } | null} `null`, wenn `qw`/`qi`
+ *   auf dieser Instanz (noch) nicht geführt werden — Aufrufer fällt dann auf
+ *   die Sicht-/`weather_code`-Erkennung zurück (siehe METHODIK.md 4.3).
+ */
+export function groundFog(col, i) {
+  let sawData = false;
+  for (let k = 0; k < col.nLevels; k++) {
+    const h = col.h[k]?.[i];
+    if (!Number.isFinite(h)) continue;
+    if (h > FOG_QW_CHECK_M) break; // Level von unten nach oben sortiert
+    const qw = col.qw?.[k]?.[i], qi = col.qi?.[k]?.[i];
+    if (!Number.isFinite(qw) && !Number.isFinite(qi)) continue; // Instanz ohne QW/QI
+    sawData = true;
+    if ((qw || 0) + (qi || 0) > FOG_QW_MIN) {
+      const t = col.t?.[k]?.[i];
+      return { fog: true, freezing: Number.isFinite(t) && t <= 0 };
+    }
+  }
+  return sawData ? { fog: false, freezing: false } : null;
 }
 
 /**
