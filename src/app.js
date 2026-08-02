@@ -214,6 +214,21 @@ el("coordinput").addEventListener("keydown", (e) => {
 // ---------------------------------------------------------------------------
 el("load").addEventListener("click", loadForecast);
 
+// Verwirft die Punktvorhersage des zuvor geladenen Punkts, inkl. aller davon
+// abhängigen Overlays. Nötig, sobald ein neuer Punkt gewählt wird, für den
+// (noch) keine gültigen Daten vorliegen — sonst zeigt das Panel weiter die
+// alten Werte, obwohl Marker/Position schon auf den neuen Punkt zeigen.
+function clearForecast() {
+  state.data = null;
+  el("now").hidden = true;
+  el("now").open = false;
+  el("now-body").innerHTML = "";
+  el("products").hidden = true;
+  el("meteogram").hidden = true;
+  el("crosssection").hidden = true;
+  el("gonogo").hidden = true;
+}
+
 async function loadForecast() {
   if (!state.point) return;
   const { lat, lon } = state.point;
@@ -221,6 +236,9 @@ async function loadForecast() {
 
   if (lat < model.bbox.latMin || lat > model.bbox.latMax ||
       lon < model.bbox.lonMin || lon > model.bbox.lonMax) {
+    // Sonst bliebe die Punktvorhersage des zuvor gewählten (gültigen) Punkts
+    // sichtbar stehen und könnte fälschlich für den neuen Punkt gehalten werden.
+    clearForecast();
     setStatus(`Punkt liegt außerhalb des ${model.label}-Gebiets.`, "error");
     return;
   }
@@ -861,6 +879,14 @@ function setStatus(msg, cls) {
   const s = el("status");
   s.textContent = msg;
   s.className = cls || "";
+  if (cls === "error") {
+    // Fehler dürfen nicht unbemerkt bleiben: Panel ggf. aufklappen (mobil,
+    // eingeklappter Zustand) und zur Meldung scrollen (Panel kann durch
+    // eine zuvor geladene Vorhersage weit nach unten gescrollt sein).
+    el("panel").classList.remove("collapsed");
+    el("paneltoggle").setAttribute("aria-expanded", "true");
+    s.scrollIntoView({ block: "nearest" });
+  }
 }
 
 function windFromDir(u, v) {
