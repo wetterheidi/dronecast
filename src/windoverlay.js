@@ -71,6 +71,7 @@ import { settings, updateSetting } from "./settings.js";
 import { nearestIndex } from "./weather.js";
 import { subscribe as subscribeTime, getMasterMs } from "./timeController.js";
 import { windToDisplay, windUnit, heightToDisplay, heightUnit } from "./units.js";
+import { windBarbMarkup } from "./windbarb.js";
 import {
   clampNum, firstFinite, round5, classFor, hex, bilin, fillBlock,
   buildGrid, debounce, throttle, sleep,
@@ -875,56 +876,15 @@ export function initWindOverlay(map) {
   }, AUTO_CHECK_MS);
 }
 
-// -- WMO-Windfieder als Inline-SVG (portiert aus METOCViewer/windbarb_viewer.html) --
+// -- WMO-Windfieder als Inline-SVG (Geometrie aus windbarb.js, gemeinsam mit
+// Meteogramm/Cross-Section) --
 // Einfarbig dunkel mit kräftigem weißem Halo (Umriss) statt Einfärbung nach
 // Geschwindigkeit: der weiße Halo liefert Kontrast über der dunklen Esri-
-// Satellitenkarte, der dunkle Kern über der hellen, unruhigen OSM-Karte. Der
-// Halo ist bewusst breiter als in der Ursprungsportierung, weil die
-// geschwindigkeitsabhängige (teils helle) Färbung — die vorher etwas Kontrast
-// mitbrachte — nun wegfällt.
+// Satellitenkarte, der dunkle Kern über der hellen, unruhigen OSM-Karte.
 function makeBarbSVG(spdKt, dirFrom, lat, size, color) {
   const side = lat < 0 ? -1 : 1; // Südhalbkugel: Fiedern spiegeln
-  const halo = "#ffffff";
   const h = size / 2;
-  const SHAFT = 18, BW = 10, BS = 4.5, SW = 2.0, HALO = SW + 3.5;
-
-  if (spdKt < 2.5) {
-    const c = `<circle cx="${h}" cy="${h}" r="4" fill="none" stroke="${color}" stroke-width="${SW}"/>`
-      + `<circle cx="${h}" cy="${h}" r="8" fill="none" stroke="${color}" stroke-width="${SW}"/>`;
-    const hc = `<circle cx="${h}" cy="${h}" r="4" fill="none" stroke="${halo}" stroke-width="${HALO}"/>`
-      + `<circle cx="${h}" cy="${h}" r="8" fill="none" stroke="${halo}" stroke-width="${HALO}"/>`;
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">${hc}${c}</svg>`;
-  }
-
-  let rem = Math.round(spdKt / 5) * 5;
-  const penn = Math.floor(rem / 50); rem -= penn * 50;
-  const full = Math.floor(rem / 10); rem -= full * 10;
-  const half = rem >= 5 ? 1 : 0;
-
-  function buildMarks(sc, sw) {
-    let out = "", y = -SHAFT;
-    for (let i = 0; i < penn; i++) {
-      const y0 = y, y1 = y + BS * 2;
-      out += `<polygon points="0,${y0} 0,${y1} ${side * BW},${(y0 + y1) / 2}" fill="${sc}" stroke="none"/>`;
-      y += BS * 2 + 1;
-    }
-    for (let i = 0; i < full; i++) {
-      out += `<line x1="0" y1="${y}" x2="${side * BW}" y2="${y}" stroke="${sc}" stroke-width="${sw}" stroke-linecap="round"/>`;
-      y += BS;
-    }
-    if (half) out += `<line x1="0" y1="${y}" x2="${side * BW * 0.5}" y2="${y}" stroke="${sc}" stroke-width="${sw}" stroke-linecap="round"/>`;
-    return out;
-  }
-
-  const haloG = `<circle cx="0" cy="0" r="2.5" fill="${halo}"/>`
-    + `<line x1="0" y1="0" x2="0" y2="${-SHAFT}" stroke="${halo}" stroke-width="${HALO}" stroke-linecap="round"/>`
-    + buildMarks(halo, HALO);
-
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">`
-    + `<g transform="translate(${h},${h}) rotate(${dirFrom})">`
-    + haloG
-    + `<circle cx="0" cy="0" r="2" fill="${color}"/>`
-    + `<line x1="0" y1="0" x2="0" y2="${-SHAFT}" stroke="${color}" stroke-width="${SW}" stroke-linecap="round"/>`
-    + buildMarks(color, SW)
-    + `</g></svg>`;
+    + `<g transform="translate(${h},${h})">${windBarbMarkup(spdKt, dirFrom, { size, side, color })}</g>`
+    + `</svg>`;
 }

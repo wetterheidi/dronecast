@@ -172,7 +172,7 @@ select, input[type="number"], input[type="text"] {
   overflow: hidden;
 }
 #crosssection[hidden] { display: none; }
-#xs-body { flex: 1; min-height: 0; overflow: hidden; padding: 4px 6px 8px; }
+#xs-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 6px 8px; }
 .xs-svg { display: block; cursor: crosshair; }
 #xs-close { margin-left: auto; border: none; background: none; font-size: 20px; color: #52514e; cursor: pointer; padding: 0 4px; }
 .seg-toggle + #xs-close { margin-left: 8px; } /* Umschalter übernimmt das Auffüllen */

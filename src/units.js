@@ -67,15 +67,24 @@ export function fmtTemp(c) {
 /** Windrichtung (Herkunft, °) als 16-teilige Kompassrose. */
 const COMPASS = ["N", "NNO", "NO", "ONO", "O", "OSO", "SO", "SSO",
   "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+/** Grad ICAO-konform auf 10° gerundet, 0° (Windstille-Konvention) wird zu 360°. */
+function roundDirIcao(norm) {
+  const r = Math.round(norm / 10) * 10 % 360;
+  return r === 0 ? 360 : r;
+}
 export function fmtDir(deg) {
   if (deg == null || !Number.isFinite(deg)) return "–";
-  const i = Math.round(((deg % 360) + 360) % 360 / 22.5) % 16;
-  return `${Math.round(deg)}° ${COMPASS[i]}`;
+  const norm = ((deg % 360) + 360) % 360;
+  const i = Math.round(norm / 22.5) % 16;
+  return `${COMPASS[i]} ${roundDirIcao(norm)}°`;
 }
 
 /** Windrichtung als dreistellige Gradzahl ohne Kompass-Buchstabe (ddd°),
- *  für die kompakte „ddd° ff"-Notation in „Aktuelle Bedingungen". */
+ *  für die kompakte „ddd° ff"-Notation in „Aktuelle Bedingungen". ICAO-konform
+ *  auf 10° gerundet; was dabei auf 0° fiele, wird als 360° gemeldet (0° ist
+ *  laut Konvention Windstille, keine Richtung). */
 export function fmtDirPadded(deg) {
   if (deg == null || !Number.isFinite(deg)) return "–––°";
-  return `${String(Math.round(((deg % 360) + 360) % 360)).padStart(3, "0")}°`;
+  const norm = ((deg % 360) + 360) % 360;
+  return `${String(roundDirIcao(norm)).padStart(3, "0")}°`;
 }

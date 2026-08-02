@@ -27,6 +27,9 @@ import {
   fmtHeight, fmtWind, fmtDir, fmtTemp,
 } from "./units.js";
 import { refineCloudBase } from "./clouds.js";
+import { placeWindBarb, CHART_PX_PER_HOUR, CHART_BARB_SIZE } from "./windbarb.js";
+
+const KT_PER_MS = 1.94384;
 
 const NS = "http://www.w3.org/2000/svg";
 const INK = "#0b0b0b";
@@ -52,8 +55,15 @@ export function renderMeteogram(host, model) {
   const time = model.time || [];
   if (time.length < 2) { host.textContent = "Keine Zeitreihe."; return; }
 
-  const W = Math.max(host.clientWidth || 0, 340);
-  const pw = W - M.l - M.r;
+  // Panelbreite: fester Pixelabstand pro Stunde (Windfiedern brauchen dafür
+  // genug Platz, siehe drawWind), Containerbreite nur als UNTERGRENZE für
+  // kurze Horizonte. Bei langen Horizonten wächst die Breite entsprechend
+  // mit — #mg-body hat overflow:auto, das Panel scrollt dann horizontal statt
+  // die Fiedern bis zur Unlesbarkeit zusammenzuquetschen.
+  const hours = Math.max(1, (time[time.length - 1] - time[0]) / 3600);
+  const containerPw = Math.max(host.clientWidth || 0, 340) - M.l - M.r;
+  const pw = Math.max(hours * CHART_PX_PER_HOUR, containerPw);
+  const W = pw + M.l + M.r;
   const t0 = time[0], t1 = time[time.length - 1];
   const x = (t) => M.l + ((t - t0) / (t1 - t0)) * pw;
   x.right = M.l + pw; // rechte Plotkante (für Rahmen/Achsen)
@@ -139,7 +149,7 @@ function setupHover(svg, m, ctx) {
       new Date(time[i] * 1000).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" }),
       `Temp ${F(V.temperature_2m[i], fmtTemp)} · Td ${F(V.dew_point_2m[i], fmtTemp)}`,
       `Feuchte ${pct(V.relative_humidity_2m[i])} · Nied. ${F(V.precipitation[i], (p) => `${p < 1 ? p.toFixed(2) : p.toFixed(1)} mm/h`)}`,
-      `Wind ${F(spd, fmtWind)} · ${F(V.wind_direction_10m[i], fmtDir)} · Böen ${F(gust, fmtWind)}`,
+      `Wind ${F(V.wind_direction_10m[i], fmtDir)} ${F(spd, fmtWind)} Böen ${F(gust, fmtWind)}`,
       `Wolken t ${pct(V.cloud_cover_low[i])} · m ${pct(V.cloud_cover_mid[i])} · h ${pct(V.cloud_cover_high[i])}`,
       `Basis ${base ? fmtHeight(base.baseM) : "–"} · Sicht ${F(V.visibility[i], (v) => `${(v / 1000).toFixed(1)} km`)}`,
     ];
@@ -254,14 +264,15 @@ function drawWind(g, m, x, yTop, yBot) {
   // Böen als rote Warnlinie.
   polyline(g, m.time, gustMs, (v) => y(windToDisplay(v)), x, COL.gust, 1.4, "3 3");
 
-  // Richtungspfeile (Herkunft) alle ~3 h am oberen Panelrand.
-  const step = Math.max(1, Math.round(3 * 3600 / (m.time[1] - m.time[0])));
+  // Windfiedern (WMO-Barbs) stündlich am oberen Panelrand — kleine Symbolgröße
+  // (CHART_BARB_SIZE), dafür Panelbreite mit fester Pixeldichte pro Stunde
+  // (siehe renderMeteogram), sonst wären stündliche Fiedern bei langen
+  // Horizonten unlesbar zusammengequetscht.
   const ay = yTop + 14;
-  for (let i = 0; i < m.time.length; i += step) {
+  for (let i = 0; i < m.time.length; i++) {
     const d = dir[i], s = spd[i];
     if (!Number.isFinite(d) || !Number.isFinite(s)) continue;
-    if (s < 0.5) { g.append(mk("circle", { cx: x(m.time[i]), cy: ay, r: 3, fill: "none", stroke: MUTED, "stroke-width": 1 })); continue; }
-    arrow(g, x(m.time[i]), ay, d);
+    g.append(placeWindBarb(x(m.time[i]), ay, s * KT_PER_MS, d, { size: CHART_BARB_SIZE, color: INK }));
   }
   legend(g, M.l + 4, yBot - 6, [["Mittel", COL.windMean], ["Böen", COL.gust]]);
 }
@@ -425,22 +436,6 @@ function moonGlyph(g, cx, cy, r, illum, waxing) {
 function hhmm(ms) {
   const d = new Date(ms);
   return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
-}
-
-function arrow(g, cx, cy, dirFrom) {
-  // Pfeil zeigt in Strömungsrichtung (wohin der Wind weht); die Spitze sitzt
-  // exakt auf dem Datenpunkt, der Schaft läuft nach hinten weg.
-  const rad = (dirFrom + 180) * Math.PI / 180;
-  const dx = Math.sin(rad), dy = -Math.cos(rad);
-  const len = 12, hl = 4.5, hw = 3;
-  const bx = cx - dx * len, by = cy - dy * len;      // Schaftende
-  const nx = cx - dx * hl, ny = cy - dy * hl;        // Kopfansatz
-  const px = -dy, py = dx;                            // senkrecht
-  g.append(mk("line", { x1: bx, y1: by, x2: nx, y2: ny, stroke: INK, "stroke-width": 1.2 }));
-  g.append(mk("polygon", {
-    points: `${cx},${cy} ${nx + px * hw},${ny + py * hw} ${nx - px * hw},${ny - py * hw}`,
-    fill: INK,
-  }));
 }
 
 function yTicks(g, lo, hi, y, x, color, fmt = (v) => String(Math.round(v))) {

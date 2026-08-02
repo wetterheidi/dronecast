@@ -12,6 +12,9 @@ import {
   heightToDisplay, heightUnit, windToDisplay, windUnit, tempToDisplay, tempUnit,
   fmtHeight, fmtWind, fmtDir, fmtTemp,
 } from "./units.js";
+import { placeWindBarb, CHART_PX_PER_HOUR, CHART_BARB_SIZE } from "./windbarb.js";
+
+const KT_PER_MS = 1.94384;
 
 const NS = "http://www.w3.org/2000/svg";
 const INK = "#0b0b0b", MUTED = "#52514e", GRID = "#d9d8d3";
@@ -37,9 +40,16 @@ export function renderCrossSection(host, field, opts = {}) {
   const { time, targetH } = field;
   if (!time || time.length < 2 || !targetH) { host.textContent = "Keine Säulendaten."; return; }
 
-  const W = Math.max(host.clientWidth || 0, 360);
+  // Panelbreite: fester Pixelabstand pro Stunde (Windfiedern brauchen dafür
+  // genug Platz, siehe windArrows), Containerbreite nur als UNTERGRENZE für
+  // kurze Horizonte. Bei langen Horizonten wächst die Breite mit — #xs-body
+  // hat overflow:auto, das Panel scrollt dann horizontal statt die Fiedern
+  // bis zur Unlesbarkeit zusammenzuquetschen.
+  const hours = Math.max(1, (time[time.length - 1] - time[0]) / 3600);
+  const containerPw = Math.max(host.clientWidth || 0, 360) - M.l - M.r;
+  const pw = Math.max(hours * CHART_PX_PER_HOUR, containerPw);
+  const W = pw + M.l + M.r;
   const Hpx = Math.max(host.clientHeight || 0, 460);
-  const pw = W - M.l - M.r;
   const t0 = time[0], t1 = time[time.length - 1];
   const x = (t) => M.l + ((t - t0) / (t1 - t0)) * pw;
   x.right = M.l + pw;
@@ -145,7 +155,7 @@ function setupHover(svg, ctx) {
     drawTip(ov, px, py, [
       new Date(time[i] * 1000).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" }),
       `Höhe ${fmtHeight(h)}`,
-      `Wind ${fmtWind(s.spd)} · ${fmtDir(s.dir)}`,
+      `Wind ${fmtDir(s.dir)} ${fmtWind(s.spd)}`,
       `Temp ${fmtTemp(s.temp)}`,
       `Wolken ${Math.round(s.cloud * 100)} %`,
     ], W, Hpx);
@@ -194,32 +204,20 @@ function heat(g, field, val2d, colorFn, x, y, targetH, time, lin) {
 
 // --- Overlays --------------------------------------------------------------
 
+// Windfiedern (WMO-Barbs) stündlich entlang der Zeitachse, je Höhenreihe
+// (nRows, unabhängig von der Zeitauflösung) — kleine Symbolgröße
+// (CHART_BARB_SIZE), dafür wächst die Panelbreite mit fester Pixeldichte pro
+// Stunde (siehe renderCrossSection).
 function windArrows(g, field, x, y, targetH, time, nRows = 7) {
   const n = targetH.length, T = time.length;
-  const stepT = Math.max(1, Math.round(3 * 3600 / (time[1] - time[0])));   // ~3 h
   const stepK = Math.max(1, Math.round(n / nRows));
-  for (let i = Math.floor(stepT / 2); i < T; i += stepT) {
+  for (let i = 0; i < T; i++) {
     for (let k = Math.floor(stepK / 2); k < n; k += stepK) {
       const s = field.spd[k][i], d = field.dir[k][i];
-      const cx = x(time[i]), cy = y(targetH[k]);
       if (!Number.isFinite(s) || !Number.isFinite(d)) continue;
-      if (s < 0.5) { g.append(mk("circle", { cx, cy, r: 2.5, fill: "none", stroke: INK, "stroke-width": 1 })); continue; }
-      arrowHalo(g, cx, cy, d, 11);
+      g.append(placeWindBarb(x(time[i]), y(targetH[k]), s * KT_PER_MS, d, { size: CHART_BARB_SIZE, color: INK }));
     }
   }
-}
-
-// Flugpfeil (zeigt in Strömungsrichtung), mittig auf dem Gitterknoten, mit
-// weißem Rand für Lesbarkeit über der Heatmap.
-function arrowHalo(g, cx, cy, dirFrom, L) {
-  const rad = (dirFrom + 180) * Math.PI / 180;
-  const dx = Math.sin(rad), dy = -Math.cos(rad);
-  const tx = cx + dx * L / 2, ty = cy + dy * L / 2;
-  const bx = cx - dx * L / 2, by = cy - dy * L / 2;
-  const nx = tx - dx * 4, ny = ty - dy * 4, px = -dy, py = dx;
-  const line = (stroke, w) => mk("line", { x1: bx, y1: by, x2: nx, y2: ny, stroke, "stroke-width": w, "stroke-linecap": "round" });
-  const head = (fill) => mk("polygon", { points: `${tx.toFixed(1)},${ty.toFixed(1)} ${(nx + px * 3).toFixed(1)},${(ny + py * 3).toFixed(1)} ${(nx - px * 3).toFixed(1)},${(ny - py * 3).toFixed(1)}`, fill });
-  g.append(line("#fff", 3), head("#fff"), line(INK, 1.4), head(INK));
 }
 
 function freezingLine(g, field, x, y, hMin, hMax) {
