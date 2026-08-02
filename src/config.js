@@ -2,8 +2,12 @@
 export const API_BASE = "https://open-meteo.mah.priv.at";
 
 // Oberflächen-/Single-Level-Felder (Niederschlag, Böen, CAPE, Bewölkung, …):
-// Michaels Instanz führt diese (noch) nicht, daher die öffentliche Instanz
-// mit demselben ICON-Modell. Hybrid-Quelle, siehe weather.js.
+// Michaels Instanz führt einen Teil davon inzwischen selbst (Downloadgruppe
+// "heidiVars", u. a. wind_gusts_10m, temperature_2m, cape, precipitation —
+// siehe gustoverlay.js), aber nicht den vollen Satz (z. B. cloud_cover*,
+// wind_speed/direction_10m, precipitation_probability fehlen dort). Für
+// Felder außerhalb von heidiVars bleibt die öffentliche Instanz mit
+// demselben ICON-Modell die Quelle. Hybrid-Quelle, siehe weather.js.
 export const SURFACE_API_BASE = "https://api.open-meteo.com";
 
 // Levelzählung der API: N=1 oberstes, N=nLevels unterstes Modelllevel (~10 m AGL).
@@ -95,7 +99,11 @@ export const MAPLAYERS_TIME_STEP_MIN = 15;
 // "grobe" Dichtestufe braucht bei einem typischen Fenster ~450–500 Punkte in
 // diesem Zoombereich — das Budget muss deutlich darüber liegen, sonst zeigen
 // alle Dichtestufen dasselbe (kappungsbegrenzte) Gitter.
-export const WIND_OVERLAY_MIN_ZOOM = 9;
+// Auf 7 abgesenkt, seit Böen primär über Michaels ratenlimitfreie Instanz
+// laufen (API_BASE, Downloadgruppe "heidiVars" — siehe gustoverlay.js);
+// buildGrid() deckelt die Punktzahl je Refresh ohnehin über das Budget, ein
+// breiterer Ausschnitt liefert also nur ein gröberes, kein größeres Gitter.
+export const WIND_OVERLAY_MIN_ZOOM = 7;
 export const WIND_OVERLAY_MAX_POINTS = 1500;
 export const WIND_OVERLAY_POINTS_PER_REQUEST = 75;
 // Gleichzeitige Requests je Refresh. Bewusst begrenzt: seit dem Höhenschieber

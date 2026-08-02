@@ -8,10 +8,14 @@
  * Böen sind ein reines Oberflächenfeld — es gibt sie NUR in 10 m, nicht auf
  * nativen Modell-Leveln. Damit entfällt die gesamte Höhenband-Maschinerie des
  * Wind-Layers (kein `ensureBand`, kein Höhenschieber, eine Cache-Dimension
- * weniger). Zudem führt Michaels Modell-Level-Instanz (`API_BASE`) die
- * Oberflächenfelder nicht — Böen kommen von der öffentlichen Instanz
- * (`SURFACE_API_BASE`, siehe config.js/weather.js). Level-zentrierte Pipeline +
- * andere Datenquelle ⇒ sauberer als eigenständiger Layer.
+ * weniger).
+ *
+ * Datenquelle: primär Michaels ratenlimitfreie Instanz (`API_BASE`), die Böen
+ * seit der Downloadgruppe "heidiVars" mitführt (gleiches Open-Meteo-Schema,
+ * gleicher `/v1/forecast`-Endpunkt). Fallback bei jedem Fehler (Netzwerk,
+ * HTTP, noch nicht eingelesener Lauf) ist die öffentliche Instanz
+ * (`SURFACE_API_BASE`, siehe config.js/weather.js) — sie führt weiterhin den
+ * vollen Oberflächen-Feldsatz, den `heidiVars` (noch) nicht abdeckt.
  *
  * Zwei Darstellungsmodi (settings.gustLayerMode), bewusst als Umschalter (nicht
  * gleichzeitig), um das Kartenbild ruhig zu halten:
@@ -22,16 +26,16 @@
  *
  * Min-Zoom und Dichtestufen teilt er mit dem Wind-Layer (WIND_OVERLAY_MIN_ZOOM,
  * WIND_OVERLAY_DENSITY_OPTIONS). Punktebudget, Parallelität und Retry-Verhalten
- * sind dagegen EIGEN und bewusst sparsamer (GUST_OVERLAY_*): der Wind-Layer
- * trifft eine limitfreie Instanz, der Böen-Layer die gemeterte öffentliche —
- * die mit HTTP 429 antwortet, wenn zu viele Locations/Requests in kurzer Zeit
- * kommen. Bei 429 pausiert der Pool und wartet Retry-After ab (statt schnell
+ * sind dagegen EIGEN und bewusst sparsamer (GUST_OVERLAY_*), weil der Fallback
+ * die gemeterte öffentliche Instanz trifft — die mit HTTP 429 antwortet, wenn
+ * zu viele Locations/Requests in kurzer Zeit kommen. Bei 429 (nur am Fallback
+ * möglich) pausiert der Pool und wartet Retry-After ab (statt schnell
  * nachzufeuern und das Limit zu verschärfen). Caching (LRU je Punkt, 1 h TTL)
  * verhindert Re-Fetches beim Zeitschieben und Pannen im geladenen Gebiet.
  */
 
 import {
-  SURFACE_API_BASE, MODELS,
+  API_BASE, SURFACE_API_BASE, MODELS,
   WIND_OVERLAY_MIN_ZOOM, WIND_OVERLAY_DENSITY_OPTIONS,
   GUST_OVERLAY_MAX_POINTS, GUST_OVERLAY_POINTS_PER_REQUEST,
   GUST_OVERLAY_MAX_CONCURRENCY, GUST_OVERLAY_CHUNK_RETRIES,
@@ -124,20 +128,10 @@ export function initGustOverlay(map) {
   }
 
   // -- Fetch --------------------------------------------------------------------
-  async function fetchChunk(chunk, modelKey, model, signal) {
-    const params = new URLSearchParams({
-      latitude: chunk.map(([a]) => round5(a * model.grid)).join(","),
-      longitude: chunk.map(([, b]) => round5(b * model.grid)).join(","),
-      hourly: "wind_gusts_10m",
-      models: model.apiModel,
-      timeformat: "unixtime",
-      forecast_days: String(settings.forecastDays),
-      cell_selection: "nearest",
-    });
-    const resp = await fetch(`${SURFACE_API_BASE}/v1/forecast?${params}`, { signal });
-    // Rate-Limit der öffentlichen Instanz gesondert behandeln: nicht als
-    // generischen Fehler schnell wiederholen (das verschärft das Limit nur),
-    // sondern nach oben melden, damit der Pool pausiert und Retry-After abwartet.
+  // Ein Abruf gegen einen Host. Wirft bei HTTP-Fehler/Parse-Fehler/API-Error;
+  // 429 (nur an der öffentlichen Instanz relevant) trägt `rateLimited`.
+  async function fetchFromHost(base, params, signal) {
+    const resp = await fetch(`${base}/v1/forecast?${params}`, { signal });
     if (resp.status === 429) {
       const e = new Error("Rate-Limit (429) der öffentlichen Open-Meteo-Instanz erreicht");
       e.rateLimited = true;
@@ -154,6 +148,32 @@ export function initGustOverlay(map) {
     if (!resp.ok || data.error) {
       throw new Error(data.reason ? `API-Fehler: ${data.reason.slice(0, 180)}` : `API-Fehler ${resp.status}`);
     }
+    return data;
+  }
+
+  async function fetchChunk(chunk, modelKey, model, signal) {
+    const params = new URLSearchParams({
+      latitude: chunk.map(([a]) => round5(a * model.grid)).join(","),
+      longitude: chunk.map(([, b]) => round5(b * model.grid)).join(","),
+      hourly: "wind_gusts_10m",
+      models: model.apiModel,
+      timeformat: "unixtime",
+      forecast_days: String(settings.forecastDays),
+      cell_selection: "nearest",
+    });
+
+    let data;
+    try {
+      // Primär: Michaels ratenlimitfreie Instanz (API_BASE) führt Böen jetzt
+      // in der Downloadgruppe "heidiVars" mit. Bei JEDEM Fehler dort (Netzwerk,
+      // HTTP, noch nicht eingelesener Lauf, …) sofort auf die öffentliche
+      // Instanz ausweichen statt zu warten/wiederholen.
+      data = await fetchFromHost(API_BASE, params, signal);
+    } catch (e) {
+      if (signal.aborted) throw e;
+      data = await fetchFromHost(SURFACE_API_BASE, params, signal);
+    }
+
     const arr = Array.isArray(data) ? data : [data];
     arr.forEach((d, i) => {
       const [iLat, iLon] = chunk[i];
