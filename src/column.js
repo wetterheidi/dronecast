@@ -79,7 +79,9 @@ export async function fetchColumn(lat, lon, modelKey, forecastDays, fetchImpl = 
     qi.push(toArr(H[`cloud_ice_level${l}`], T, 1e-3));
     clc.push(toArr(H[`cloud_cover_level${l}`], T, 1));
   }
-  return { time, h, u, v, t, rh, p, w, q, qw, qi, clc, nLevels: h.length, elevation: data.elevation };
+  // `model` mitgeführt für modellspezifische Konstanten in clouds.js
+  // (RH_CRIT_Z_REF unterscheidet sich zwischen ICON-D2/EU, s. dort).
+  return { time, h, u, v, t, rh, p, w, q, qw, qi, clc, nLevels: h.length, elevation: data.elevation, model: modelKey };
 }
 
 /**
@@ -90,7 +92,7 @@ export async function fetchColumn(lat, lon, modelKey, forecastDays, fetchImpl = 
  *            temp[k][i] (°C), freezing[i] (m AGL | null) }
  */
 export function buildField(col, capM = 8000, nTarget = 44, grid = "log") {
-  const { time, h, u, v, t, rh, w, p, q, qw, qi, clc } = col;
+  const { time, h, u, v, t, rh, w, p, q, qw, qi, clc, model } = col;
   const T = time.length;
   const hMin = Math.max(10, firstFinite(h[0]) || 10);
   const targetH = grid === "lin" ? linspace(hMin, capM, nTarget) : logspace(hMin, capM, nTarget);
@@ -118,7 +120,7 @@ export function buildField(col, capM = 8000, nTarget = 44, grid = "log") {
       dir[k][i] = (Math.atan2(-uu, -vv) * 180 / Math.PI + 360) % 360;
       temp[k][i] = tt;
       rhc[k][i] = rr;
-      cloud[k][i] = cloudFraction({ q: qq, p: pp, t: tt, rh: rr, qw: qwq, qi: qiq, clc: clcq }, targetH[k], ww);
+      cloud[k][i] = cloudFraction({ q: qq, p: pp, t: tt, rh: rr, qw: qwq, qi: qiq, clc: clcq, model }, targetH[k], ww);
     }
     // Nullgradgrenze: unterster Übergang T ≥ 0 → < 0 nach oben.
     freezing[i] = zeroCrossing(hi, t, i);
@@ -145,7 +147,7 @@ export function sampleColumnAtHeight(col, i, ht) {
   }
   return {
     h: ht, u: val(col.u), v: val(col.v), t: val(col.t), rh: val(col.rh), p, w: val(col.w), q: val(col.q),
-    qw: val(col.qw), qi: val(col.qi), clc: val(col.clc),
+    qw: val(col.qw), qi: val(col.qi), clc: val(col.clc), model: col.model,
   };
 }
 

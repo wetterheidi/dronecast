@@ -20,17 +20,34 @@
  *  4. Vertikales Clustering → Schichten, Ceiling und unterste Basis (stufen-
  *     unabhängig, arbeitet nur auf der fertigen CF-Kurve).
  *
- * Daneben `groundFog()`: physikalische Nebelerkennung direkt aus QW/QI am
- * Boden (unabhängig von der CF-Kurve), Ersatz/Ergänzung für die bisherige
- * Sicht-/`weather_code`-Erkennung.
+ * Daneben, beide unabhängig von der CF-Kurve:
+ *  - `groundFog()`: physikalische Nebelerkennung direkt aus QW/QI am Boden,
+ *    Ersatz/Ergänzung für die bisherige Sicht-/`weather_code`-Erkennung.
+ *  - `developmentTag()`: Entwicklungstendenz (wachsend/stabil/auflösend) aus
+ *    der Vertikalgeschwindigkeit w — orthogonal zu CF, sagt nicht "ist Wolke
+ *    da", sondern "wächst/löst sie sich gerade auf".
  */
 
-// --- Kalibrierung (Startwerte, später ggf. je Modell / an METAR) ------------
+// --- Kalibrierung ------------------------------------------------------------
+//
+// ⚠️ WICHTIGE ERINNERUNG — REGELMÄSSIG NEU PRÜFEN ⚠️
+// RH_CRIT_SURF/MID/Z_REF/ICE unten sind KEINE Startwerte mehr, sondern gegen
+// echtes CLC von Michaels Instanz gefittet (`scripts/calibrate-clouds.mjs`,
+// dort ausführen für eine neue Messung). ABER: Datenbasis war nur EIN
+// Kalendermonat (August 2026, mitteleuropäischer Sommer). Vor blindem
+// Vertrauen bei anderen Wetterlagen (Winterinversion, Herbstnebel, Frühjahr,
+// andere Jahreszeiten allgemein) UNBEDINGT `scripts/calibrate-clouds.mjs`
+// erneut laufen lassen und mit den Werten hier vergleichen — s. METHODIK.md
+// 4.1 für die volle Herleitung und die bekannten Einschränkungen.
 const RH_SAT = 100;          // % — Sättigung (in der jeweiligen Referenz) → CF = 1
-const RH_CRIT_SURF = 72;     // % — kritische RH in der Grenzschicht (wasser-ref.)
-const RH_CRIT_MID = 85;      // % — kritische RH in der freien Troposphäre (wasser-ref.)
-const RH_CRIT_Z_REF = 1500;  // m AGL — Höhe, ab der RH_CRIT_MID gilt
-const RH_CRIT_ICE = 72;      // % — kritische RH im Eisast (eis-referenziert)
+const RH_CRIT_SURF = 96;     // % — kritische RH in der Grenzschicht (wasser-ref.)
+const RH_CRIT_MID = 83;      // % — kritische RH in der freien Troposphäre (wasser-ref.)
+// Höhe, ab der RH_CRIT_MID gilt — modellspezifisch (unterschiedliche
+// Grenzschichtauflösung), je eigens gefittet. `col.model` fehlt (z. B. externe
+// Aufrufer ohne Säule) ⇒ DEFAULT (grober Mittelwert aus der Gesamtstichprobe).
+const RH_CRIT_Z_REF_BY_MODEL = { icon_d2: 300, icon_eu: 1200 };
+const RH_CRIT_Z_REF_DEFAULT = 950; // m AGL
+const RH_CRIT_ICE = 96.5;    // % — kritische RH im Eisast (eis-referenziert)
 const ICE_T_FULL = -35;      // °C — darunter reine Eisphase (RH_i)
 
 // Vertikalwind-Dynamik (Punkt 3). PLATZHALTER — die Schwellen kalibriert der
@@ -56,15 +73,61 @@ const FOG_BASE_M = 30;           // m AGL — darunter gilt eine Basis als Nebel
 // Physikalische Nebelerkennung (`groundFog()`, s. u.): nennenswertes Kondensat
 // (QW+QI) an einem bodennahen Level unterhalb FOG_QW_CHECK_M gilt als Nebel —
 // direkter als die RH-Heuristik, die bodennah nur über den Dunst-Guard
-// zwischen Dunst und Wolke unterscheidet. PLATZHALTER, wie QCOND_SCALE.
+// zwischen Dunst und Wolke unterscheidet. PLATZHALTER wie die QCOND_SCALE_*-
+// Konstanten oben (unvalidiert, s. METHODIK.md 4.1/4.3).
 const FOG_QW_CHECK_M = 50;  // m AGL — Level-Reichweite der Nebelprüfung
 const FOG_QW_MIN = 1e-5;    // kg/kg — Kondensat-Schwelle für „Nebel vorhanden"
 
-// Kondensat-Schwelle für die QW/QI-Stufe (Stufe 2, s. u.): Skala für
-// „nennenswerte" Wolkenwasser-/eis-Konzentration in kg/kg. PLATZHALTER — bis
-// eine CLC-Kalibrierung vorliegt, an typischen Cirrus-/Stratus-Werten (~1e-5…
-// 1e-4 kg/kg) orientiert.
-const QCOND_SCALE = 1e-5; // kg/kg
+// Kondensat-Skalen für die QW/QI-Stufe (Stufe 2, s. u.): getrennt für Wasser
+// und Eis, NICHT eine gemeinsame Skala — Eis erzeugt bei gleicher Masse mehr
+// Bedeckungsgrad als Wasser. Quelle für die Asymmetrie (Faktor ~4, nicht nur
+// die Größenordnung 1e-5 kg/kg selbst): Grundner et al. 2024 (JAMES, "Data-
+// Driven Equation Discovery of a Cloud Cover Parameterization"), deren
+// per-Regression gefundener Kondensat-Term CF ~ 1/(qc/a₈ + qi/a₉) mit
+// a₈≈1,16 mg/kg (Wasser), a₉≈0,31 mg/kg (Eis) ein Verhältnis a₈/a₉≈3,8 ergibt.
+// WICHTIGER VORBEHALT (per Prüfung, s. METHODIK.md 4.1): dieser Wert stammt
+// aus einem ML-Ersatzschema für ~80-km-Klimamodellauflösung (trainiert gegen
+// kilometerskalige Referenzsimulationen), NICHT aus dem operationellen ICON-
+// D2/EU-Schema, das unser `clc` tatsächlich liefert — nur die Richtung
+// (Eis sensitiver) ist direkt begründet, nicht die absolute Größe. Eigene
+// Regression gegen echte CLC-Werte von Michaels Instanz ergab je nach Methode
+// Verhältnisse zwischen ~7,6 und ~13 (s. METHODIK.md) — beide Werte bleiben
+// daher PLATZHALTER, die Grundner-Ratio ist nur die Startannahme.
+const QCOND_SCALE_WATER = 2e-5; // kg/kg
+const QCOND_SCALE_ICE = 5e-6;   // kg/kg — ~4x kleiner/sensitiver als Wasser
+
+/** Wolkenfraktion aus Kondensatgehalt (Stufe 2, s. `cloudFraction`): getrennte
+ *  Sättigungs-Skalen für Wasser/Eis (s. o.), additiv kombiniert. Erfordert
+ *  KEINE Höhen-/Temperatur-Gate-Logik — die Formel ist unabhängig davon
+ *  korrekt, ob `qw` und `qi` gleichzeitig auftreten (im Mischphasenbereich
+ *  −35…0 °C, s. `iceFraction`, ist das sogar der Regelfall, z. B. unterkühltes
+ *  Flüssigwasser + Eis in Altocumulus). */
+function condensateFraction(qw, qi) {
+  const termW = qw > 0 ? qw / QCOND_SCALE_WATER : 0;
+  const termI = qi > 0 ? qi / QCOND_SCALE_ICE : 0;
+  return clamp(1 - Math.exp(-(termW + termI)), 0, 1);
+}
+
+// Entwicklungstendenz aus Vertikalwind (orthogonal zu cloudFraction — sagt
+// nichts über "ist Wolke da" aus, sondern "wächst/löst sie sich gerade auf").
+// PLATZHALTER, Größenordnung an W_SCALE (s. o.) angelehnt, w auf nativen
+// Leveln ist bei ICON-D2 (2,2 km) kleinskalig/verrauscht — einzelne
+// Level/Stunden-Werte können zwischen den Kategorien flackern.
+const W_DEV_THRESHOLD = 0.3; // m/s
+
+/**
+ * Entwicklungstendenz eines Levels aus der Vertikalgeschwindigkeit `w` (m/s,
+ * positiv aufwärts) — unabhängig von der CF-Quelle (Stufe 1/2/3), da `w`
+ * unabhängig von CLC/QW/QI/RH eine eigene Information trägt. Kein Ersatz für
+ * `cloudFraction()`, sondern eine zusätzliche, orthogonale Größe.
+ * @returns {"developing"|"dissipating"|"stable"|null}
+ */
+export function developmentTag(w) {
+  if (!Number.isFinite(w)) return null;
+  if (w > W_DEV_THRESHOLD) return "developing";
+  if (w < -W_DEV_THRESHOLD) return "dissipating";
+  return "stable";
+}
 
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 
@@ -114,10 +177,15 @@ export function effectiveRH(hum, tC) {
 // --- kritische Feuchte + Wolkenfraktion -------------------------------------
 
 /** Wasser-referenzierte kritische RH (%) nach Höhe: RH_CRIT_SURF am Boden,
- *  linear auf RH_CRIT_MID bei RH_CRIT_Z_REF, darüber konstant. */
-function critWarm(zAgl) {
+ *  linear auf RH_CRIT_MID bei RH_CRIT_Z_REF (modellspezifisch, s. o.), darüber
+ *  konstant. WICHTIG: mit den gefitteten Werten fällt die Kurve von der Höhe
+ *  0 mit RH_CRIT_SURF an — höher als RH_CRIT_MID, ANDERS als früher (Grenz-
+ *  schicht sinkt dann Richtung freie Troposphäre statt zu steigen, s.
+ *  METHODIK.md 4.1 für die physikalische Deutung). */
+function critWarm(zAgl, model) {
   const z = Number.isFinite(zAgl) ? Math.max(0, zAgl) : 0;
-  return RH_CRIT_SURF + (RH_CRIT_MID - RH_CRIT_SURF) * Math.min(1, z / RH_CRIT_Z_REF);
+  const zref = RH_CRIT_Z_REF_BY_MODEL[model] ?? RH_CRIT_Z_REF_DEFAULT;
+  return RH_CRIT_SURF + (RH_CRIT_MID - RH_CRIT_SURF) * Math.min(1, z / zref);
 }
 
 /**
@@ -125,17 +193,22 @@ function critWarm(zAgl) {
  * Referenz wie `effectiveRH` (im Eisast eis-referenziert). Die Eisabsenkung
  * folgt der Temperatur (α = `iceFraction`), nicht einer festen Höhe — greift
  * daher im Winter korrekt schon tiefer. Vertikalwind `w` (m/s, positiv aufwärts)
- * senkt (Aufwind) bzw. hebt (Absinken) die Schwelle.
+ * senkt (Aufwind) bzw. hebt (Absinken) die Schwelle. `model` ("icon_d2"/
+ * "icon_eu", optional) wählt die modellspezifische `RH_CRIT_Z_REF`.
  */
-export function criticalRH(zAgl, tC, w) {
+export function criticalRH(zAgl, tC, w, model) {
   const a = iceFraction(tC);
-  let crit = (1 - a) * critWarm(zAgl) + a * RH_CRIT_ICE;
-  // Bodennaher Dunst-Guard: RH_crit von RH_CRIT_SURF_GUARD am Boden linear auf
-  // das normale Profil bei Z_SURF_M — bodennah erst nahe Sättigung „Wolke",
-  // sonst nur optischer Dunst (verhindert Phantom-„Cloud 0 m").
+  let crit = (1 - a) * critWarm(zAgl, model) + a * RH_CRIT_ICE;
+  // Bodennaher Dunst-Guard: war ursprünglich dafür da, RH_crit nahe am Boden
+  // über das allgemeine Profil anzuheben (Dunst ≠ Wolke). Mit dem gefitteten
+  // RH_CRIT_SURF (96 %, s. o.) liegt `critWarm` am Boden bereits über dem
+  // Guard-Wert (90 %) — der Guard ist unter der aktuellen Kalibrierung daher
+  // FAKTISCH INAKTIV (der `max()` unten greift nie zugunsten von `guard`).
+  // Bewusst NICHT entfernt: strukturelle Sicherheitsnetz, falls RH_CRIT_SURF
+  // künftig wieder sinkt (z. B. nach einer Rekalibrierung mit mehr Daten).
   const z = Number.isFinite(zAgl) ? Math.max(0, zAgl) : 0;
   if (z < Z_SURF_M) {
-    const guard = RH_CRIT_SURF_GUARD + (critWarm(Z_SURF_M) - RH_CRIT_SURF_GUARD) * (z / Z_SURF_M);
+    const guard = RH_CRIT_SURF_GUARD + (critWarm(Z_SURF_M, model) - RH_CRIT_SURF_GUARD) * (z / Z_SURF_M);
     crit = Math.max(crit, guard);
   }
   if (Number.isFinite(w)) crit -= CRIT_W_MAX * Math.tanh(w / W_SCALE);
@@ -148,25 +221,28 @@ export function criticalRH(zAgl, tC, w) {
  *     `CF = clc / 100`. ICONs eigene Diagnose inkl. Subskalen-Bewölkung,
  *     schlägt jede Feuchte-Heuristik — wird 1:1 übernommen.
  *  2. `qw`/`qi` (Wolkenwasser/-eis, kg/kg, ohne `clc`): `CF` aus dem
- *     Kondensatgehalt (`1 − exp(−(qw+qi)/QCOND_SCALE)`) — gröber als CLC
- *     (Grid-Mittel, keine Subskalen-Wolken), aber physikalisch direkter als
- *     die RH-Schätzung.
- *  3. Sonst Sundqvist-Fallback (Startkalibrierung, unverändert): `hum`
- *     bündelt die Feuchte-Eingänge ({ q, p, t, rh }); q_v ist die bevorzugte
- *     Basis (siehe `effectiveRH`), t die Temperatur (°C). Feuchte-Referenz/
+ *     Kondensatgehalt (`condensateFraction()`, getrennte Wasser-/Eis-Skalen,
+ *     s. u.) — gröber als CLC (Grid-Mittel, keine Subskalen-Wolken; laut DWD-
+ *     Doku ist `clc` sogar mit einer ANDEREN, subskalen-bewussten Kondensat-
+ *     variante konsistent als der grid-scale `qw`/`qi`, den wir bekommen —
+ *     s. METHODIK.md 4.1), aber physikalisch direkter als die RH-Schätzung.
+ *  3. Sonst Sundqvist-Fallback (gegen echtes CLC kalibriert, s. Konstanten-
+ *     Block oben — ⚠️ nur ein Monat Daten, regelmäßig neu prüfen): `hum`
+ *     bündelt die Feuchte-Eingänge ({ q, p, t, rh, model }); q_v ist die
+ *     bevorzugte Basis (siehe `effectiveRH`), t die Temperatur (°C), `model`
+ *     wählt die modellspezifische `RH_CRIT_Z_REF`. Feuchte-Referenz/
  *     Eis-Korrektur (1), phasen-/windabhängiges RH_crit (2), Sundqvist (3).
  * z in m AGL, w optional (m/s, nur für Stufe 3 relevant).
  */
 export function cloudFraction(hum, zAgl, w) {
   if (Number.isFinite(hum?.clc)) return clamp(hum.clc / 100, 0, 1);
-  const qCond = (hum?.qw || 0) + (hum?.qi || 0);
   if (Number.isFinite(hum?.qw) || Number.isFinite(hum?.qi)) {
-    return clamp(1 - Math.exp(-qCond / QCOND_SCALE), 0, 1);
+    return condensateFraction(hum?.qw || 0, hum?.qi || 0);
   }
   const tC = hum?.t;
   const rhEff = effectiveRH(hum, tC);
   if (!Number.isFinite(rhEff)) return 0;
-  const rhc = criticalRH(zAgl, tC, w);
+  const rhc = criticalRH(zAgl, tC, w, hum?.model);
   if (rhEff <= rhc || rhc >= RH_SAT) return 0;
   const cf = 1 - Math.sqrt(Math.max(0, (RH_SAT - rhEff) / (RH_SAT - rhc)));
   return clamp(cf, 0, 1);
@@ -186,7 +262,7 @@ export function oktaCategory(cf) {
 function cfAt(col, k, i) {
   const hum = {
     q: col.q?.[k]?.[i], p: col.p?.[k]?.[i], t: col.t?.[k]?.[i], rh: col.rh?.[k]?.[i],
-    qw: col.qw?.[k]?.[i], qi: col.qi?.[k]?.[i], clc: col.clc?.[k]?.[i],
+    qw: col.qw?.[k]?.[i], qi: col.qi?.[k]?.[i], clc: col.clc?.[k]?.[i], model: col.model,
   };
   return cloudFraction(hum, col.h[k][i], col.w?.[k]?.[i]);
 }

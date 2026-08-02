@@ -11,7 +11,7 @@
  */
 
 import { sampleColumnAtHeight } from "./column.js";
-import { cloudFraction, cloudLayers, groundFog } from "./clouds.js";
+import { cloudFraction, cloudLayers, groundFog, developmentTag } from "./clouds.js";
 import {
   windToDisplay, tempToDisplay, heightToDisplay,
   windUnit, tempUnit, heightUnit,
@@ -103,7 +103,7 @@ export function buildBriefingContent({ surface, col, point, modelLabel, maxHeigh
     html += `<h3>${ymdUTC(sec)} ${hhmmZ(sec)}</h3>
       <table><thead><tr>
         <th>h (${hu} AGL)</th><th>p (hPa)</th><th>T (${tu})</th><th>Dew (${tu})</th>
-        <th>Dir (°)</th><th>Spd (${wu})</th><th>RH (%)</th><th>Wolken (%)</th>
+        <th>Dir (°)</th><th>Spd (${wu})</th><th>RH (%)</th><th>Wolken (%)</th><th>Tendenz</th>
       </tr></thead><tbody>`;
 
     for (const hM of heights) {
@@ -119,7 +119,8 @@ export function buildBriefingContent({ surface, col, point, modelLabel, maxHeigh
         <td>${metarDir(dir)}</td>
         <td>${fmtNum(windToDisplay(spdMs), 1)}</td>
         <td>${fmtNum(s.rh, 0)}</td>
-        <td>${fmtNum(cloudFraction({ q: s.q, p: s.p, t: s.t, rh: s.rh, qw: s.qw, qi: s.qi, clc: s.clc }, hM, s.w) * 100, 0)}</td>
+        <td>${fmtNum(cloudFraction({ q: s.q, p: s.p, t: s.t, rh: s.rh, qw: s.qw, qi: s.qi, clc: s.clc, model: s.model }, hM, s.w) * 100, 0)}</td>
+        <td>${devLabel(developmentTag(s.w))}</td>
       </tr>`;
     }
     html += `</tbody></table>`;
@@ -180,6 +181,15 @@ function metarWeather(code, physFog = null) {
   const w = Number.isNaN(c) ? "N/A" : (WMO_TO_TAF[c] || "N/A");
   if (physFog?.fog && (w === "NSW" || w === "N/A")) return physFog.freezing ? "FZFG" : "FG";
   return w;
+}
+
+/** Textlabel für `developmentTag()` (clouds.js) — Entwicklungstendenz aus w,
+ *  rein informativ für die Höhentabelle (Debug-/Kalibrierungssicht). */
+function devLabel(tag) {
+  if (tag === "developing") return "↑ Aufbau";
+  if (tag === "dissipating") return "↓ Auflösung";
+  if (tag === "stable") return "–";
+  return "N/A";
 }
 
 /** Windrichtung METAR: auf 10° gerundet, 360 für Nord, dreistellig. */

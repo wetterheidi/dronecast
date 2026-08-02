@@ -98,9 +98,39 @@ bleibt unverändert nachgeschaltet.
 
 **Stufe 2 — `qw`/`qi` (Wolkenwasser/-eis), wenn `clc` fehlt.**
 `cloud_water_level{l}`/`cloud_ice_level{l}` (g/kg) sind das tatsächliche
-Kondensat. `CF = 1 − exp(−(qw+qi)/QCOND_SCALE)` (`QCOND_SCALE = 1e-5 kg/kg`,
-**Platzhalter**) — gröber als CLC (Grid-Mittel, keine Subskalen-Wolken, steilerer
-Übergang klar/bedeckt), aber physikalisch direkter als die reine RH-Schätzung.
+Kondensat, aber **nicht symmetrisch** verrechnet: `condensateFraction(qw, qi) =
+1 − exp(−(qw/QCOND_SCALE_WATER + qi/QCOND_SCALE_ICE))` mit getrennten Skalen
+(`QCOND_SCALE_WATER = 2e-5 kg/kg`, `QCOND_SCALE_ICE = 5e-6 kg/kg`, Eis also
+~4x sensitiver — bei gleicher Masse erzeugt Eis mehr Bedeckungsgrad als Wasser).
+
+*Quelle der Asymmetrie:* Grundner et al. 2024 (JAMES, „Data-Driven Equation
+Discovery of a Cloud Cover Parameterization") — deren per Regression
+gefundener Kondensat-Term liefert Koeffizienten a₈≈1,16 mg/kg (Wasser),
+a₉≈0,31 mg/kg (Eis), Verhältnis ≈3,8. **Vorbehalt, per Prüfung bestätigt:**
+Diese Koeffizienten stammen aus einem ML-Ersatzschema für ~80-km-
+Klimamodellauflösung (trainiert gegen kilometerskalige Referenzsimulationen),
+NICHT aus dem operationellen ICON-D2/EU-Schema, das unser `clc` tatsächlich
+liefert — nur die **Richtung** (Eis sensitiver) ist direkt begründet, nicht
+die absolute Größe. Eine eigene Regression `-ln(1-CLC/100) = qw/s_w + qi/s_i`
+gegen ~8000 echte (T, qw, qi, CLC)-Tripel von Michaels Instanz (getrennt nach
+T > 0 °C / T < −35 °C) ergab je nach Schätzmethode (Least-Squares vs. Median
+der Punktschätzungen) Verhältnisse zwischen ~7,6 und ~13 — Richtung bestätigt,
+absoluter Wert bleibt unsicher. Beide Konstanten sind daher weiterhin
+**Platzhalter**, die Grundner-Ratio nur die Startannahme.
+
+*Warum Stufe 2 strukturell nie so gut wie CLC wird:* Laut DWD-Doku
+(„DWD Database Reference for ICON") ist unser `qw`/`qi` die reine
+**Grid-Scale**-Größe aus der Sättigungsadjustierung des Mikrophysikschemas
+(Seifert & Beheng 2006, zweimomentig) — „based on the assumption that there
+would be no sub-grid-scale variability. That assumption is particularly
+problematic for precipitation generation, moist turbulence and radiation."
+`clc` ist dagegen laut DWD explizit konsistent mit einer **diagnostischen**
+Variante (`QC_DIA`/`QI_DIA`), die Subgrid-/Turbulenz-/Konvektions-Anteile
+einrechnet — genau die für tiefe, fleckige Bewölkung (Ceiling!) entscheidende
+Komponente. Michaels Instanz liefert die DIA-Variante nicht (geprüft, mehrere
+Namensvarianten). Stufe 2 bleibt also ein grober Nothelfer mit struktureller
+Obergrenze, kein vollwertiger CLC-Ersatz — Kalibrierungsaufwand lohnt sich
+hier weniger als in Stufe 3.
 
 **Stufe 3 — Sundqvist-Fallback aus der Feuchte, wenn beides fehlt.** Der
 ursprüngliche, weiterhin unveränderte Algorithmus — greift automatisch, wenn
@@ -123,31 +153,93 @@ die Modell-`relative_humidity` unter 0 °C **bereits über Eis** referenziert is
 selbst zu rechnen vermeidet die dadurch drohende **Doppelkorrektur** und braucht
 keine Referenz-Annahme mehr. Sättigungsdrücke via Magnus/WMO (Wasser & Eis).
 
-**(b) Kritische Feuchte `criticalRH(z, T, w)`.** Wolke bildet sich ab `RH_crit`,
-nicht erst bei Sättigung — in der Grenzschicht niedriger, frei höher:
-`72 %` (Boden) → `85 %` (ab 1500 m). Im Eisast (α = `iceFraction`) auf `~72 %`
-**eis-referenziert** abgesenkt (folgt der Nullgradgrenze, nicht einer festen
-Höhe). **Vertikalwind** `w` (m/s, nativ `wind_w_level{l}`): Aufwind senkt,
-Absinken hebt `RH_crit` — `−CRIT_W_MAX · tanh(w / W_SCALE)`.
+**(b) Kritische Feuchte `criticalRH(z, T, w, model)`.** Wolke bildet sich ab
+`RH_crit`, nicht erst bei Sättigung — nach CLC-Kalibrierung (s. u.) mit
+GEGENÜBER der ursprünglichen Annahme UMGEKEHRTER Höhenrichtung: `96 %` am
+Boden → `83 %` ab `RH_CRIT_Z_REF` (modellspezifisch, D2 300 m/EU 1200 m).
+Im Eisast (α = `iceFraction`) auf `96,5 %` **eis-referenziert** — bei
+Kältephasen also eher ANGEHOBEN gegenüber dem freitroposphärischen `83 %`-
+Wert, nicht abgesenkt wie früher angenommen (folgt der Nullgradgrenze, nicht
+einer festen Höhe). **Vertikalwind** `w` (m/s, nativ `wind_w_level{l}`,
+Dynamik noch unkalibriert, Platzhalter): Aufwind senkt, Absinken hebt
+`RH_crit` — `−CRIT_W_MAX · tanh(w / W_SCALE)`.
 
-**(b′) Bodennaher Dunst-Guard.** In den untersten `Z_SURF_M = 150 m` wird
-`RH_crit` von `RH_CRIT_SURF_GUARD = 90 %` am Boden linear auf das normale Profil
-angehoben. Grund: bodennah ist hohe RH (72–90 %) meist **optischer Dunst**, keine
-Wolke — ohne den Guard entstünde eine Phantom-Bewölkung mit „Basis 0 m". Echte
-Bodensättigung (RH ≳ 90 %) bleibt erhalten und wird als Nebel behandelt (4.3).
+**(b′) Bodennaher Dunst-Guard — unter der aktuellen Kalibrierung faktisch
+inaktiv.** In den untersten `Z_SURF_M = 150 m` wird `RH_crit` von
+`RH_CRIT_SURF_GUARD = 90 %` am Boden linear auf das normale Profil angehoben
+(ursprünglicher Zweck: bodennah ist hohe RH oft **optischer Dunst**, keine
+Wolke). Mit dem seit der CLC-Kalibrierung (s. u.) geltenden `RH_CRIT_SURF =
+96 %` liegt das allgemeine Profil am Boden bereits ÜBER dem Guard-Wert (90 %)
+— der `max(crit, guard)` greift daher aktuell nie zugunsten des Guards.
+Bewusst nicht entfernt: strukturelles Sicherheitsnetz, falls `RH_CRIT_SURF`
+künftig (z. B. nach Rekalibrierung mit mehr Daten) wieder sinkt.
 
 **(c) Sundqvist:** `CF = clamp(1 − √(max(0, (100 − RH_eff)/(100 − RH_crit))), 0, 1)`.
 
-**Startkalibrierung** (benannte Konstanten in clouds.js): `RH_CRIT_SURF=72`,
-`RH_CRIT_MID=85`, `RH_CRIT_Z_REF=1500`, `RH_CRIT_ICE=72`, `ICE_T_FULL=−35`,
-`Z_SURF_M=150`, `RH_CRIT_SURF_GUARD=90`; w-Dynamik `W_SCALE=0.1 m/s`,
-`CRIT_W_MAX=8 %` (**Platzhalter**, w-Schwellen noch zu kalibrieren). Noch nicht
-modellspezifisch geprüft (ICON-D2 vs. ICON-EU).
+**Kalibrierung gegen echtes CLC (umgesetzt).** ⚠️ **Regelmäßig neu prüfen** —
+s. Warnhinweis direkt im Konstanten-Block von `clouds.js`. Statt freier
+Startwerte sind `RH_CRIT_SURF`, `RH_CRIT_MID`, `RH_CRIT_Z_REF` und
+`RH_CRIT_ICE` jetzt direkt gegen echtes `clc` von Michaels Instanz gefittet
+(Fehlerquadrat-Minimierung der vollen Sundqvist-Formel gegen `CLC/100`, nicht
+nur eine Zwischengröße — robust gegen Annahmen über die Kurvenform).
+Reproduzier-/Rekalibrierbar mit `npm run calibrate:clouds`
+([scripts/calibrate-clouds.mjs](scripts/calibrate-clouds.mjs)).
 
-**Kalibrierungs-Dividende:** Sobald `clc` durchgängig verfügbar ist, liefert es
-kostenlos die Referenz, um Stufe 3 zu kalibrieren (Vergleich CF_Sundqvist vs.
-CLC über viele Stunden/Orte) — die Platzhalter-Konstanten oben werden dadurch
-besser, nicht nur als Rückfall konserviert.
+- **Ergebnis:** `RH_CRIT_SURF=96`, `RH_CRIT_MID=83`, `RH_CRIT_ICE=96,5`.
+  `RH_CRIT_Z_REF` modellspezifisch: **D2=300 m, EU=1200 m** (`col.model`
+  wählt die Konstante, Default 950 m ohne Modellinfo) — plausibel an die
+  unterschiedliche Grenzschichtauflösung gekoppelt.
+- **Überraschender Befund — Höhenrichtung umgekehrt:** `RH_CRIT_SURF (96 %) >
+  RH_CRIT_MID (83 %)`, GENAU ANDERSHERUM als die ursprüngliche Annahme
+  (72→85, aufsteigend). Physikalische Deutung: in der turbulent durchmischten
+  Grenzschicht ist die Feuchte innerhalb einer Gitterzelle relativ homogen —
+  erst nahe Gebietssättigung wird ein Teilbereich wolkig. In der freien
+  Troposphäre ist Feuchte kleinräumiger fleckig (Frontalzonen, Wellen), schon
+  niedrigeres Gitter-Mittel reicht für Teilsättigung.
+- **Fit-Güte:** MSE mit den alten Konstanten (72/85/1500) lag bei 0,0099 —
+  kaum besser als die naive Vorhersage "immer der Mittelwert" (0,0113). Mit
+  den neuen Konstanten: 0,0022 (≈80 % Fehlerreduktion). Eisast: 0,0156 →
+  0,0076 (Referenz 0,0215).
+- **Robustheit:** unabhängig für ICON-D2 und ICON-EU gefittet —
+  `RH_CRIT_SURF` liegt in beiden bei ~95–96 %, die Höhenrichtung ist in
+  beiden Modellen gleich umgekehrt. Nur `RH_CRIT_Z_REF` unterscheidet sich
+  deutlich (s. o.).
+- **Bekannte Einschränkungen (nicht kleinreden):**
+  - Datenbasis nur **ein Kalendermonat** (August 2026) — saisonale
+    Verzerrung möglich (Sommer-Grenzschicht ≠ Winter-Inversion). **Deshalb
+    die ausdrückliche Pflicht, `npm run calibrate:clouds` regelmäßig bei
+    anderen Wetterlagen erneut laufen zu lassen und zu vergleichen.**
+  - `W_SCALE`/`CRIT_W_MAX` (w-Dynamik) sind weiterhin **Platzhalter** —
+    zu wenige Level mit nennenswertem `|w|` in der Kalibrierungsstichprobe.
+  - Der Dunst-/Nebel-Guard (`Z_SURF_M`, `RH_CRIT_SURF_GUARD`) wurde bewusst
+    NICHT gegen CLC gefittet — er soll ja gerade den Fall abfangen, wo
+    CLC/RH "Wolke" sagen, real aber nur Dunst vorliegt; dafür bräuchte es
+    echte Sicht-/METAR-Referenz, nicht CLC selbst.
+  - Regime-Vermischung (Höhe korreliert mit Wettertyp in der Stichprobe)
+    ist nicht ausgeschlossen — eine reine Korrelationsanalyse.
+
+**Kalibrierungs-Hintergrund:** DWDs COSMO-Physikdokumentation (Doms et al.
+2011) beschreibt das operationelle Subgrid-Wolkenschema selbst als „an
+empirical function depending on relative humidity and height" — strukturell
+**dieselbe Form** wie unser Sundqvist-Fallback, anders als Stufe 2 (dort
+strukturelle Obergrenze durch grid-scale `qw`/`qi`, s. o.) stand einer
+Kalibrierung hier nichts im Weg.
+
+**`developmentTag(w)` — Entwicklungstendenz, orthogonal zur CF-Stufen-Kette.**
+Unabhängig davon, welche Stufe die Wolkenfraktion liefert, geht die
+Information aus `w` (Vertikalgeschwindigkeit) bislang nur in Stufe 3
+(`criticalRH`) ein — bei verfügbarem `clc`/`qw`/`qi` ginge sie sonst verloren,
+obwohl `w` nichts über „ist Wolke da" aussagt (das leisten CF bereits),
+sondern über „wächst sie gerade oder löst sie sich auf". Daher als separate
+Funktion, an jedem Level zusätzlich zu `cloudFraction()` aufrufbar, ohne deren
+Signatur zu ändern: `w > W_DEV_THRESHOLD` (0,3 m/s, **Platzhalter**, an
+`W_SCALE` orientiert) ⇒ `"developing"`, `w < −W_DEV_THRESHOLD` ⇒
+`"dissipating"`, sonst `"stable"`. Genutzt in der Briefing-Höhentabelle
+(Spalte „Tendenz", [src/briefing.js](src/briefing.js)) — bislang nicht in
+Cross-Section/Meteogramm verdrahtet (offene Erweiterung, keine feste
+Darstellung dafür entschieden). `w` auf nativen ICON-D2-Leveln (2,2 km) ist
+kleinskalig/verrauscht — einzelne Level/Stunden-Werte können zwischen den
+Kategorien flackern.
 
 ### 4.2 Bedeckungskategorien (Okta)
 `oktaCategory(cf)` bildet CF auf METAR-nahe Stufen ab. **BKN beginnt bei
@@ -181,7 +273,8 @@ die reine Sicht + `weather_code` der Oberflächen-API (einer *anderen* Instanz
 als Michaels Modell-Level) die gesamte Nebelerkennung. Mit `qw`/`qi` steht ein
 direkter Nachweis von Flüssigwasser/Eis am Boden zur Verfügung: prüft die Level
 unterhalb `FOG_QW_CHECK_M = 50 m` (von unten) auf `qw + qi > FOG_QW_MIN`
-(**Platzhalter**, wie `QCOND_SCALE`). Rückgabe `{fog, freezing}` — `freezing`
+(**Platzhalter**, wie die `QCOND_SCALE_*`-Konstanten in 4.1). Rückgabe
+`{fog, freezing}` — `freezing`
 (T ≤ 0 °C im Nebel-Level, unterkühlter Nebel, vereist auf Oberflächen inkl.
 Rotorblättern) — oder `null`, wenn die Instanz `qw`/`qi` (noch) nicht führt.
 
