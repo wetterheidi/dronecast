@@ -49,55 +49,6 @@ BKN 5–7 · OVC 8.
 
 ---
 
-## Wolkenfraktion: höhenabhängige kritische RH (Sundqvist)
-
-**Status:** **gebaut, inkl. q_v-Feuchtebasis, Eis-Korrektur und Vertikalwind-
-Dynamik** — jetzt die gemeinsame Kurve für ALLE abgeleiteten Wolkengrößen.
-[src/clouds.js](src/clouds.js): `cloudFraction(hum, z, w)` bündelt (a) Feuchte
-aus **spezifischer Feuchte `q_v`** (`vaporPressure`/`effectiveRH`: Dampfdruck aus
-q,p → Mischphasen-Blend Wasser/Eis, unter −35 °C reines Eis — macht Cirren
-sichtbar; Fallback auf Modell-RH roh, wenn q fehlt), (b) phasen-/höhen-/
-windabhängiges `criticalRH(z, T, w)` (72→85 %, Eisast 72 %, **bodennaher Dunst-
-Guard 90 %** in den untersten 150 m, Aufwind senkt / Absinken hebt via `tanh`),
-(c) Sundqvist. Dazu `oktaCategory`, `cloudLayers`, `cloudCeiling` (ICAO) +
-`lowestCloudBase`. **Nebel** (bodenberührende Sättigung, Basis < 30 m) wird aus
-Ceiling/Layern ausgenommen und über Modell-Sicht + `weather_code` getragen.
-`wind_w` (m/s) und `specific_humidity` (g/kg) werden in `fetchColumn` mitgeladen.
-Konsumenten: Cross-Section, Meteogramm (Tief-Panel deckelt bei 2500 m, keine
-Scheinlinie über Stockwerke), Go/No-Go, Briefing. Details:
-[METHODIK.md](METHODIK.md) Abschnitt 4.
-
-**Erledigt per q_v:** die frühere „RH-über-Wasser?"-Verifikation — Direktabfrage
-zeigte, dass das Modell RH unter 0 °C über Eis meldet; das Rechnen aus q_v macht
-die Annahme (und die drohende Doppelkorrektur) gegenstandslos.
-
-**Noch offen:** (1) **w-Schwellen** `W_SCALE`/`CRIT_W_MAX` sind Platzhalter — der
-Nutzer kalibriert die kritischen w-Werte separat. (2) `RH_crit`-Anker je Modell
-(ICON-D2 vs. ICON-EU) an METAR-Fällen prüfen. (3) Optional σ=p/p₀ statt Höhe.
-
-### Ursprüngliche Idee: RH_crit mit Höhe/Druck variieren (Sundqvist-Typ)
-Echte Wolkenschemata nutzen keine feste Schwelle, sondern eine **kritische
-relative Feuchte `RH_crit(p)`**, ab der Wolke gebildet wird — sie ist in der
-Grenzschicht niedriger (Wolken entstehen dort schon bei geringerer RH) und in
-der freien Troposphäre höher. Wolkenfraktion z. B. (Sundqvist):
-
-```
-CF = 1 − sqrt( max(0, (RH_sat − RH) / (RH_sat − RH_crit(p)) ) )
-```
-
-mit `RH_sat ≈ 100 %`. `RH_crit(p)` typischerweise ~0,6–0,7 nahe Boden,
-ansteigend auf ~0,8–0,9 in der Höhe (Profil aus dem Druck/der Höhe ableiten).
-
-### Nutzen / Hinweise
-- Physikalisch plausiblere vertikale Wolkenstruktur als die feste Schwelle,
-  v. a. der Übergang Grenzschicht ↔ freie Troposphäre.
-- Braucht keine neuen Daten (RH pro Level ist vorhanden); nur `cloudFrac`
-  ersetzen und ein `RH_crit(p)`-Profil festlegen (ggf. je Modell kalibrieren).
-- Verwandt mit dem [RH-Profil-Ceiling](#wolkenbasis-ceiling-höhe-aus-dem-modell-rh-profil)
-  oben — beide könnten sich dieselbe `RH_crit`-Kurve teilen.
-
----
-
 ## Gefahrenbereiche in der Cross-Section visualisieren
 
 **Status:** vorgemerkt · **Vehikel:** Wind-/Temperatur-Cross-Section (die
@@ -135,15 +86,6 @@ zusätzlich den Ortsnamen via Nominatim auf
   sauber auf Koordinaten zurückfallen (Try/Catch wie in DZMaster). Ggf.
   Ergebnis cachen, damit wiederholtes Öffnen keine erneute Abfrage auslöst.
 
-### Direkt-Download als `.html`-Datei
-Aktuell öffnet das Briefing einen **neuen Tab** (`window.open` + `document.write`).
-- Alternative/Ergänzung: denselben HTML-String als `Blob` herunterladen
-  (`type: "text/html"`, `<a download>` — Muster wie DZMasters
-  `exportComprehensiveReportAsHtml`/Blob-Download).
-- Dateiname z. B. `droneforecast-briefing_<lat>_<lon>_<YYYY-MM-DD>.html`.
-- Nützlich für Offline-Ablage/Weitergabe; Tab-Variante bleibt für „schnell
-  ansehen & drucken".
-
 ### Verwandt / später
 - **Mehrtages-Briefing:** aktuell nur der laufende Tag (UTC). Auf den
   geladenen Horizont (1–5 Tage) erweitern, nach Tagen gruppiert — bewusst
@@ -174,30 +116,6 @@ anwenden. Bewusst zurückgestellt, um keine unvalidierte Zusatzannahme in die
 Bewertung einzubauen.
 
 ### In-App-Editor für Drohnenprofile
-**Status:** gebaut (3 Stufen). Die Werksmodelle stehen weiterhin als
-Datenobjekte in [src/droneProfiles.js](src/droneProfiles.js) (jetzt 9 konkrete
-Modelle, `origin: "factory"`). Darüber liegt ein Store
-([src/droneProfileStore.js](src/droneProfileStore.js)), der Nutzerprofile in
-`localStorage` (`droneforecast.profiles.v1`) hält und die effektive Liste
-(Werk + Nutzer) liefert.
-- **Stufe 1 – Ansehen:** read-only Detailkarte mit Herkunft-Zeile
-  ([src/droneProfileView.js](src/droneProfileView.js)), erreichbar über den
-  ℹ-Button in der Go/No-Go-Kopfzeile.
-- **Stufe 2 – Bearbeiten/Neu:** Formular
-  ([src/droneProfileEditor.js](src/droneProfileEditor.js)); Duplizieren,
-  Bearbeiten, Neu, Löschen. Werksmodelle bleiben unveränderlich (Duplikat →
-  `origin: "user"`, `basedOn`, Hersteller-`source` entfernt). IDs mit
-  `user:`-Präfix.
-- **Stufe 3 – Export/Import:** JSON-Umschlag (`droneforecast.profiles/v1`) mit
-  Herkunft je Profil. **Vertrauensgrenze beim Import:** jedes Profil wird
-  zwingend auf `origin: "imported"` gesetzt und bekommt eine frische ID — eine
-  Datei kann sich nie zu Werksdaten erklären oder ein bestehendes Profil
-  überschreiben.
-
-**Datenherkunft der Grenzwerte** (im Kopf von droneProfiles.js dokumentiert):
-herstellerbasiert (Wind/Temp; Regen grob aus IP-Schutzart) vs.
-operationell/regulatorisch (Wolkenbasis/Sicht — VLOS-Platzhalter, für alle
-Modelle gleich). Werte sind recherchierte Richtwerte, keine Freigaben.
 
 **Noch offen (Ausbau):** Import-Vorschau/Konfliktdialog statt stillem Anhängen;
 Bearbeiten von Richtung/Einheit je Parameter (bewusst fix gelassen);
@@ -307,13 +225,9 @@ Vorhersage als spätere Ergänzung, nicht als Vorstufe nötig.
 
 ## Weitere Ideen (Kurzliste)
 
-- **Cross-Section (Höhe × Zeit):** eigenes Produkt; hier gehören die
-  Höhenwinde aus Michaels Modell-Leveln hin (aus dem Meteogramm bewusst
-  herausgehalten).
 - **Wind-Höhenwahl im Meteogramm:** optionaler Selektor (z. B. 10 m / 50 /
   100 / 150 m) statt fest 10 m — falls doch gewünscht.
 - **Echte Windbarbs** als Alternative zu den Richtungspfeilen.
 - **Südhalbkugel:** Sichel-Orientierung der Mondscheibe spiegeln
   (aktuell NH-Konvention: zunehmend = rechts beleuchtet).
-- **RH-Profil-Ceiling** (siehe oben).
 - **Andere Satellitenbildquelle weltweit:** Alternative: NASA GIBS  Falls du doch einmal eine globale Abdeckung benötigst, bietet die NASA mit den Global Imagery Browse Services (GIBS) ebenfalls einen hervorragenden, kostenfreien WMS/WMTS. NASA GIBS integriert die europäischen Meteosat-Daten in ihre globalen Karten. Die Latenz ist dort mit ca. 30 Minuten minimal höher als direkt bei EUMETSAT, dafür lassen sich die Kacheln besonders performant als standardmäßiges WMTS-Overlay laden.  

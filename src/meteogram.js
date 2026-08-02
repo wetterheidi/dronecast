@@ -10,10 +10,11 @@
  *             precipitation, weather_code, cloud_cover_low/mid/high,
  *             wind_gusts_10m (km/h), visibility (m) },
  *     units: {},
- *     rhCeiling?: (number|null)[],  // Höhe der untersten gesättigten
- *       Modell-Schicht je Stunde (m AGL, aus column.js), verfeinert die
- *       LCL-Schätzung der Wolkenbasis — optional, fehlt z. B. wenn die
- *       Säule (noch) nicht geladen ist (dann reine LCL-Schätzung).
+ *     lowestLayer?: ({baseM, cover, cf}|null)[],  // unterste Wolkenschicht je
+ *       Stunde (aus clouds.js `cloudLayers`, erste Schicht — `cover` ist die
+ *       Okta-Kategorie FEW/SCT/BKN/OVC), verfeinert die LCL-Schätzung der
+ *       Wolkenbasis — optional, fehlt z. B. wenn die Säule (noch) nicht
+ *       geladen ist (dann reine LCL-Schätzung).
  *     groundFog?: ({fog,freezing}|null)[] }  // physikalischer Nebelnachweis
  *       aus QW/QI je Stunde (clouds.js `groundFog`) — optional, ergänzt (ODER-
  *       verknüpft) die `weather_code`-Nebelerkennung im Bewölkungs-Panel.
@@ -133,7 +134,7 @@ function setupHover(svg, m, ctx) {
     const spd = Number.isFinite(V.wind_speed_10m[i]) ? V.wind_speed_10m[i] / 3.6 : NaN;
     const gust = Number.isFinite(V.wind_gusts_10m[i]) ? V.wind_gusts_10m[i] / 3.6 : NaN;
     const base = refineCloudBase(V.temperature_2m[i], V.dew_point_2m[i], V.cloud_cover_low[i],
-      m.rhCeiling ? m.rhCeiling[i] : null);
+      m.lowestLayer ? m.lowestLayer[i] : null);
     const lines = [
       new Date(time[i] * 1000).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" }),
       `Temp ${F(V.temperature_2m[i], fmtTemp)} · Td ${F(V.dew_point_2m[i], fmtTemp)}`,
@@ -290,9 +291,9 @@ function drawCloud(g, m, x, yTop, yBot) {
 function drawBaseVis(g, m, x, yTop, yBot) {
   const T = m.vars.temperature_2m, Td = m.vars.dew_point_2m;
   const lo = m.vars.cloud_cover_low, V = m.vars.visibility;
-  // Wolkenbasis: LCL (Espy) verfeinert mit dem Modell-Feuchteprofil, falls
-  // vorhanden (siehe clouds.js/column.js). Trigger bleibt cloud_cover_low.
-  const refined = m.time.map((t, i) => refineCloudBase(T[i], Td[i], lo[i], m.rhCeiling ? m.rhCeiling[i] : null));
+  // Wolkenbasis: LCL (Espy) verfeinert mit der untersten Modell-Wolkenschicht,
+  // falls vorhanden (siehe clouds.js/column.js). Trigger bleibt cloud_cover_low.
+  const refined = m.time.map((t, i) => refineCloudBase(T[i], Td[i], lo[i], m.lowestLayer ? m.lowestLayer[i] : null));
   // y-Achse deckt immer die Vorhersagehöhe ab, expandiert bei Bedarf für eine
   // höhere tiefe Basis, gedeckelt auf das tiefe Stockwerk (~2500 m AGL). Höhere
   // Ceilings (z. B. Cirrus-BKN) gehören nicht in dieses Tief-Panel → nicht
@@ -312,8 +313,9 @@ function drawBaseVis(g, m, x, yTop, yBot) {
 
   const visKm = V.map((v) => (Number.isFinite(v) ? Math.min(15, v / 1000) : null));
   polyline(g, m.time, visKm, (v) => yR(v), x, COL.vis, 1.6);
-  // Basislinie segmentweise: durchgezogen, wenn Bedeckung UND Feuchteprofil
-  // übereinstimmen (hohe Konfidenz), sonst gestrichelt (nur ein Signal).
+  // Basislinie segmentweise: durchgezogen bei BKN/OVC (unterste Schicht mit
+  // CF ≥ CF_BKN), gestrichelt bei FEW/SCT bzw. beim reinen LCL-Fallback ohne
+  // bekannte Kategorie (siehe refineCloudBase in clouds.js).
   // Über große Basissprünge (verschiedene Stockwerke) NICHT verbinden — sonst
   // täuscht eine Scheinlinie einen kontinuierlichen Basisverlauf vor. Punkte an
   // jeder gültigen Basis, damit isolierte Werte sichtbar bleiben.
@@ -333,14 +335,15 @@ function drawBaseVis(g, m, x, yTop, yBot) {
     if (Number.isFinite(base[i])) g.append(mk("circle", { cx: x(m.time[i]).toFixed(1), cy: yB(base[i]).toFixed(1), r: 1.6, fill: COL.base }));
   }
 
-  // Legende mit Linienstilen (durchgezogen = hohe Konfidenz, gestrichelt = ein Signal).
+  // Legende mit Linienstilen (durchgezogen = BKN/OVC, gestrichelt = FEW/SCT
+  // bzw. LCL-Fallback ohne bekannte Kategorie).
   const ly = yBot - 6; let lx = M.l + 4;
   const sample = (dash) => {
     g.append(mk("line", { x1: lx, y1: ly - 3, x2: lx + 14, y2: ly - 3, stroke: COL.base, "stroke-width": 1.8, ...(dash ? { "stroke-dasharray": "4 3" } : {}) }));
     lx += 17;
   };
-  sample(false); g.append(txt(lx, ly - 1, "sicher", MUTED, 10, "start")); lx += 40;
-  sample(true); g.append(txt(lx, ly - 1, "unsicher", MUTED, 10, "start")); lx += 50;
+  sample(false); g.append(txt(lx, ly - 1, "BKN/OVC", MUTED, 10, "start")); lx += 48;
+  sample(true); g.append(txt(lx, ly - 1, "FEW/SCT", MUTED, 10, "start")); lx += 48;
   g.append(mk("rect", { x: lx, y: ly - 7, width: 10, height: 4, rx: 1, fill: COL.vis }));
   g.append(txt(lx + 13, ly - 3, "Sicht", MUTED, 10, "start"));
 }

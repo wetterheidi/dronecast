@@ -427,15 +427,17 @@ export function bandCoverage(col, i, { capM = 12000 } = {}) {
 }
 
 /**
- * Kombiniert Modell-Ceiling und LCL-Fallback für die Meteogramm-Wolkenbasis.
- * Liegt ein Modell-Ceiling (`rhCeilingM`, aus `cloudCeiling`) vor, bestimmt DAS
- * die Höhe — `cloud_cover_low` gatet das NICHT, sondern liefert nur die
- * Konfidenz (> 50 % → durchgezogene statt gestrichelter Linie). Fehlt es, greift
- * die LCL-Schätzung. null, wenn beides fehlt.
+ * Kombiniert die unterste Wolkenschicht (`cloudLayers()`, erste Schicht) mit
+ * dem LCL-Fallback für die Meteogramm-Wolkenbasis. Liegt eine Schicht aus dem
+ * Höhenprofil vor (`lowestLayer`, aus `cloudLayers(col, i, {maxLayers: 1})[0]`),
+ * bestimmt DEREN Basis die Höhe; die Liniendarstellung folgt ihrer Okta-
+ * Kategorie — durchgezogen bei BKN/OVC (CF ≥ CF_BKN), gestrichelt bei FEW/SCT.
+ * Fehlt die Säule, greift die LCL-Schätzung (Espy) — deren Kategorie ist
+ * unbekannt, daher immer gestrichelt. null, wenn beides fehlt.
  */
-export function refineCloudBase(tC, tdC, ccLowPct, rhCeilingM) {
-  if (Number.isFinite(rhCeilingM)) {
-    return { baseM: rhCeilingM, confident: (ccLowPct ?? 0) > 50 };
+export function refineCloudBase(tC, tdC, ccLowPct, lowestLayer) {
+  if (lowestLayer && Number.isFinite(lowestLayer.baseM)) {
+    return { baseM: lowestLayer.baseM, confident: (lowestLayer.cf ?? 0) >= CF_BKN };
   }
   const lcl = cloudBaseAgl(tC, tdC, ccLowPct);
   if (lcl == null) return null;

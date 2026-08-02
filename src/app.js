@@ -4,7 +4,7 @@ import { fetchSurface, nearestIndex } from "./weather.js";
 import { initTimeControls, setRange, getMasterMs, subscribe as subscribeTime } from "./timeController.js";
 import { renderMeteogram } from "./meteogram.js";
 import { fetchColumn, buildField } from "./column.js";
-import { cloudCeiling, groundFog } from "./clouds.js";
+import { cloudCeiling, cloudLayers, groundFog } from "./clouds.js";
 import { renderCrossSection } from "./crosssection.js";
 import { buildBriefingHtml, buildBriefingContent } from "./briefing.js";
 import { evaluate as evaluateGoNoGo } from "./gonogo.js";
@@ -380,17 +380,20 @@ async function openMeteogram() {
   const events = astro.moonRiseSetEvents(t0, t1, lat, lon)
     .map((e) => ({ ...e, ...astro.moonPhase(e.t) }));
 
-  // RH-Profil-Verfeinerung der Wolkenbasis: Säule wird ohnehin für
+  // Profil-Verfeinerung der Wolkenbasis: Säule wird ohnehin für
   // Cross-Section/Briefing gebraucht und hier mitgenutzt (gecacht in
   // state.data.col). Schlägt der Abruf fehl, zeichnet drawBaseVis einfach
   // mit der reinen LCL-Schätzung weiter (kein Hard-Fail fürs Meteogramm).
-  let rhCeiling = null, mgGroundFog = null;
+  // Basis + Okta-Kategorie kommen aus der UNTERSTEN Schicht (`cloudLayers`,
+  // erste Schicht) — nicht aus `cloudCeiling` (das sucht die erste BKN/OVC-
+  // Höhe im ganzen Profil, auch wenn eine tiefere FEW/SCT-Schicht darunter
+  // liegt; für die Meteogramm-Linie soll aber die tatsächliche unterste
+  // Wolke inkl. ihrer eigenen Kategorie erscheinen).
+  let lowestLayer = null, mgGroundFog = null;
   try {
     const col = await ensureColumn();
     if (col.time.length === surface.time.length) {
-      const ccLow = surface.vars.cloud_cover_low;
-      rhCeiling = surface.time.map((_, i) =>
-        cloudCeiling(col, i, { ccLowPct: ccLow?.[i] })?.baseM ?? null);
+      lowestLayer = surface.time.map((_, i) => cloudLayers(col, i, { maxLayers: 1 })[0] ?? null);
       mgGroundFog = surface.time.map((_, i) => groundFog(col, i));
     }
   } catch { /* Säule nicht verfügbar -> Meteogramm bleibt bei reiner LCL-Schätzung */ }
@@ -402,7 +405,7 @@ async function openMeteogram() {
     units: surface.units,
     moon: { events },
     maxHeightM: settings.maxHeight,
-    rhCeiling,
+    lowestLayer,
     groundFog: mgGroundFog,
   });
 }
