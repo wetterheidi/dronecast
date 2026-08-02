@@ -1,9 +1,9 @@
 /**
  * Cross-Sections (Höhe × Zeit) am Operationspunkt — reines SVG.
  * Oben Wind (sequenzielle Skala + Richtungspfeile), unten Temperatur
- * (divergierend um 0 °C + Nullgradlinie). Log-Höhenachse (dicht am Boden),
+ * (regenbogenfarbig, Kalt→Warm + Nullgradlinie). Log-Höhenachse (dicht am Boden),
  * Flughöhe als Linie markiert. Farbskalen: Wind einhuig hell→dunkel,
- * Temperatur zweihuig Blau↔Rot mit neutralem Grau bei 0 °C (beide CVD-sicher).
+ * Temperatur regenbogenfarbig Lila→Blau→Grün→Gelb→Orange→Rot (mehr Kontrast).
  * opts.axis = "lin" schaltet auf eine lineare Höhenachse (Zoom-Modus bis
  * Flughöhe: feines Gitter, dichtere Windpfeile).
  */
@@ -25,10 +25,12 @@ const WIND_STOPS = [
   [0, "#eef4fb"], [3, "#c2dbf0"], [6, "#8bb8e2"], [9, "#5290cf"],
   [12, "#2f6cb6"], [16, "#1d4c8c"], [22, "#122f5c"],
 ];
-// Divergierende Temperaturskala (°C): Blau ↔ neutrales Grau (0 °C) ↔ Rot.
+// Regenbogen-Temperaturskala (°C): Lila (kalt) → Blau → Cyan → Grün → Gelb → Orange → Rot (warm).
+// Testweise anstelle der divergierenden Blau/Grau/Rot-Skala für mehr Kontrast.
 const TEMP_STOPS = [
-  [-40, "#2166ac"], [-20, "#4393c3"], [-8, "#92c5de"], [-2, "#d6e6f0"],
-  [0, "#f1f1ee"], [2, "#fbdccb"], [8, "#f4a582"], [20, "#d6604d"], [35, "#b2182b"],
+  [-40, "#2a0a4a"], [-30, "#1b3f8c"], [-20, "#1f7ec9"], [-10, "#22b8c9"],
+  [-4, "#3fc98a"], [0, "#8fd444"], [4, "#ffe93b"], [10, "#ffb62b"],
+  [16, "#ff8a1f"], [22, "#f2521f"], [28, "#c9281f"], [35, "#7a1414"],
 ];
 // Sequenzielle Wolkenskala (%): eine Hue, frei (weiß) → bedeckt (dunkelblau).
 const CLOUD_STOPS = [
