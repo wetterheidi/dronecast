@@ -110,6 +110,13 @@ export function sunRiseSet(startMs, endMs, lat, lon) {
   return riseSet(sun, startMs, endMs, lat, lon, H0_SUN);
 }
 
+/** Sonnenhöhe (geozentrisch, Grad) zu einem Zeitpunkt — Grundlage für den
+ *  kontinuierlichen Tag/Nacht-Verlauf im GRAMET-Meteogramm (statt binärer
+ *  Auf-/Untergangs-Intervalle wie im normalen Meteogramm). */
+export function sunAltitude(ms, lat, lon) {
+  return altitude(ms, lat, lon, sun);
+}
+
 const PHASE_NAMES = [
   "Neumond", "zunehmende Sichel", "erstes Viertel", "zunehmender Mond",
   "Vollmond", "abnehmender Mond", "letztes Viertel", "abnehmende Sichel",

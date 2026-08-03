@@ -296,14 +296,14 @@ function colorbar(svg, cx, top, bot, stops, labelFn, unit) {
 
 // --- Helfer ----------------------------------------------------------------
 
-function fmtH(m) { return `${Math.round(heightToDisplay(m))} ${heightUnit()}`; }
+export function fmtH(m) { return `${Math.round(heightToDisplay(m))} ${heightUnit()}`; }
 
-function niceLogHeights(hMin, hMax) {
+export function niceLogHeights(hMin, hMax) {
   const cand = [30, 50, 100, 200, 300, 500, 1000, 1500, 2000, 3000, 4000, 6000, 8000, 10000];
   return cand.filter((h) => h >= hMin && h <= hMax);
 }
 
-function niceTicks(lo, hi, n) {
+export function niceTicks(lo, hi, n) {
   const raw = (hi - lo) / n;
   const mag = Math.pow(10, Math.floor(Math.log10(raw)));
   const step = [1, 2, 2.5, 5, 10].map((s) => s * mag).find((s) => s >= raw) || 10 * mag;

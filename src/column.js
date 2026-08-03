@@ -16,7 +16,10 @@ const KMH_TO_MS = 1 / 3.6;
 // Feldern, wird einmalig ohne sie wiederholt (Muster wie SURFACE_OPTIONAL in
 // weather.js) — der Sundqvist-Fallback in clouds.js greift dann automatisch.
 function levelVars(nLevels, includeCloudDiag) {
-  const vars = [];
+  // pressure_msl (Meeresniveau, kein Level-Suffix): fürs GRAMET-Meteogramm
+  // (SLP-Zeile) — kommt von derselben Instanz wie die Level-Daten, kein
+  // separater Request nötig.
+  const vars = ["pressure_msl"];
   for (let l = 1; l <= nLevels; l++) {
     vars.push(`wind_u_component_level${l}`, `wind_v_component_level${l}`,
       `temperature_level${l}`, `height_agl_level${l}`, `relative_humidity_level${l}`,
@@ -79,9 +82,10 @@ export async function fetchColumn(lat, lon, modelKey, forecastDays, fetchImpl = 
     qi.push(toArr(H[`cloud_ice_level${l}`], T, 1e-3));
     clc.push(toArr(H[`cloud_cover_level${l}`], T, 1));
   }
+  const pmsl = toArr(H.pressure_msl, T, 1);
   // `model` mitgeführt für modellspezifische Konstanten in clouds.js
   // (RH_CRIT_Z_REF unterscheidet sich zwischen ICON-D2/EU, s. dort).
-  return { time, h, u, v, t, rh, p, w, q, qw, qi, clc, nLevels: h.length, elevation: data.elevation, model: modelKey };
+  return { time, h, u, v, t, rh, p, w, q, qw, qi, clc, pmsl, nLevels: h.length, elevation: data.elevation, model: modelKey };
 }
 
 /**

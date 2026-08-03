@@ -6,6 +6,9 @@ import { renderMeteogram } from "./meteogram.js";
 import { fetchColumn, buildField } from "./column.js";
 import { cloudCeiling, cloudLayers, groundFog } from "./clouds.js";
 import { renderCrossSection } from "./crosssection.js";
+import { gridFromColumn } from "./gramet/grid.js";
+import { deriveView } from "./gramet/derive.js";
+import { renderGramet, exportPng as exportGrametPng } from "./gramet/render.js";
 import { buildBriefingHtml, buildBriefingContent } from "./briefing.js";
 import { evaluate as evaluateGoNoGo } from "./gonogo.js";
 import { renderGoNoGoTable } from "./gonogotable.js";
@@ -226,6 +229,7 @@ function clearForecast() {
   el("products").hidden = true;
   el("meteogram").hidden = true;
   el("crosssection").hidden = true;
+  el("gramet").hidden = true;
   el("gonogo").hidden = true;
 }
 
@@ -280,6 +284,7 @@ async function loadForecast() {
     renderNow();
     if (!el("meteogram").hidden) openMeteogram();       // offene Overlays aktualisieren
     if (!el("crosssection").hidden) openCrossSection();
+    if (!el("gramet").hidden) openGramet();
     if (!el("gonogo").hidden) openGoNoGo();
   } catch (err) {
     setStatus(err.message || String(err), "error");
@@ -381,6 +386,7 @@ document.querySelectorAll(".product").forEach((btn) => {
   btn.addEventListener("click", () => {
     if (btn.dataset.prod === "meteogram") openMeteogram();
     else if (btn.dataset.prod === "xsection") openCrossSection();
+    else if (btn.dataset.prod === "gramet") openGramet();
     else if (btn.dataset.prod === "briefing") openBriefing();
     else if (btn.dataset.prod === "table") openGoNoGo();
   });
@@ -495,8 +501,66 @@ el("xs-range").addEventListener("click", (e) => {
   if (!btn) return;
   updateSetting("xsZoom", btn.dataset.range === "zoom");
   renderXs();
+  if (!el("gramet").hidden) renderGm(); // teilt sich denselben Höhenbereich-State
 });
 el("xs-close").addEventListener("click", () => { el("crosssection").hidden = true; });
+
+// GRAMET-Meteogramm: dieselbe gecachte Säule wie Cross-Section/Briefing, dazu
+// die ohnehin schon geladenen Oberflächenwerte (state.data.surface) — kein
+// eigener Request (s. src/gramet/grid.js).
+async function openGramet() {
+  if (!state.data || !state.point) return;
+  el("gramet").hidden = false;
+  el("gm-sub").textContent = el("pointpos").textContent;
+  if (!state.data.col) {
+    el("gm-body").textContent = "Lade Höhenprofil …";
+    try {
+      await ensureColumn();
+    } catch (e) {
+      el("gm-body").textContent = "Fehler beim Laden des Höhenprofils: " + (e.message || e);
+      return;
+    }
+  }
+  renderGm();
+}
+
+function renderGm() {
+  if (!state.data?.col) return;
+  syncGmToggle();
+  if (!state.data.gmGrid) {
+    const { lat, lon } = state.point;
+    state.data.gmGrid = gridFromColumn(state.data.col, state.data.surface, lat, lon);
+    state.data.gmView = deriveView(state.data.gmGrid);
+  }
+  let zMin, zMax;
+  if (settings.xsZoom) {
+    zMax = Math.round(settings.maxHeight * XS_ZOOM_HEADROOM);
+    zMin = Math.max(10, state.data.gmGrid.z[0] || 10);
+  }
+  state.data.gmCanvas = renderGramet(el("gm-body"), state.data.gmGrid, state.data.gmView, {
+    axis: settings.xsZoom ? "lin" : "log", zMin, zMax,
+  });
+}
+
+function syncGmToggle() {
+  document.querySelectorAll("#gm-range button").forEach((b) => {
+    b.classList.toggle("active", (b.dataset.range === "zoom") === settings.xsZoom);
+  });
+}
+
+el("gm-range").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-range]");
+  if (!btn) return;
+  updateSetting("xsZoom", btn.dataset.range === "zoom");
+  renderGm();
+  if (!el("crosssection").hidden) renderXs();
+});
+el("gm-export").addEventListener("click", () => {
+  if (state.data?.gmCanvas) {
+    exportGrametPng(state.data.gmCanvas, ["gramet", settings.model, state.point?.lat, state.point?.lon]);
+  }
+});
+el("gm-close").addEventListener("click", () => { el("gramet").hidden = true; });
 
 // Go/No-Go-Tabelle: Windmaximum zwischen 10 m und Flughöhe pro Stunde aus dem
 // bereits gecachten WindField auflösen (keine neuen Requests, nur
@@ -792,6 +856,7 @@ window.addEventListener("resize", () => {
   resizeTimer = setTimeout(() => {
     if (!el("meteogram").hidden) openMeteogram();
     if (!el("crosssection").hidden) renderXs();
+    if (!el("gramet").hidden) renderGm();
   }, 150);
 });
 
@@ -815,9 +880,10 @@ function initSettings() {
   bind("set-model", "model");
   bind("set-maxheight", "maxHeight", () => {
     needReload();
-    // Cross-Section kann sofort nachziehen: die Säule enthält alle Level,
-    // Flughöhenlinie und Zoom-Bereich hängen nur von dieser Einstellung ab.
+    // Cross-Section/GRAMET können sofort nachziehen: die Säule enthält alle
+    // Level, Flughöhenlinie und Zoom-Bereich hängen nur von dieser Einstellung ab.
     if (!el("crosssection").hidden) renderXs();
+    if (!el("gramet").hidden) renderGm();
   });
   // Der Horizont ändert die Datenbasis (mehr/weniger Stunden). Ist ein Punkt
   // geladen, sofort automatisch neu abrufen, damit Meteogramm/Cross-Section und
@@ -834,6 +900,7 @@ function refreshViews() {
   renderNow();
   if (!el("meteogram").hidden) openMeteogram();
   if (!el("crosssection").hidden) renderXs();
+  if (!el("gramet").hidden) renderGm();
   if (!el("gonogo").hidden && state.data?.windBandMax) {
     renderGoNoGoTable(el("gng-body"), evaluateGoNoGo(
       state.data.surface, state.data.windBandMax, getProfile(settings.droneProfile), settings.maxHeight,

@@ -54,6 +54,7 @@ export const SURFACE_OPTIONAL = [
   "visibility",
   "cape",
   "freezing_level_height",
+  "snowfall", // Niederschlagsphase im GRAMET-Meteogramm (src/gramet)
 ];
 
 // Vorhersage-Obergrenze (max. Flughöhe AGL) – Auswahl fürs Settings-Panel.
