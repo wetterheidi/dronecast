@@ -191,8 +191,15 @@ select, input[type="number"], input[type="text"] {
   overflow: hidden;
 }
 #gramet[hidden] { display: none; }
-#gm-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 6px 8px; position: relative; }
-.gm-canvas { display: block; cursor: crosshair; }
+/* Kein horizontales Padding: `position: sticky; left: 0` des Achsenstreifens
+   bezieht sich auf die Padding-Box des Scrollcontainers -- mit Padding würde
+   die Beschriftung beim Andocken um genau diesen Betrag springen. */
+#gm-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 0 8px; position: relative; }
+.gm-plot { display: flex; align-items: flex-start; width: max-content; }
+.gm-canvas { display: block; cursor: crosshair; flex: none; position: relative; z-index: 1; }
+/* Linker Randstreifen (Höhenachse + Zeilenbeschriftung) bleibt beim
+   horizontalen Scrollen stehen; liegt über dem durchlaufenden Chart. */
+.gm-axis { display: block; flex: none; position: sticky; left: 0; z-index: 2; }
 #gm-export, #gm-close { margin-left: 0; border: none; background: none; font-size: 13px; color: #52514e; cursor: pointer; padding: 0 4px; }
 #gm-close { font-size: 20px; margin-left: 4px; }
 .seg-toggle + #gm-export { margin-left: 8px; }

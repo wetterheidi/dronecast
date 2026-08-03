@@ -5,7 +5,10 @@
       "Bash(node -e ' *)",
       "Bash(node test_export.mjs)",
       "Bash(curl -s \"http://localhost:5173/src/gramet/derive.js\")",
-      "Bash(node debug_precip.mjs)"
+      "Bash(node debug_precip.mjs)",
+      "Bash(node test-gramet.mjs)",
+      "Bash(sed -i '' 's/M = { l: 50, r: 52 }/M = { l: 50, r: 16 }/' /Users/wetterheidi/Documents/Git/droneforecast/src/gramet/render.js)",
+      "Bash(node /private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/1e3ad9c3-771c-4007-92b6-a49cbc4fb625/scratchpad/test-gramet.mjs)"
     ]
   }
 }

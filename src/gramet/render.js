@@ -25,7 +25,14 @@ import { fmtHeight, fmtWind, fmtTemp, fmtDir } from "../units.js";
 import { metarWeather } from "../briefing.js";
 
 const INK = "#0b0b0b", MUTED = "#52514e", GRID = "#d9d8d3";
-const TOPAX = 22, GAP = 16, BOT = 22, M = { l: 50, r: 16 };
+// Rechter Rand: Platz für die Beschriftungskästchen der Isothermen/Isotachen/
+// Tropopause, die am rechten Ende ihrer Polylinie sitzen (also i. d. R. exakt
+// auf `x.right`) -- mit dem alten 16 px wurden sie abgeschnitten.
+const TOPAX = 22, GAP = 16, BOT = 22, M = { l: 50, r: 52 };
+
+// Füllfarbe des mitscrollenden Achsenstreifens: deckend, damit der Chart beim
+// horizontalen Scrollen darunter verschwindet (Panel-Hintergrund von #gramet).
+const PANEL_BG = "#fcfcfb";
 
 // Dunkleres Blau als im ersten Entwurf (das helle Himmelblau ließ die weiße
 // Wolkenschraffur verschwinden) -- näher am Original-GRAMET-Kontrast.
@@ -153,9 +160,39 @@ export function renderGramet(host, grid, view, state = {}) {
   ctx.fillStyle = INK; ctx.font = "bold 12px system-ui, sans-serif"; ctx.textAlign = "left";
   ctx.fillText("GRAMET", x.left, 13);
 
-  host.append(canvas);
-  setupHover(host, canvas, grid, { x, y, mainTop, mainBot });
+  const axis = makeStickyAxis(canvas, W, H, dpr);
+  const plot = document.createElement("div");
+  plot.className = "gm-plot";
+  plot.append(axis, canvas);
+
+  host.append(plot);
+  setupHover(host, canvas, axis, grid, { x, y, mainTop, mainBot });
   return canvas;
+}
+
+// Der linke Randstreifen (Höhenachse + Zeilenbeschriftung) wird als Kopie der
+// ersten `M.l` Pixel des fertigen Charts in ein eigenes, `position: sticky`
+// gesetztes Canvas gespiegelt: beim horizontalen Scrollen bleibt die
+// Beschriftung stehen, der Chart läuft darunter durch. Bewusst eine Kopie und
+// kein eigener Zeichenpfad -- so bleibt genau ein Renderpfad, und das
+// Haupt-Canvas enthält weiterhin alles (der PNG-Export braucht keine
+// Sonderbehandlung).
+function makeStickyAxis(canvas, W, H, dpr) {
+  const axis = document.createElement("canvas");
+  axis.className = "gm-axis";
+  axis.width = Math.round(M.l * dpr);
+  axis.height = Math.round(H * dpr);
+  axis.style.width = `${M.l}px`;
+  axis.style.height = `${H}px`;
+  const actx = axis.getContext("2d");
+  actx.scale(dpr, dpr);
+  actx.fillStyle = PANEL_BG;
+  actx.fillRect(0, 0, M.l, H);
+  actx.drawImage(canvas, 0, 0, Math.round(M.l * dpr), canvas.height, 0, 0, M.l, H);
+  // Negativer Rand: das Haupt-Canvas beginnt unter dem Streifen, die Summe der
+  // Flex-Breiten bleibt damit W (kein zusätzlicher Scrollweg).
+  canvas.style.marginLeft = `${-M.l}px`;
+  return axis;
 }
 
 export function exportPng(canvas, nameParts) {
@@ -418,10 +455,13 @@ function pathFor(ctx, pl, x, y) {
     if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
   });
 }
-function labelBox(ctx, px, py, text, color) {
+// `limitX` = rechte Kante, hinter die das Kästchen nicht laufen darf (CSS-
+// Pixel). Vorher stand hier `ctx.canvas.width` -- das sind Geräte-Pixel
+// (W * dpr), die Begrenzung hat also nie gegriffen.
+function labelBox(ctx, px, py, text, color, limitX) {
   ctx.font = "10px system-ui, sans-serif"; ctx.textAlign = "start"; ctx.textBaseline = "middle";
   const w = ctx.measureText(text).width + 8;
-  const bx = Math.min(px + 2, ctx.canvas.width - w - 2);
+  const bx = Math.min(px + 2, limitX - w - 2);
   ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.fillRect(bx, py - 8, w, 16);
   ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.strokeRect(bx, py - 8, w, 16);
   ctx.fillStyle = color; ctx.fillText(text, bx + 4, py);
@@ -437,7 +477,7 @@ function drawIsotherms(ctx, isotherms, x, y) {
     for (const pl of polylines) drawPolyline(ctx, pl, x, y, color, [5, 3]);
     const last = rightmost(polylines);
     const p = last[last.length - 1];
-    labelBox(ctx, x(p.t), y(p.z), `${tempC}°C`, color);
+    labelBox(ctx, x(p.t), y(p.z), `${tempC}°C`, color, x.right + M.r);
   }
 }
 function drawIsotachs(ctx, isotachs, x, y) {
@@ -446,14 +486,14 @@ function drawIsotachs(ctx, isotachs, x, y) {
     for (const pl of polylines) drawPolyline(ctx, pl, x, y, "#6b6b1f", [3, 3]);
     const last = rightmost(polylines);
     const p = last[last.length - 1];
-    labelBox(ctx, x(p.t), y(p.z), `${kt} kt`, "#6b6b1f");
+    labelBox(ctx, x(p.t), y(p.z), `${kt} kt`, "#6b6b1f", x.right + M.r);
   }
 }
 function drawTropopause(ctx, line, x, y) {
   if (line.length < 2) return;
   drawPolyline(ctx, line, x, y, "#cc0000", []);
   const p = line[line.length - 1];
-  labelBox(ctx, x(p.t), y(p.z), "Trop", "#cc0000");
+  labelBox(ctx, x(p.t), y(p.z), "Trop", "#cc0000", x.right + M.r);
 }
 
 // --- Achsen --------------------------------------------------------------------
@@ -516,13 +556,17 @@ function drawTimeAxis(ctx, times, x, yTop, yBot) {
 
 // --- Hover (DOM-Overlay) -------------------------------------------------------
 
-function setupHover(host, canvas, grid, info) {
+function setupHover(host, canvas, axis, grid, info) {
   const { x, y, mainTop, mainBot } = info;
   host.style.position = host.style.position || "relative";
   const tip = document.createElement("div");
   tip.className = "gm-tip";
   tip.style.display = "none";
   host.append(tip);
+  // Über dem festen Achsenstreifen liegt kein sichtbarer Chart -- Tooltip aus,
+  // sonst bliebe der letzte Wert stehen, sobald der Zeiger den Streifen
+  // erreicht (der Streifen fängt die Pointer-Events ab).
+  axis.addEventListener("pointerenter", () => { tip.style.display = "none"; });
 
   canvas.addEventListener("pointermove", (e) => {
     const r = canvas.getBoundingClientRect();
