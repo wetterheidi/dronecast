@@ -8,7 +8,12 @@
       "Bash(node debug_precip.mjs)",
       "Bash(node test-gramet.mjs)",
       "Bash(sed -i '' 's/M = { l: 50, r: 52 }/M = { l: 50, r: 16 }/' /Users/wetterheidi/Documents/Git/droneforecast/src/gramet/render.js)",
-      "Bash(node /private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/1e3ad9c3-771c-4007-92b6-a49cbc4fb625/scratchpad/test-gramet.mjs)"
+      "Bash(node /private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/1e3ad9c3-771c-4007-92b6-a49cbc4fb625/scratchpad/test-gramet.mjs)",
+      "Bash(node /private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/1e3ad9c3-771c-4007-92b6-a49cbc4fb625/scratchpad/measure-clouds.mjs)",
+      "Bash(node test-noise.mjs)",
+      "Bash(node test-precip.mjs)",
+      "Bash(cp /Users/wetterheidi/Documents/Git/droneforecast/src/gramet/render.js __TRACKED_VAR__/render2.bak)",
+      "Bash(sed -i '' 's/const PRECIP_JITTER_X = 0.30, PRECIP_JITTER_Y = 0.32;/const PRECIP_JITTER_X = 0, PRECIP_JITTER_Y = 0;/; s/const PRECIP_SIZE_MIN = 0.80, PRECIP_SIZE_SPAN = 0.45;/const PRECIP_SIZE_MIN = 1, PRECIP_SIZE_SPAN = 0;/' /Users/wetterheidi/Documents/Git/droneforecast/src/gramet/render.js)"
     ]
   }
 }

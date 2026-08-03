@@ -15,25 +15,20 @@
  */
 
 import { CF_FEW, CF_BKN } from "../clouds.js";
+import { hashSeed, mulberry32 } from "./noise.js";
 
-function hashSeed(str) {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+// Strichdichte in PIXELN (Striche je 1000 px² bei voller Bedeckung) — bewusst
+// NICHT als feste Strichzahl je Gitterzelle: dieselbe Falle wie beim
+// Niederschlagsvorhang (s. `render.js` `precipSpacingPx`). Modell-Level liegen
+// am Boden dicht beieinander und oben weit auseinander, die Höhenachse staucht
+// zusätzlich (log) bzw. streckt (lin). Bei fester Zahl je Zelle schwankte die
+// sichtbare Dichte dadurch um Faktor ~35 über die Achse: auf der log-Achse
+// wirkten 75 % Bedeckung am Boden etwa 5x dünner als in 10 km Höhe, im
+// lin-Zoom kippte es ins Gegenteil (unten verklumpt, oben ausgedünnt).
+// Über die Pixelfläche gezählt bleibt der Eindruck in beiden Achsenmodi gleich.
+// Der Wert ist die eine Stellschraube für die Gesamtdichte -- rein optisch
+// eingestellt, nicht gegen echte GRAMETs kalibriert.
+const STROKES_PER_1000PX2 = 50;
 
 /** Zeichnet die Wolkenschraffur direkt in den Haupt-Canvas-Kontext. */
 export function drawClouds(ctx, grid, cloudFrac, x, y) {
@@ -59,12 +54,19 @@ export function drawClouds(ctx, grid, cloudFrac, x, y) {
         ctx.fillStyle = `rgba(255,255,255,${(0.12 + 0.35 * cf).toFixed(2)})`;
         ctx.fillRect(x0, yTop, x1 - x0, yBot - yTop);
       }
-      const n = Math.max(1, Math.round(cf * 6));
+      const hPx = yBot - yTop;
+      const nExact = STROKES_PER_1000PX2 * cf * (x1 - x0) * Math.max(0, hPx) / 1000;
+      // Nachkommaanteil stochastisch runden (mit demselben seeded PRNG, bleibt
+      // also reproduzierbar): erzwänge man je Zelle mindestens einen Strich,
+      // würde ein Stapel sehr dünner Zellen — am Boden im lin-Zoom sind das
+      // 1-2 px pro Level — wieder überzeichnet. So stimmt die Dichte auch über
+      // einen solchen Stapel im Mittel.
+      const n = Math.floor(nExact) + (rng() < nExact % 1 ? 1 : 0);
       ctx.strokeStyle = "rgba(255,255,255,0.85)";
       ctx.lineWidth = 1;
       for (let s = 0; s < n; s++) {
         const rx = x0 + rng() * (x1 - x0);
-        const ry = yTop + rng() * Math.max(1, yBot - yTop);
+        const ry = yTop + rng() * Math.max(1, hPx);
         const len = 3 + rng() * 6;
         const curve = (rng() - 0.5) * 3;
         ctx.beginPath();

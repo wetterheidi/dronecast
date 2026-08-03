@@ -17,6 +17,7 @@
 import { sampleAt } from "./grid.js";
 import { contour } from "./derive.js";
 import { drawClouds } from "./texture.js";
+import { hashSeed, hashRand } from "./noise.js";
 import { drawWindRow, WIND_ROW_HEIGHT } from "./rows/wind.js";
 import { drawNumberRow, NUMBER_ROW_HEIGHT } from "./rows/numberRow.js";
 import { niceLogHeights, niceTicks, fmtH } from "../crosssection.js";
@@ -130,7 +131,8 @@ export function renderGramet(host, grid, view, state = {}) {
   if (toggles.cb !== false) drawCbShaft(ctx, view.cb, times, x, y);
   if (toggles.clouds !== false) drawClouds(ctx, grid, view.cloudFrac, x, y);
   if (toggles.cb !== false) drawCbGlyphs(ctx, view.cb, view.tropopause, times, x, y);
-  if (toggles.precip !== false) drawPrecip(ctx, view.precip, x, y);
+  const seed = hashSeed(`${grid.meta.lat},${grid.meta.lon},${grid.meta.elevation},${times[0]}`);
+  if (toggles.precip !== false) drawPrecip(ctx, view.precip, times, x, y, seed);
   drawHazardArea(ctx, grid, view.hazards.turbulence, TURB_STYLES, x, y);
   if (toggles.isotherms !== false) drawIsotherms(ctx, view.isotherms, x, y);
   if (toggles.isotachs !== false) drawIsotachs(ctx, view.isotachs, x, y);
@@ -388,7 +390,18 @@ function precipSpacingPx(rateMmH) {
   return PRECIP_SPACING_MAX_PX - span * Math.tanh(r / PRECIP_RATE_SCALE);
 }
 
-function drawPrecip(ctx, entries, x, y) {
+// Streuung der Symbole um ihre Rasterposition, damit der Vorhang nicht wie
+// eine gezogene Linie wirkt (s. Wolkenschraffur, die schon so arbeitet).
+// X als Anteil der Stundenspalte, Y als Anteil des Symbolabstands -- beide
+// bewusst moderat: bei mehr als ~0,35 Spaltenbreite laufen die Vorhänge
+// benachbarter Stunden ineinander und die Zuordnung "Vorhang unter dieser
+// Stunde" geht verloren. Werte rein optisch gewählt.
+const PRECIP_JITTER_X = 0.30, PRECIP_JITTER_Y = 0.32;
+const PRECIP_SIZE_MIN = 0.80, PRECIP_SIZE_SPAN = 0.45;
+
+function drawPrecip(ctx, entries, times, x, y, seed) {
+  const dt = times.length > 1 ? times[1] - times[0] : 3600;
+  const colW = Math.max(1, x(times[0] + dt) - x(times[0]));
   ctx.save();
   for (const e of entries) {
     const cx = x(e.t);
@@ -400,12 +413,35 @@ function drawPrecip(ctx, entries, x, y) {
     // ganzer Symbolabstand frei und der Vorhang wirkte abgeschnitten).
     const steps = span > 0 ? Math.max(1, Math.round(span / precipSpacingPx(e.rate))) : 0;
     const step = steps > 0 ? span / steps : 0;
+    // Stundenindex statt Schleifenzähler als Hash-Koordinate: jeder Vorhang
+    // würfelt damit unabhängig von allen anderen. Mit einem fortlaufenden
+    // PRNG-Strom (wie bei den Wolken) hinge das Muster einer Stunde daran, wie
+    // viele Symbole die Stunden davor gezogen haben -- ändert sich deren
+    // Symbolzahl (Höhenumschalter), verschöbe sich der ganze Rest mit.
+    // Die Symbolzahl je Vorhang hängt weiterhin an der Höhenachse, ein
+    // umgeschalteter Vorhang sieht also anders aus -- aber nur er.
+    const col = Math.round((e.t - times[0]) / dt);
     for (let s = 0; s <= steps; s++) {
-      const py = pyBot - s * step;
+      // Erstes und letztes Symbol NICHT vertikal versetzen: der Vorhang soll
+      // weiterhin exakt an der Wolkenoberkante ansetzen und den Boden
+      // erreichen (dieselbe Eigenschaft, die das Einrasten oben herstellt).
+      const jy = (s === 0 || s === steps)
+        ? 0
+        : (hashRand(seed, col, s, 1) - 0.5) * 2 * PRECIP_JITTER_Y * step;
+      const py = pyBot - s * step + jy;
+      // Seitlich in der Spalte streuen, aber innerhalb des Chartrahmens
+      // bleiben -- sonst rutschte die erste/letzte Stunde über die Höhenachse
+      // bzw. in den rechten Rand mit den Linien-Labels.
+      const jx = (hashRand(seed, col, s, 0) - 0.5) * 2 * PRECIP_JITTER_X * colW;
+      const px = clamp(cx + jx, x.left + 3, x.right - 3);
       // Phase aus der Höhe, die dieses Pixel tatsächlich meint.
       const z = y.inv(py);
       const snowHere = e.type === "sn" || (Number.isFinite(e.freezingZ) && z > e.freezingZ);
-      if (snowHere) drawAsterisk(ctx, cx, py, 3.2); else drawDash(ctx, cx, py, 4.5);
+      const size = PRECIP_SIZE_MIN + hashRand(seed, col, s, 2) * PRECIP_SIZE_SPAN;
+      const rot = hashRand(seed, col, s, 3);
+      // Flocke: Drehung über 60° reicht, ein 3-Strich-Stern ist so periodisch.
+      if (snowHere) drawAsterisk(ctx, px, py, 3.2 * size, rot * Math.PI / 3);
+      else drawDash(ctx, px, py, 4.5 * size, rot);
     }
   }
   ctx.restore();
@@ -413,11 +449,11 @@ function drawPrecip(ctx, entries, x, y) {
 // Weißes Halo zuerst (wie bei den Isothermen/Isotachen), dann die eigentliche
 // Farbe -- sonst geht das Symbol im dunkleren Himmelblau unter (s. Feedback).
 const PRECIP_COLOR = "#134a7a";
-function drawAsterisk(ctx, cx, cy, r) {
+function drawAsterisk(ctx, cx, cy, r, rot = 0) {
   for (const [stroke, width] of [["#fff", 2.6], [PRECIP_COLOR, 1.2]]) {
     ctx.strokeStyle = stroke; ctx.lineWidth = width;
     for (const deg of [0, 60, 120]) {
-      const rad = deg * Math.PI / 180;
+      const rad = deg * Math.PI / 180 + rot;
       ctx.beginPath();
       ctx.moveTo(cx - r * Math.cos(rad), cy - r * Math.sin(rad));
       ctx.lineTo(cx + r * Math.cos(rad), cy + r * Math.sin(rad));
@@ -425,12 +461,15 @@ function drawAsterisk(ctx, cx, cy, r) {
     }
   }
 }
-function drawDash(ctx, cx, cy, len) {
+// `tilt` in [0,1) variiert die Neigung des Tropfenstrichs (0.15..0.45 der
+// Länge seitlich) -- gleichmäßig geneigte Striche lasen sich als Raster.
+function drawDash(ctx, cx, cy, len, tilt = 0.5) {
+  const dx = len * (0.15 + tilt * 0.3);
   for (const [stroke, width] of [["#fff", 2.8], [PRECIP_COLOR, 1.4]]) {
     ctx.strokeStyle = stroke; ctx.lineWidth = width;
     ctx.beginPath();
-    ctx.moveTo(cx - len * 0.3, cy - len * 0.5);
-    ctx.lineTo(cx + len * 0.3, cy + len * 0.5);
+    ctx.moveTo(cx - dx, cy - len * 0.5);
+    ctx.lineTo(cx + dx, cy + len * 0.5);
     ctx.stroke();
   }
 }
