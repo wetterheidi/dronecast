@@ -50,3 +50,20 @@ export function hashRand(seed, a, b, salt = 0) {
   h ^= h >>> 13; h = Math.imul(h, 0x297a2d39) >>> 0;
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
+
+/**
+ * Value-Noise in [0,1]: Zufallswerte auf einem Einheitsgitter, dazwischen mit
+ * Smoothstep interpoliert -- also stetig und ohne sichtbare Gitterkanten, im
+ * Gegensatz zu punktweisem Zufall. `x`/`y` sind Gittereinheiten (der Aufrufer
+ * teilt die Pixel durch die gewünschte Wellenlänge), `octave` trennt mehrere
+ * unabhängige Rauschfelder.
+ */
+export function valueNoise(seed, x, y, octave = 0) {
+  const x0 = Math.floor(x), y0 = Math.floor(y);
+  const fx = smoothstep(x - x0), fy = smoothstep(y - y0);
+  const v00 = hashRand(seed, x0, y0, octave), v10 = hashRand(seed, x0 + 1, y0, octave);
+  const v01 = hashRand(seed, x0, y0 + 1, octave), v11 = hashRand(seed, x0 + 1, y0 + 1, octave);
+  return (v00 + (v10 - v00) * fx) * (1 - fy) + (v01 + (v11 - v01) * fx) * fy;
+}
+
+function smoothstep(t) { return t * t * (3 - 2 * t); }

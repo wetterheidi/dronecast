@@ -13,7 +13,10 @@
       "Bash(node test-noise.mjs)",
       "Bash(node test-precip.mjs)",
       "Bash(cp /Users/wetterheidi/Documents/Git/droneforecast/src/gramet/render.js __TRACKED_VAR__/render2.bak)",
-      "Bash(sed -i '' 's/const PRECIP_JITTER_X = 0.30, PRECIP_JITTER_Y = 0.32;/const PRECIP_JITTER_X = 0, PRECIP_JITTER_Y = 0;/; s/const PRECIP_SIZE_MIN = 0.80, PRECIP_SIZE_SPAN = 0.45;/const PRECIP_SIZE_MIN = 1, PRECIP_SIZE_SPAN = 0;/' /Users/wetterheidi/Documents/Git/droneforecast/src/gramet/render.js)"
+      "Bash(sed -i '' 's/const PRECIP_JITTER_X = 0.30, PRECIP_JITTER_Y = 0.32;/const PRECIP_JITTER_X = 0, PRECIP_JITTER_Y = 0;/; s/const PRECIP_SIZE_MIN = 0.80, PRECIP_SIZE_SPAN = 0.45;/const PRECIP_SIZE_MIN = 1, PRECIP_SIZE_SPAN = 0;/' /Users/wetterheidi/Documents/Git/droneforecast/src/gramet/render.js)",
+      "Bash(node test-clouds.mjs)",
+      "Bash(node test-tuner-parity.mjs)",
+      "Bash(node count-clouds.mjs)"
     ]
   }
 }
