@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "Bash(node -e ' *)",
+      "Bash(node test_export.mjs)"
+    ]
+  }
+}

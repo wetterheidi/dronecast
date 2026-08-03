@@ -6,7 +6,7 @@
  */
 
 import { derive as deriveGrid } from "./grid.js";
-import { CF_FEW } from "../clouds.js";
+import { CF_FEW, CF_BKN } from "../clouds.js";
 import { sunAltitude } from "../astro.js";
 import * as icing from "./hazards/icing.js";
 import * as turbulence from "./hazards/turbulence.js";
@@ -17,6 +17,15 @@ const FOG_BASE_M = 30; // m AGL — mirrors clouds.js FOG_BASE_M (nicht exportie
 const ISOTHERM_MAX_JUMP_M = 1500; // m je Spaltenschritt, s. METHODIK/Plan
 const ISOTHERM_THRESHOLDS_C = [0, -20, -40];
 const ISOTACH_THRESHOLDS_KT = [50, 75, 100];
+
+// CB-Erkennung: HEURISTIK, kein Modell-Flag (Open-Meteo liefert keine direkte
+// Konvektions-/Cb-Kennung). Kombiniert Oberflächen-CAPE mit vergletschertem
+// Wolkenoberrand (T <= -20 °C bei CF >= CF_BKN) ODER einem kräftigen Updraft
+// irgendwo im Profil. Schwellwerte nicht kalibriert — grober erster Ansatz,
+// per Screenshot-Vergleich mit echten GRAMETs nachzuschärfen (s. M3-Hinweis
+// in render.js zur Wolkentextur-Kalibrierung).
+const CB_CAPE_MIN_JKG = 300;
+const CB_UPDRAFT_MIN_MS = 3;
 
 export function deriveView(grid) {
   const d = deriveGrid(grid);
@@ -36,6 +45,7 @@ export function deriveView(grid) {
     cloudFrac: d.cloudFrac,
     cloudBase,
     precip: precipEntries(grid, cloudBase),
+    cb: cbColumns(grid, d.cloudFrac, cloudBase),
     hazards: { icing: icing.computeGrid(grid), turbulence: turbulence.computeGrid(grid) },
   };
 }
@@ -294,7 +304,39 @@ function precipEntries(grid, cloudBase) {
     const top = cloudTopAt(grid, cloudFrac, i, cloudBase[i]);
     const zTop = Number.isFinite(top) ? top : topOfDomain;
     const isSnow = Number.isFinite(surface.snow[i]) && surface.snow[i] > 0;
-    out.push({ t: times[i], zTop, freezingZ, type: isSnow ? "sn" : "ra" });
+    out.push({ t: times[i], zTop, freezingZ, type: isSnow ? "sn" : "ra", rate: p });
+  }
+  return out;
+}
+
+/**
+ * CB-Spalten (Cumulonimbus) — HEURISTIK, kein direktes Modell-Flag: CAPE über
+ * Schwelle + vergletscherter Wolkenoberrand (CF >= CF_BKN bei T <= -20 °C),
+ * oder ersatzweise ein kräftiger Updraft irgendwo im Profil. Liefert pro
+ * Stunde entweder `null` oder `{ base, top }` (m AGL) für den Cb-Schaft im
+ * Renderer. Nicht kalibriert, s. Konstanten oben.
+ */
+function cbColumns(grid, cloudFrac, cloudBase) {
+  const { nk, times, surface } = grid;
+  const out = [];
+  for (let i = 0; i < times.length; i++) {
+    let maxAbsW = 0, deepTop = NaN;
+    for (let k = 0; k < nk; k++) {
+      const ix = i * nk + k;
+      const w = grid.w[ix];
+      if (Number.isFinite(w) && Math.abs(w) > maxAbsW) maxAbsW = Math.abs(w);
+      if (cloudFrac[ix] >= CF_BKN && (grid.T[ix] - KELVIN) <= -20) {
+        const z = grid.z[ix];
+        if (!Number.isFinite(deepTop) || z > deepTop) deepTop = z;
+      }
+    }
+    const cape = surface?.cape ? surface.cape[i] : NaN;
+    const capeSignal = Number.isFinite(cape) && cape >= CB_CAPE_MIN_JKG && Number.isFinite(deepTop);
+    const updraftSignal = maxAbsW >= CB_UPDRAFT_MIN_MS;
+    if (!capeSignal && !updraftSignal) { out.push(null); continue; }
+    const top = Number.isFinite(deepTop) ? deepTop : grid.z[i * nk + nk - 1];
+    const base = Number.isFinite(cloudBase[i]) ? cloudBase[i] : 0;
+    out.push({ base, top });
   }
   return out;
 }

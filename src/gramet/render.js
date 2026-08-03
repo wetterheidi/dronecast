@@ -15,12 +15,14 @@
  */
 
 import { sampleAt } from "./grid.js";
+import { contour } from "./derive.js";
 import { drawClouds } from "./texture.js";
 import { drawWindRow, WIND_ROW_HEIGHT } from "./rows/wind.js";
 import { drawNumberRow, NUMBER_ROW_HEIGHT } from "./rows/numberRow.js";
 import { niceLogHeights, niceTicks, fmtH } from "../crosssection.js";
 import { CHART_PX_PER_HOUR } from "../windbarb.js";
 import { fmtHeight, fmtWind, fmtTemp, fmtDir } from "../units.js";
+import { metarWeather } from "../briefing.js";
 
 const INK = "#0b0b0b", MUTED = "#52514e", GRID = "#d9d8d3";
 const TOPAX = 22, GAP = 16, BOT = 22, M = { l: 50, r: 16 };
@@ -29,8 +31,21 @@ const TOPAX = 22, GAP = 16, BOT = 22, M = { l: 50, r: 16 };
 // Wolkenschraffur verschwinden) -- näher am Original-GRAMET-Kontrast.
 const NIGHT_COLOR = "#050b1e", DAY_COLOR = "#2b5c93";
 
-const ICING_COLORS = { light: "rgba(46,204,113,0.28)", moderate: "rgba(39,174,96,0.48)", severe: "rgba(27,94,32,0.68)" };
-const TURB_COLORS = { light: "rgba(255,193,7,0.28)", moderate: "rgba(255,152,0,0.48)", severe: "rgba(211,47,47,0.6)" };
+// Hazard-Flächen als Kontur-Umriss (marching squares, s. `derive.js`
+// `contour()`) statt Zellraster -- entspricht der GRAMET-Konvention aus dem
+// Referenz-Screenshot (gestrichelt umrandete Fläche statt Pixelraster).
+// icing: Grün (klassische Vereisungsfarbe), turbulence: Gelb->Orange->Rot
+// (steigender Schweregrad), analog zur gelb umrandeten Fläche im Original.
+const ICING_STYLES = { light: "#2e7d32", moderate: "#1b5e20", severe: "#0d3b10" };
+const TURB_STYLES = { light: "#f9a825", moderate: "#ef6c00", severe: "#c62828" };
+const HAZARD_LEVELS = { light: 1, moderate: 2, severe: 3 };
+
+// Cb-Schaft (Cumulonimbus): sandfarbene Säule + vereinfachtes Gewitter-Glyph,
+// angelehnt an die Ogimet-GRAMET-Darstellung (s. Referenz-Screenshot).
+const CB_SHAFT_COLOR = "rgba(224,178,120,0.5)";
+const CB_GLYPH_COLOR = "#6b2e2e";
+const CB_ANVIL_FILL = "rgba(255,235,150,0.28)";
+const CB_ANVIL_STROKE = "#c9a227";
 
 const ROW_DEFS = {
   wind: {
@@ -56,9 +71,13 @@ const ROW_DEFS = {
       { values: grid.surface.pmsl, fmt: (v) => String(Math.round(v)), color: "#1a6b4a" },
     ]),
   },
+  weather: {
+    height: NUMBER_ROW_HEIGHT * 0.55, label: ["Wetter", "(METAR)"],
+    draw: (ctx, grid, x, top, h) => drawWeatherRow(ctx, grid, x, top, h),
+  },
 };
 
-const DEFAULT_ROWS = ["wind", "tempdew", "gust", "pressure"];
+const DEFAULT_ROWS = ["wind", "tempdew", "gust", "pressure", "weather"];
 
 export function renderGramet(host, grid, view, state = {}) {
   host.innerHTML = "";
@@ -100,10 +119,12 @@ export function renderGramet(host, grid, view, state = {}) {
 
   const toggles = state.layerToggles ?? {};
   drawBackground(ctx, grid, view, x, mainTop, mainBot);
-  drawHazardCells(ctx, grid, view.hazards.icing, ICING_COLORS, x, y);
+  drawHazardArea(ctx, grid, view.hazards.icing, ICING_STYLES, x, y);
+  if (toggles.cb !== false) drawCbShaft(ctx, view.cb, times, x, y);
   if (toggles.clouds !== false) drawClouds(ctx, grid, view.cloudFrac, x, y);
+  if (toggles.cb !== false) drawCbGlyphs(ctx, view.cb, view.tropopause, times, x, y);
   if (toggles.precip !== false) drawPrecip(ctx, view.precip, x, y);
-  drawHazardCells(ctx, grid, view.hazards.turbulence, TURB_COLORS, x, y);
+  drawHazardArea(ctx, grid, view.hazards.turbulence, TURB_STYLES, x, y);
   if (toggles.isotherms !== false) drawIsotherms(ctx, view.isotherms, x, y);
   if (toggles.isotachs !== false) drawIsotachs(ctx, view.isotachs, x, y);
   if (toggles.tropopause !== false) drawTropopause(ctx, view.tropopause, x, y);
@@ -185,36 +206,150 @@ function drawBackground(ctx, grid, view, x, top, bot) {
 
 // --- Hazard-Flächen (Vereisung/Turbulenz, aktuell Stubs -> zeichnet nichts) --
 
-function drawHazardCells(ctx, grid, hazardArr, colorMap, x, y) {
-  const { nk, times } = grid, nt = times.length;
-  const dt = nt > 1 ? times[1] - times[0] : 3600;
-  for (let i = 0; i < nt; i++) {
-    const x0 = x(times[i] - dt / 2), x1 = x(times[i] + dt / 2);
-    if (x1 < x.left || x0 > x.right) continue;
-    for (let k = 0; k < nk; k++) {
-      const ix = i * nk + k;
-      const col = colorMap[hazardArr[ix]];
-      if (!col) continue;
-      const zLo = k > 0 ? (grid.z[ix] + grid.z[ix - 1]) / 2 : grid.z[ix];
-      const zHi = k < nk - 1 ? (grid.z[ix] + grid.z[ix + 1]) / 2 : grid.z[ix];
-      const yTop = y(zHi), yBot = y(zLo);
-      if (yBot <= y.top || yTop >= y.bot) continue;
-      ctx.fillStyle = col;
-      ctx.fillRect(x0, yTop, x1 - x0, yBot - yTop);
+// Kontur-Umriss statt Zellraster: reicht die Schweregrad-Zeichenkette (none/
+// light/moderate/severe) als Zahlenfeld an `contour()` (marching squares,
+// dieselbe Funktion wie für die Isotachen) durch und zeichnet je Schwelle
+// eine gestrichelt umrandete, leicht gefüllte Fläche -- wie im Referenz-
+// Screenshot (gelb umrandete Fläche um den Amboss), nicht als Pixelraster.
+// Offene Polylinien (Kontur trifft den Gitterrand) werden trotzdem gefüllt
+// (canvas schließt sie automatisch mit einer Geraden); bei echten Hazard-
+// Daten ggf. visuell nachjustieren -- mit den aktuellen "none"-Stubs zeichnet
+// das noch nichts.
+function drawHazardArea(ctx, grid, hazardArr, styles, x, y) {
+  const n = grid.times.length * grid.nk;
+  const field = new Float32Array(n);
+  for (let ix = 0; ix < n; ix++) field[ix] = HAZARD_LEVELS[hazardArr[ix]] || 0;
+
+  for (const [level, key] of [[1, "light"], [2, "moderate"], [3, "severe"]]) {
+    const polylines = contour(grid, field, level - 0.5);
+    if (!polylines.length) continue;
+    const color = styles[key];
+    for (const pl of polylines) {
+      if (pl.length < 2) continue;
+      ctx.beginPath();
+      pl.forEach((p, i) => {
+        const px = x(p.t), py = y(p.z);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      });
+      ctx.closePath();
+      ctx.fillStyle = `${color}33`;
+      ctx.fill();
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = color; ctx.lineWidth = 1.4;
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
   }
 }
 
+// --- Cumulonimbus (Cb) — HEURISTIK aus derive.js, s. dort ---------------------
+
+// Schaft (sandfarbene Fläche vom Boden/Wolkenbasis bis zum Wolkenoberrand):
+// vor den Wolken gezeichnet, damit die weiße Schraffur darüberliegt (wie im
+// Referenz-GRAMET).
+function drawCbShaft(ctx, cb, times, x, y) {
+  const dt = times.length > 1 ? times[1] - times[0] : 3600;
+  ctx.fillStyle = CB_SHAFT_COLOR;
+  for (let i = 0; i < times.length; i++) {
+    const c = cb[i];
+    if (!c) continue;
+    const x0 = x(times[i] - dt / 2), x1 = x(times[i] + dt / 2);
+    const yTop = y(c.top), yBot = y(Math.max(0, c.base));
+    ctx.fillRect(x0, yTop, x1 - x0, yBot - yTop);
+  }
+}
+
+// Glyph + Amboss-Andeutung: nach den Wolken gezeichnet (liegt darüber).
+function drawCbGlyphs(ctx, cb, tropopause, times, x, y) {
+  const dt = times.length > 1 ? times[1] - times[0] : 3600;
+  for (let i = 0; i < times.length; i++) {
+    const c = cb[i];
+    if (!c) continue;
+    const cx = x(times[i]), cellW = x(times[i] + dt / 2) - x(times[i] - dt / 2);
+    const yTop = y(c.top), yBot = y(Math.max(0, c.base));
+    drawCbGlyph(ctx, cx, yTop + (yBot - yTop) * 0.45, Math.min(18, cellW * 0.8));
+
+    // Reicht der Cb-Oberrand nahe an die Tropopause heran (< 1200 m
+    // Abstand), Amboss-Andeutung wie im Original (gelb gestrichelte Fläche).
+    const tropZ = tropAt(tropopause, times[i]);
+    if (Number.isFinite(tropZ) && tropZ - c.top < 1200) {
+      drawAnvilHint(ctx, cx, y(Math.min(c.top, tropZ)), Math.max(20, cellW));
+    }
+  }
+}
+
+function drawCbGlyph(ctx, cx, cy, size) {
+  ctx.save();
+  ctx.strokeStyle = CB_GLYPH_COLOR; ctx.fillStyle = CB_GLYPH_COLOR; ctx.lineWidth = 1.3;
+  // Amboss-Kappe (Trapez).
+  ctx.beginPath();
+  ctx.moveTo(cx - size * 0.6, cy - size * 0.5);
+  ctx.lineTo(cx + size * 0.6, cy - size * 0.5);
+  ctx.lineTo(cx + size * 0.3, cy - size * 0.1);
+  ctx.lineTo(cx - size * 0.3, cy - size * 0.1);
+  ctx.closePath();
+  ctx.fill();
+  // Stamm.
+  ctx.beginPath(); ctx.moveTo(cx, cy - size * 0.1); ctx.lineTo(cx, cy + size * 0.3); ctx.stroke();
+  // Blitz.
+  ctx.beginPath();
+  ctx.moveTo(cx - size * 0.15, cy + size * 0.3);
+  ctx.lineTo(cx + size * 0.1, cy + size * 0.55);
+  ctx.lineTo(cx - size * 0.05, cy + size * 0.55);
+  ctx.lineTo(cx + size * 0.2, cy + size * 0.85);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawAnvilHint(ctx, cx, cy, w) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, Math.max(10, w * 0.9), 12, 0, 0, Math.PI * 2);
+  ctx.fillStyle = CB_ANVIL_FILL;
+  ctx.fill();
+  ctx.setLineDash([4, 2]);
+  ctx.strokeStyle = CB_ANVIL_STROKE; ctx.lineWidth = 1.3;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+// Tropopausenhöhe zur Zeit `t` aus der (ggf. lückenhaften) Polylinie
+// interpolieren; NaN, wenn `t` außerhalb des erfassten Bereichs liegt.
+function tropAt(line, t) {
+  if (!line || line.length < 2) return NaN;
+  if (t <= line[0].t) return line[0].t === t ? line[0].z : NaN;
+  for (let i = 1; i < line.length; i++) {
+    if (line[i].t >= t) {
+      const a = line[i - 1], b = line[i];
+      if (t - a.t > 2 * (b.t - a.t || 1)) return NaN; // Lücke in der Linie
+      const f = (t - a.t) / (b.t - a.t);
+      return a.z + f * (b.z - a.z);
+    }
+  }
+  return NaN;
+}
+
 // --- Niederschlag --------------------------------------------------------------
+
+// Symbolzahl nach Niederschlagsintensität (mm/h): dichter bei stärkerem
+// Niederschlag, wie im Original (dichtere Schraffur bei Starkregen). Grobe,
+// nicht kalibrierte Stufung.
+function precipSymbolCount(rateMmH) {
+  const r = Number.isFinite(rateMmH) ? rateMmH : 0.5;
+  return Math.max(4, Math.min(16, Math.round(4 + r * 3)));
+}
 
 function drawPrecip(ctx, entries, x, y) {
   ctx.save();
   for (const e of entries) {
     const cx = x(e.t);
     const topZ = Math.max(0, e.zTop);
-    const n = 6;
+    const n = precipSymbolCount(e.rate);
+    // Endpunkte eingeschlossen (s=0 -> Boden, s=n-1 -> Wolkenoberkante):
+    // der Niederschlag muss sichtbar am Boden ankommen, nicht kurz davor enden.
     for (let s = 0; s < n; s++) {
-      const z = (topZ * (s + 0.5)) / n;
+      const z = n > 1 ? (topZ * s) / (n - 1) : 0;
       const py = y(z);
       if (py < y.top || py > y.bot) continue;
       const snowHere = e.type === "sn" || (Number.isFinite(e.freezingZ) && z > e.freezingZ);
@@ -398,6 +533,35 @@ function setupHover(host, canvas, grid, info) {
 }
 
 // --- Helfer --------------------------------------------------------------------
+
+// weather_code als METAR-nahes Kürzel (dieselbe Tabelle wie im Briefing) --
+// "NSW"/"N/A" (kein signifikantes Wetter) wird wie im echten METAR weggelassen.
+function drawWeatherRow(ctx, grid, x, top, height) {
+  const { times, surface } = grid;
+  if (!surface?.wcode) return;
+  ctx.font = "10px system-ui, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const cy = top + height / 2;
+  let lastX = -Infinity;
+  for (let i = 0; i < times.length; i++) {
+    const code = surface.wcode[i];
+    if (!Number.isFinite(code)) continue;
+    const label = metarWeather(code);
+    if (label === "NSW" || label === "N/A") continue;
+    const px = x(times[i]);
+    if (px - lastX < 30) continue;
+    ctx.fillStyle = weatherColor(label);
+    ctx.fillText(label, px, cy);
+    lastX = px;
+  }
+}
+function weatherColor(label) {
+  if (label.includes("TS")) return "#b71c1c";
+  if (label.includes("SN") || label.includes("SG")) return "#1565c0";
+  if (label.includes("FZ")) return "#6a1b9a";
+  if (label.includes("FG")) return "#616161";
+  return "#01579b";
+}
 
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 function mixHex(a, b, f) {

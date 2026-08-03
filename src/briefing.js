@@ -176,7 +176,7 @@ const WMO_TO_TAF = {
  * weather_code bereits etwas Schwereres (Gewitter, Niederschlag), bleibt das
  * unverändert — Nebel wird nicht darübergestülpt.
  */
-function metarWeather(code, physFog = null) {
+export function metarWeather(code, physFog = null) {
   const c = parseInt(code, 10);
   const w = Number.isNaN(c) ? "N/A" : (WMO_TO_TAF[c] || "N/A");
   if (physFog?.fog && (w === "NSW" || w === "N/A")) return physFog.freezing ? "FZFG" : "FG";
