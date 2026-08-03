@@ -8,6 +8,7 @@
 import { derive as deriveGrid } from "./grid.js";
 import { CF_FEW, CF_BKN } from "../clouds.js";
 import { sunAltitude } from "../astro.js";
+import { metarWeather } from "../briefing.js";
 import * as icing from "./hazards/icing.js";
 import * as turbulence from "./hazards/turbulence.js";
 
@@ -26,6 +27,19 @@ const ISOTACH_THRESHOLDS_KT = [50, 75, 100];
 // in render.js zur Wolkentextur-Kalibrierung).
 const CB_CAPE_MIN_JKG = 300;
 const CB_UPDRAFT_MIN_MS = 3;
+// Ersatz-Oberrand, wenn weder ein vergletschertes Wolkenniveau noch überhaupt
+// eine Wolkenspur im Profil gefunden wird (z. B. Gewitter nur via weather_code
+// gemeldet) -- NICHT der Modelldeckel, s. PRECIP_FALLBACK_TOP_M.
+const CB_FALLBACK_TOP_M = 6000;
+
+// Fällt keine Wolke im CF_FEW-Sinn im Profil auf (Niederschlag aber laut
+// weather_code/Menge gemeldet), Ersatz-Obergrenze für den Niederschlags-
+// vorhang -- NICHT der Modelldeckel (führte zum "bis in die Stratosphäre"-
+// Artefakt, s. Feedback). Grobe Annahme für flachen Nieselregen/Sprühregen.
+const PRECIP_FALLBACK_TOP_M = 2000;
+// Unterhalb dieser Menge (mm/h) gilt Niederschlag als nicht mehr relevant für
+// den Vorhang, selbst wenn weather_code noch "-RA" o.ä. meldet (Rundungsreste).
+const PRECIP_MIN_RATE = 0.05;
 
 export function deriveView(grid) {
   const d = deriveGrid(grid);
@@ -259,19 +273,37 @@ function cloudBaseAt(grid, cloudFrac, i) {
   return NaN;
 }
 
-// Obergrenze der untersten Wolkenschicht ab `baseH` (erster Rückgang unter
-// CF_FEW darüber) — Startpunkt der Niederschlagssymbole nach unten zum Boden.
+// Obergrenze der zusammenhängenden Wolkenschicht ab `baseH`: kleine, trockene
+// Zwischenschichten (< CLOUD_TOP_GAP_TOLERANCE_M) werden überbrückt, damit
+// z. B. eine dünne bodennahe Feuchteschicht nicht fälschlich als eigene,
+// flache "Wolke" von der eigentlich regnenden Schicht darüber abgeschnitten
+// wird (führte zu Niederschlagsvorhängen, die weit unter der sichtbaren
+// Wolke endeten, s. Feedback) — eine ECHTE, größere Lücke (z. B. zu isoliert
+// darüberliegendem Cirrus) beendet die Schicht aber weiterhin.
+const CLOUD_TOP_GAP_TOLERANCE_M = 1200;
 function cloudTopAt(grid, cloudFrac, i, baseH) {
   if (!Number.isFinite(baseH)) return NaN;
   const { nk } = grid;
-  let top = baseH, entered = false;
+  let top = baseH, lastCloudH = baseH;
   for (let k = 0; k < nk; k++) {
     const ix = i * nk + k, h = grid.z[ix];
     if (!Number.isFinite(h) || h < baseH) continue;
     const cf = cloudFrac[ix];
-    if (!entered) { entered = true; top = h; continue; }
-    if (cf < CF_FEW) break;
-    top = h;
+    if (cf >= CF_FEW) { lastCloudH = h; top = h; }
+    else if (h - lastCloudH > CLOUD_TOP_GAP_TOLERANCE_M) break;
+  }
+  return top;
+}
+
+// Höchstes Level im GESAMTEN Profil mit CF >= CF_FEW (nicht nur die unterste,
+// zusammenhängende Schicht wie `cloudTopAt`) -- robuster Fallback, wenn die
+// Basis-Erkennung nichts findet, aber irgendwo im Profil doch Wolke steckt.
+function anyCloudTopAt(grid, cloudFrac, i) {
+  const { nk } = grid;
+  let top = NaN;
+  for (let k = 0; k < nk; k++) {
+    const ix = i * nk + k;
+    if (cloudFrac[ix] >= CF_FEW) top = grid.z[ix];
   }
   return top;
 }
@@ -289,32 +321,58 @@ function freezingHeightAt(grid, i) {
   return NaN;
 }
 
-// Niederschlagseintrag je Stunde mit Bodenniederschlag > 0,1 mm/h. type ist
-// bewusst offen für später (Schauer- vs. Landregen-Unterscheidung, s. Plan).
+/**
+ * Niederschlagseintrag je Stunde: `weather_code` (als METAR-Kürzel, dieselbe
+ * Tabelle wie die Wetter-Zeile) entscheidet OB und ALS WAS gezeichnet wird,
+ * die Menge (`precipitation`, mm/h) nur, wie DICHT (Intensität). Vorher war
+ * die Menge allein das Gate (>0,1 mm/h) -- bei sehr leichtem Niederschlag
+ * rundet die Menge oft auf ~0, obwohl weather_code ihn noch meldet, was die
+ * Wetter-Zeile und den gezeichneten Vorhang auseinanderlaufen ließ (s.
+ * Feedback). Phase (Regen/Schnee) kommt jetzt ebenfalls aus dem METAR-Kürzel
+ * (SN/SG/FZ...), nicht mehr nur aus `snowfall > 0`.
+ */
 function precipEntries(grid, cloudBase) {
   const out = [];
-  const { times, surface, nk } = grid;
+  const { times, surface } = grid;
   if (!surface) return out;
   const cloudFrac = deriveGrid(grid).cloudFrac;
   for (let i = 0; i < times.length; i++) {
-    const p = surface.precip[i];
-    if (!Number.isFinite(p) || p <= 0.1) continue;
+    const label = Number.isFinite(surface.wcode?.[i]) ? metarWeather(surface.wcode[i]) : "N/A";
+    const amt = surface.precip[i];
+    const hasAmount = Number.isFinite(amt) && amt > PRECIP_MIN_RATE;
+    const hasWx = label !== "NSW" && label !== "N/A";
+    const isFogOnly = label === "FG" || label === "FZFG"; // Nebel ist kein Niederschlag
+    if (!hasAmount && (!hasWx || isFogOnly)) continue;
+
     const freezingZ = freezingHeightAt(grid, i);
-    const topOfDomain = grid.z[i * nk + nk - 1];
+    // Oberkante des Vorhangs: zusammenhängende Schicht ab der Basis
+    // (`cloudTopAt`, jetzt mit Lückentoleranz, s. dort). Nur wenn gar keine
+    // Basis gefunden wurde (Niederschlag laut weather_code/Menge, aber keine
+    // Wolke im CF_FEW-Sinn erkannt), Ersatz über die höchste Wolkenspur im
+    // ganzen Profil bzw. einen festen Fallback -- NICHT einfach das Maximum
+    // aus beidem, sonst reißt der Vorhang bis zu unverbundenem Cirrus weit
+    // darüber (nächstes Artefakt, s. Feedback-Iteration).
     const top = cloudTopAt(grid, cloudFrac, i, cloudBase[i]);
-    const zTop = Number.isFinite(top) ? top : topOfDomain;
-    const isSnow = Number.isFinite(surface.snow[i]) && surface.snow[i] > 0;
-    out.push({ t: times[i], zTop, freezingZ, type: isSnow ? "sn" : "ra", rate: p });
+    const anyTop = anyCloudTopAt(grid, cloudFrac, i);
+    const zTop = Number.isFinite(top) ? top : Number.isFinite(anyTop) ? anyTop : PRECIP_FALLBACK_TOP_M;
+    const isSnow = label.includes("SN") || label.includes("SG")
+      || (Number.isFinite(surface.snow[i]) && surface.snow[i] > 0);
+    // Nominale Mindestrate, wenn nur weather_code (nicht die Menge) den
+    // Niederschlag anzeigt -- sonst bliebe der Vorhang trotz "-RA" unsichtbar.
+    const rate = hasAmount ? amt : 0.3;
+    out.push({ t: times[i], zTop, freezingZ, type: isSnow ? "sn" : "ra", rate });
   }
   return out;
 }
 
 /**
- * CB-Spalten (Cumulonimbus) — HEURISTIK, kein direktes Modell-Flag: CAPE über
- * Schwelle + vergletscherter Wolkenoberrand (CF >= CF_BKN bei T <= -20 °C),
- * oder ersatzweise ein kräftiger Updraft irgendwo im Profil. Liefert pro
- * Stunde entweder `null` oder `{ base, top }` (m AGL) für den Cb-Schaft im
- * Renderer. Nicht kalibriert, s. Konstanten oben.
+ * CB-Spalten (Cumulonimbus) — `weather_code` meldet Gewitter (TS-Kürzel)
+ * direkt aus dem Modell, das ist das verlässlichste Signal. HEURISTISCHER
+ * Ersatz, wenn kein TS-Code vorliegt: CAPE über Schwelle + vergletscherter
+ * Wolkenoberrand (CF >= CF_BKN bei T <= -20 °C), oder ein kräftiger Updraft
+ * irgendwo im Profil. Liefert pro Stunde entweder `null` oder `{ base, top }`
+ * (m AGL) für den Cb-Schaft im Renderer. CAPE-/Updraft-Schwellen (nicht der
+ * weather_code-Pfad) nicht kalibriert.
  */
 function cbColumns(grid, cloudFrac, cloudBase) {
   const { nk, times, surface } = grid;
@@ -330,11 +388,17 @@ function cbColumns(grid, cloudFrac, cloudBase) {
         if (!Number.isFinite(deepTop) || z > deepTop) deepTop = z;
       }
     }
+    const label = Number.isFinite(surface?.wcode?.[i]) ? metarWeather(surface.wcode[i]) : "N/A";
+    const wxThunder = label.includes("TS");
     const cape = surface?.cape ? surface.cape[i] : NaN;
     const capeSignal = Number.isFinite(cape) && cape >= CB_CAPE_MIN_JKG && Number.isFinite(deepTop);
     const updraftSignal = maxAbsW >= CB_UPDRAFT_MIN_MS;
-    if (!capeSignal && !updraftSignal) { out.push(null); continue; }
-    const top = Number.isFinite(deepTop) ? deepTop : grid.z[i * nk + nk - 1];
+    if (!wxThunder && !capeSignal && !updraftSignal) { out.push(null); continue; }
+    // Kein Modelldeckel als Fallback (derselbe Fehler wie beim Niederschlag,
+    // s. precipEntries) -- erst der höchste Level mit irgendeiner
+    // Wolkenspur, sonst ein plausibler mittlerer Cb-Oberrand.
+    const anyTop = anyCloudTopAt(grid, cloudFrac, i);
+    const top = Number.isFinite(deepTop) ? deepTop : Number.isFinite(anyTop) ? anyTop : CB_FALLBACK_TOP_M;
     const base = Number.isFinite(cloudBase[i]) ? cloudBase[i] : 0;
     out.push({ base, top });
   }

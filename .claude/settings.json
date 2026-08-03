@@ -3,7 +3,9 @@
     "allow": [
       "Bash(python3 -c ' *)",
       "Bash(node -e ' *)",
-      "Bash(node test_export.mjs)"
+      "Bash(node test_export.mjs)",
+      "Bash(curl -s \"http://localhost:5173/src/gramet/derive.js\")",
+      "Bash(node debug_precip.mjs)"
     ]
   }
 }

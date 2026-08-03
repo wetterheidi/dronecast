@@ -332,49 +332,70 @@ function tropAt(line, t) {
 
 // --- Niederschlag --------------------------------------------------------------
 
-// Symbolzahl nach Niederschlagsintensität (mm/h): dichter bei stärkerem
-// Niederschlag, wie im Original (dichtere Schraffur bei Starkregen). Grobe,
-// nicht kalibrierte Stufung.
-function precipSymbolCount(rateMmH) {
-  const r = Number.isFinite(rateMmH) ? rateMmH : 0.5;
-  return Math.max(4, Math.min(16, Math.round(4 + r * 3)));
+// Symbolabstand in PIXELN — bewusst NICHT in Höhenmetern: die Höhenachse ist
+// logarithmisch, gleich große Höhenschritte werden dadurch oben gestaucht und
+// unten gedehnt. Bei fester Symbolzahl über die Höhe ballten sich die Symbole
+// oben zusammen und rissen darunter kilometerweit auf (ein "-RA" zerfiel in
+// Flocken oben, ein paar Tropfen, Lücke, ein Tropfen am Boden — s. Feedback).
+// Über die Pixelachse verteilt bleibt der Vorhang in beiden Achsenmodi (log
+// wie lin) optisch gleichmäßig. Dichte weiterhin aus der Intensität (mm/h);
+// die Stufung ist grob und nicht kalibriert.
+// tanh-Kennlinie statt linear, damit sich auch kräftiger Niederschlag noch
+// abstuft (linear lief schon ab ~5 mm/h in den Minimalabstand und sah dann
+// bei 5 wie bei 50 mm/h aus). RATE_SCALE = Rate, bei der ~76 % der Spanne
+// ausgeschöpft sind. Stufung grob, nicht kalibriert.
+const PRECIP_SPACING_MAX_PX = 30, PRECIP_SPACING_MIN_PX = 11, PRECIP_RATE_SCALE = 6;
+function precipSpacingPx(rateMmH) {
+  const r = Math.max(0, Number.isFinite(rateMmH) ? rateMmH : 0.5);
+  const span = PRECIP_SPACING_MAX_PX - PRECIP_SPACING_MIN_PX;
+  return PRECIP_SPACING_MAX_PX - span * Math.tanh(r / PRECIP_RATE_SCALE);
 }
 
 function drawPrecip(ctx, entries, x, y) {
   ctx.save();
   for (const e of entries) {
     const cx = x(e.t);
-    const topZ = Math.max(0, e.zTop);
-    const n = precipSymbolCount(e.rate);
-    // Endpunkte eingeschlossen (s=0 -> Boden, s=n-1 -> Wolkenoberkante):
-    // der Niederschlag muss sichtbar am Boden ankommen, nicht kurz davor enden.
-    for (let s = 0; s < n; s++) {
-      const z = n > 1 ? (topZ * s) / (n - 1) : 0;
-      const py = y(z);
-      if (py < y.top || py > y.bot) continue;
+    const pyBot = y.bot - 4; // knapp innerhalb des Rahmens: Vorhang endet am Boden
+    const pyTop = Math.max(y.top, y(Math.max(0, e.zTop)));
+    const span = pyBot - pyTop;
+    // Abstand auf die Spanne einrasten, damit der Vorhang exakt von der
+    // Wolkenoberkante bis zum Boden reicht (sonst bliebe oben bis zu ein
+    // ganzer Symbolabstand frei und der Vorhang wirkte abgeschnitten).
+    const steps = span > 0 ? Math.max(1, Math.round(span / precipSpacingPx(e.rate))) : 0;
+    const step = steps > 0 ? span / steps : 0;
+    for (let s = 0; s <= steps; s++) {
+      const py = pyBot - s * step;
+      // Phase aus der Höhe, die dieses Pixel tatsächlich meint.
+      const z = y.inv(py);
       const snowHere = e.type === "sn" || (Number.isFinite(e.freezingZ) && z > e.freezingZ);
-      ctx.strokeStyle = "#1f6fb2";
       if (snowHere) drawAsterisk(ctx, cx, py, 3.2); else drawDash(ctx, cx, py, 4.5);
     }
   }
   ctx.restore();
 }
+// Weißes Halo zuerst (wie bei den Isothermen/Isotachen), dann die eigentliche
+// Farbe -- sonst geht das Symbol im dunkleren Himmelblau unter (s. Feedback).
+const PRECIP_COLOR = "#134a7a";
 function drawAsterisk(ctx, cx, cy, r) {
-  ctx.lineWidth = 1.2;
-  for (const deg of [0, 60, 120]) {
-    const rad = deg * Math.PI / 180;
-    ctx.beginPath();
-    ctx.moveTo(cx - r * Math.cos(rad), cy - r * Math.sin(rad));
-    ctx.lineTo(cx + r * Math.cos(rad), cy + r * Math.sin(rad));
-    ctx.stroke();
+  for (const [stroke, width] of [["#fff", 2.6], [PRECIP_COLOR, 1.2]]) {
+    ctx.strokeStyle = stroke; ctx.lineWidth = width;
+    for (const deg of [0, 60, 120]) {
+      const rad = deg * Math.PI / 180;
+      ctx.beginPath();
+      ctx.moveTo(cx - r * Math.cos(rad), cy - r * Math.sin(rad));
+      ctx.lineTo(cx + r * Math.cos(rad), cy + r * Math.sin(rad));
+      ctx.stroke();
+    }
   }
 }
 function drawDash(ctx, cx, cy, len) {
-  ctx.lineWidth = 1.4;
-  ctx.beginPath();
-  ctx.moveTo(cx - len * 0.3, cy - len * 0.5);
-  ctx.lineTo(cx + len * 0.3, cy + len * 0.5);
-  ctx.stroke();
+  for (const [stroke, width] of [["#fff", 2.8], [PRECIP_COLOR, 1.4]]) {
+    ctx.strokeStyle = stroke; ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(cx - len * 0.3, cy - len * 0.5);
+    ctx.lineTo(cx + len * 0.3, cy + len * 0.5);
+    ctx.stroke();
+  }
 }
 
 // --- Linien: Isothermen/Isotachen/Tropopause ---------------------------------
