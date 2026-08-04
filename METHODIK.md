@@ -654,15 +654,64 @@ CCL, sonst die allgemeine Wolkenbasis (7.3), sonst 0 — mit der Nebenbedingung
 `Basis < Oberrand` (sonst würde bei hochbasiger Konvektion ohne EL ein
 Fallback-Oberrand unter dem CCL liegen und der Schaft invertiert gezeichnet).
 
-### 7.6 Vereisung & Turbulenz — vorbereitet, noch nicht implementiert
-[src/gramet/hazards/icing.js](src/gramet/hazards/icing.js) und
-[turbulence.js](src/gramet/hazards/turbulence.js) sind reine **Stubs**: beide
-liefern für jede Gitterzelle konstant `"none"`, unabhängig vom tatsächlichen
-Wetter. Die fachlichen Eingangsgrößen liegen bereits bereit — Wolkenfraktion/
-Temperatur/RH für Vereisung, `shear2`/`N²`/Richardson-Zahl für Turbulenz (s.
-7.1) —, aber es findet **keine** Bewertung statt. Zeilen/Hooks, die diese
-Module konsumieren, zeigen also aktuell durchgängig „ohne Befund", nicht
-„geprüft und unauffällig".
+### 7.6 Vereisung (Icing-Potential-Index) & Turbulenz
+[src/gramet/hazards/icing.js](src/gramet/hazards/icing.js) ist implementiert,
+[turbulence.js](src/gramet/hazards/turbulence.js) bleibt ein reiner **Stub**
+(liefert konstant `"none"`; `shear2`/`N²`/Richardson-Zahl liegen bereit, s.
+7.1, aber es findet noch keine Bewertung statt — die Turbulenz-Zeile im
+GRAMET zeigt also „ohne Befund", nicht „geprüft und unauffällig").
+
+**Architektur, bewusst physik-/UI-getrennt:** die Vereisungsdiagnose soll
+sowohl das GRAMET-Meteogramm als auch später die Go/No-Go-Tabelle bedienen —
+zwei Konsumenten mit unterschiedlicher Reduktion (Meteogramm: kontinuierliches
+Feld pro Gitterzelle; Go/No-Go: ein Bandmaximum pro Stunde, analog 1). Deshalb
+ist die Physik als reine, UI-unabhängige Funktion `ipiAt(tC, cloudFrac)`
+gebaut, die keine dieser beiden Reduktionen kennt.
+
+**Icing-Potential-Index (IPI) = f_T(T) · cloudFrac**, pro Zelle/Punkt:
+- **f_T(T)** — weiches Temperaturfenster (Trapez) statt harter 0…−15-°C-Box:
+  `0` bei `T ≥ 0 °C`; linear `0 → 1` zwischen `0` und `−2 °C` (schneller
+  Onset — Klareis ist knapp unter 0 °C am gefährlichsten, große
+  Tropfen/hoher LWC); `1` im Kernfenster `−2…−15 °C` (maximale
+  Häufigkeit unterkühlten Flüssigwassers); linear `1 → 0` zwischen `−15` und
+  `−20 °C` (zunehmend vergletschert, SLW versiegt); `0` bei `T ≤ −20 °C`
+  (praktisch nur noch Eiskristalle). Die −20-°C-Kante ist absichtlich
+  identisch mit `CB_GLACIATION_C` aus `derive.js` (7.5) gehalten, damit nicht
+  zwei verschiedene Vergletscherungstemperaturen im selben Modul
+  auseinanderdriften — dort nicht exportiert (zirkulärer Import), daher
+  eigenständig gepflegt, aber bewusst gleich.
+- **cloudFrac** — statt einer eigenen RH-Schwelle (ursprünglich geplant: 0 bei
+  RH ≤ 90 %, linear auf 1 bei 100 %) wird die bereits kalibrierte
+  Wolkenfraktion aus 4.1 wiederverwendet (dieselbe Größe wie Wolkenbasis und
+  Cb-Erkennung) — eine Definition für „ist die Zelle in der Wolke" im ganzen
+  GRAMET statt einer zweiten, unkalibrierten RH-Heuristik. `derive.js` reicht
+  `d.cloudFrac` direkt an `icing.computeGrid(grid, cloudFrac)` durch.
+
+Physik dahinter: `f_T` kodiert „gibt es überhaupt unterkühltes Flüssigwasser",
+`cloudFrac` „ist die Zelle in der Wolke". Das Produkt ist die ehrlichste
+Näherung an LWC ohne eigene Flüssigwassergröße.
+
+**Kategorisierung:** `ipiCategory()` bildet den kontinuierlichen IPI (0…1) auf
+`none/light/moderate/severe` ab, Schwellen `0,15/0,30/0,45` — **nicht
+kalibriert**, gemeinsam für alle künftigen Verbraucher (GRAMET-Kontur, später
+Go/No-Go-Status) definiert, damit eine spätere Kalibrierung an einer Stelle
+beide Darstellungen trifft.
+
+**Rendering (GRAMET):** `computeGrid()` liefert die Kategorie pro Gitterzelle
+für `drawHazardArea()` (Kontur-Fläche, s. 7.5-Muster) — bewusst **über**
+Wolken/Niederschlag gezeichnet (transparente Füllung, s.
+[render.js](src/gramet/render.js)), damit die Gefahrenfläche auf der Wolke
+„aufsitzt" statt darunter zu verschwinden. Zusätzlich ein WMO-nahes
+Vereisungssymbol (U-Bogen mit zwei vertikalen Linien) je zusammenhängender
+`severe`-Fläche, an deren Schwerpunkt, mit Mindestabstand analog zu den
+Cb-Glyphen (7.5).
+
+**Noch offen:** Go/No-Go-Bandmaximum (analog `windBandMaxAt`, 1) über
+`ipiAt`/`ipiCategory`, aus der ohnehin geladenen Säule (`state.data.col`) statt
+einer neuen Fetch-Pipeline; Aufwind-Bonus `f_w(w)` (Hebung repliziert SLW, wie
+im NCAR-CIP-Ansatz) — `w` liegt über `grid.w` bereit, aber bewusst nicht in
+V1; echte Kalibrierung aller Schwellen (T-Fenster wie IPI-Kategorien) mit
+realen Vereisungsfällen.
 
 ---
 
@@ -682,7 +731,8 @@ vereinfachende Annahme steckt:
 | Wind-Bandmaximum (1) | Stützstellen-Sampling, kein exaktes Profilmaximum |
 | Böen (1) | nur am Boden, keine Hochrechnung auf Flughöhe |
 | Go/No-Go-Schwellenwerte | Platzhalterprofil, keine geprüften Herstellerwerte |
-| Vereisung, Turbulenz | in der Go/No-Go-Tabelle noch nicht abgebildet |
+| Vereisung, Turbulenz | in der Go/No-Go-Tabelle noch nicht abgebildet (Vereisung: Bandmaximum offen, s. 7.6) |
 | GRAMET Konvektionsschwellen (7.5) | `TRIGGER_EXCESS_K`, Towering-Hürde, CAPE-/Updraft-Auffangpfad — sämtlich unkalibriert |
 | GRAMET Niederschlags-Fallback-Obergrenze (7.4) | 2000 m, grobe Annahme für flachen Niesel-/Sprühregen ohne erkannte Wolkenspur |
-| GRAMET Vereisung/Turbulenz (7.6) | Stubs, liefern konstant "none" — Eingangsgrößen bereit, Algorithmus fehlt |
+| GRAMET Vereisung (7.6) | `f_T`-Fenster und IPI-Kategorie-Schwellen (0,15/0,30/0,45) unkalibriert; `cloudFrac` statt eigener LWC-Größe |
+| GRAMET Turbulenz (7.6) | Stub, liefert konstant "none" — Eingangsgrößen (`shear2`/`N²`/Ri, s. 7.1) bereit, Algorithmus fehlt |

@@ -56,6 +56,10 @@ const HAZARD_LEVELS = { light: 1, moderate: 2, severe: 3 };
 // gefleckten Wolkentextur unter.
 const CB_SYMBOL_INK = "#12161c";
 const CB_SYMBOL_HALO = "rgba(255,255,255,0.9)";
+// Vereisungssymbol bewusst in Rot statt im Cb-Schwarz -- hebt sich von der
+// grünen Kontur-Füllung (ICING_STYLES) ab und markiert die Fläche als
+// Warnung, dieselbe Rotstufe wie TURB_STYLES.severe (konsistente Alarmfarbe).
+const ICING_SYMBOL_INK = "#c62828";
 
 const ROW_DEFS = {
   wind: {
@@ -129,7 +133,6 @@ export function renderGramet(host, grid, view, state = {}) {
 
   const toggles = state.layerToggles ?? {};
   drawBackground(ctx, grid, view, x, mainTop, mainBot);
-  drawHazardArea(ctx, grid, view.hazards.icing, ICING_STYLES, x, y);
   // Zellzerlegung einmal ziehen: Schaft, Amboss und Symbol müssen auf demselben
   // Turm sitzen (s. `cbCells`).
   const cells = toggles.cb !== false ? cbCells(grid, view.cb, x, y) : [];
@@ -141,6 +144,12 @@ export function renderGramet(host, grid, view, state = {}) {
   }
   const seed = hashSeed(`${grid.meta.lat},${grid.meta.lon},${grid.meta.elevation},${times[0]}`);
   if (toggles.precip !== false) drawPrecip(ctx, view.precip, times, x, y, seed);
+  // Vereisung/Turbulenz bewusst ÜBER Wolken/Niederschlag: beides sind Gefahren-
+  // hinweise, die auf der Wolke "aufsitzen" sollen, statt darunter zu verschwinden
+  // -- die Kontur-Füllung ist transparent genug (s. `drawHazardArea`), dass die
+  // Wolkentextur durchscheint.
+  drawHazardArea(ctx, grid, view.hazards.icing, ICING_STYLES, x, y);
+  drawIcingSevereGlyphs(ctx, grid, view.hazards.icing, x, y);
   drawHazardArea(ctx, grid, view.hazards.turbulence, TURB_STYLES, x, y);
   if (toggles.isotherms !== false) drawIsotherms(ctx, view.isotherms, x, y);
   if (toggles.isotachs !== false) drawIsotachs(ctx, view.isotachs, x, y);
@@ -251,7 +260,8 @@ function drawBackground(ctx, grid, view, x, top, bot) {
   ctx.fillRect(x.left, top, span, bot - top);
 }
 
-// --- Hazard-Flächen (Vereisung/Turbulenz, aktuell Stubs -> zeichnet nichts) --
+// --- Hazard-Flächen (Vereisung berechnet, s. hazards/icing.js; Turbulenz noch
+// Stub -> zeichnet nichts) -----------------------------------------------------
 
 // Kontur-Umriss statt Zellraster: reicht die Schweregrad-Zeichenkette (none/
 // light/moderate/severe) als Zahlenfeld an `contour()` (marching squares,
@@ -260,8 +270,7 @@ function drawBackground(ctx, grid, view, x, top, bot) {
 // Screenshot (gelb umrandete Fläche um den Amboss), nicht als Pixelraster.
 // Offene Polylinien (Kontur trifft den Gitterrand) werden trotzdem gefüllt
 // (canvas schließt sie automatisch mit einer Geraden); bei echten Hazard-
-// Daten ggf. visuell nachjustieren -- mit den aktuellen "none"-Stubs zeichnet
-// das noch nichts.
+// Daten ggf. visuell nachjustieren.
 function drawHazardArea(ctx, grid, hazardArr, styles, x, y) {
   const n = grid.times.length * grid.nk;
   const field = new Float32Array(n);
@@ -287,6 +296,65 @@ function drawHazardArea(ctx, grid, hazardArr, styles, x, y) {
       ctx.setLineDash([]);
     }
   }
+}
+
+// --- Vereisung: Symbol in "severe"-Flächen -----------------------------------
+
+// Eigenes Konturfeld nur für "severe" (Schwellen s. hazards/icing.js): ein
+// Symbol je zusammenhängender Fläche, an deren (Polylinien-)Schwerpunkt --
+// analog zum Cb-Symbol (ein Symbol je Fläche/Zelle statt Textur-Streusaat),
+// mit demselben Mindestabstand `GLYPH_MIN_GAP` gegen Überlappung bei
+// mehreren knapp benachbarten Flächen.
+function drawIcingSevereGlyphs(ctx, grid, hazardArr, x, y) {
+  const n = grid.times.length * grid.nk;
+  const field = new Float32Array(n);
+  for (let ix = 0; ix < n; ix++) field[ix] = hazardArr[ix] === "severe" ? 1 : 0;
+  const polylines = contour(grid, field, 0.5);
+  const size = 20;
+  const centers = polylines
+    .filter((pl) => pl.length >= 2)
+    .map((pl) => ({
+      cx: pl.reduce((s, p) => s + x(p.t), 0) / pl.length,
+      cy: pl.reduce((s, p) => s + y(p.z), 0) / pl.length,
+    }))
+    .sort((a, b) => a.cx - b.cx);
+
+  let lastX = -Infinity;
+  for (const c of centers) {
+    if (c.cx - lastX < size * GLYPH_MIN_GAP) continue;
+    strokeSymbol(ctx, icingSeverePath(c.cx, c.cy, size), size, ICING_SYMBOL_INK);
+    lastX = c.cx;
+  }
+}
+
+/**
+ * Starke Vereisung (Severe Icing). Kartensymbol: Ein weiter Bogen (U-Form),
+ * der von zwei parallelen, vertikalen Linien geschnitten wird.
+ */
+function icingSeverePath(cx, cy, size) {
+  const p = new Path2D();
+  const w = size * 0.35;
+  const curveTopY = cy - size * 0.25;
+
+  // U-förmiger Bogen (mittels quadratischer Bezier-Kurve)
+  p.moveTo(cx - w, curveTopY);
+  // Kontrollpunkt liegt tiefer, um den schönen runden Bauch zu erzeugen
+  p.quadraticCurveTo(cx, cy + size * 0.6, cx + w, curveTopY);
+
+  // Parameter für die beiden vertikalen Linien
+  const lineOffset = size * 0.08;
+  const lineTopY = cy - size * 0.05;
+  const lineBottomY = cy + size * 0.45;
+
+  // Linke vertikale Linie
+  p.moveTo(cx - lineOffset, lineTopY);
+  p.lineTo(cx - lineOffset, lineBottomY);
+
+  // Rechte vertikale Linie
+  p.moveTo(cx + lineOffset, lineTopY);
+  p.lineTo(cx + lineOffset, lineBottomY);
+
+  return p;
 }
 
 // --- Konvektion (TCU/Cb) — Klassifikation in derive.js, s. dort --------------
@@ -398,13 +466,13 @@ function cl3Path(cx, cy, size) {
 // Der Halo wächst ADDITIV mit der Strichstärke, nicht proportional zur Größe:
 // proportional (0.24*size) fraß er bei kleinen Symbolen die Binnenform auf --
 // die Sanduhrtaille lief zu, die Kuppel wurde ein weißer Klecks.
-function strokeSymbol(ctx, path, size) {
+function strokeSymbol(ctx, path, size, inkColor = CB_SYMBOL_INK) {
   ctx.save();
   ctx.lineJoin = "round"; ctx.lineCap = "round";
   const ink = Math.max(1.2, size * 0.075);
   ctx.strokeStyle = CB_SYMBOL_HALO; ctx.lineWidth = ink + 2.2;
   ctx.stroke(path);
-  ctx.strokeStyle = CB_SYMBOL_INK; ctx.lineWidth = ink;
+  ctx.strokeStyle = inkColor; ctx.lineWidth = ink;
   ctx.stroke(path);
   ctx.restore();
 }
