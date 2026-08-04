@@ -306,54 +306,96 @@ function drawCbGlyphs(ctx, cb, times, x, y) {
     if (!c) continue;
     const cx = x(times[i]), cellW = x(times[i] + dt / 2) - x(times[i] - dt / 2);
     const yTop = y(c.top), yBot = y(Math.max(0, c.base));
-    const cy = yTop + (yBot - yTop) * 0.45, size = Math.min(18, cellW * 0.8);
+    // Größer als der alte Glyph: die Kartensymbole sind reine Strichzeichnung,
+    // unter ~22 px läuft der Halo in die Binnenform und der Umriss verklumpt.
+    const cy = yTop + (yBot - yTop) * 0.45, size = Math.min(24, cellW * 0.95);
     strokeSymbol(ctx, c.kind === "cb" ? cl9Path(cx, cy, size) : cl3Path(cx, cy, size), size);
   }
 }
 
 /**
- * C_L 9 — Cumulonimbus mit Amboss. Kartensymbol: waagerechter Deckel oben,
- * waagerechte Basis unten, dazwischen zur Mitte hin eingeschnürte Flanken
- * (Sanduhr-Umriss).
+ * C_L 9 — Cumulonimbus mit Amboss. Kartensymbol: Große Quellwolkenkuppel
+ * auf flacher Basis, darüber ein waagerechter Ambossdeckel, dessen schräge 
+ * Flanken direkt auf die Kuppel treffen (siehe image_e7b248.png).
  */
 function cl9Path(cx, cy, size) {
-  const w = size * 0.42, h = size * 0.48;
+  const R = size * 0.42;
+  const baseY = cy + R * 0.5;
   const p = new Path2D();
-  p.moveTo(cx - w, cy - h); p.lineTo(cx + w, cy - h);      // Ambossdeckel
-  p.moveTo(cx - w, cy + h); p.lineTo(cx + w, cy + h);      // Basis
-  p.moveTo(cx - w, cy - h); p.lineTo(cx, cy);              // Flanken zur Taille
-  p.lineTo(cx + w, cy - h);
-  p.moveTo(cx - w, cy + h); p.lineTo(cx, cy);
-  p.lineTo(cx + w, cy + h);
+
+  // Basis mit großer Kuppel (durchgehender Halbkreis)
+  p.moveTo(cx - R, baseY);
+  p.arc(cx, baseY, R, Math.PI, 0);
+  p.lineTo(cx - R, baseY);
+
+  // Amboss (umgedrehtes Trapez auf der Kuppel)
+  const topW = R * 0.7;
+  const topY = cy - R * 0.9;
+  
+  // Berührungspunkte der schrägen Ambossflanken auf der Kuppel
+  const touchX = R * 0.48;
+  const touchY = baseY - Math.sqrt(R * R - touchX * touchX);
+
+  // Deckel und rechte Flanke zeichnen
+  p.moveTo(cx - topW, topY);
+  p.lineTo(cx + topW, topY);
+  p.lineTo(cx + touchX, touchY);
+  
+  // Linke Flanke zeichnen
+  p.moveTo(cx - topW, topY);
+  p.lineTo(cx - touchX, touchY);
+
   return p;
 }
 
 /**
- * C_L 3 — Cumulonimbus calvus. Kartensymbol: Quellwolkenkuppel auf flacher
- * Basis, darüber der kurze Stiel mit Querbalken (der beginnende, noch nicht
- * ausgebreitete Oberrand).
+ * C_L 3 — Cumulonimbus calvus. Kartensymbol: Große Quellwolkenkuppel
+ * auf flacher Basis. Darauf sitzt eine kleinere Kuppel, die durch eine
+ * vertikale Linie vom Scheitel der großen bis zum Scheitel der kleinen
+ * Kuppel halbiert wird (siehe image_e7aa63.png).
  */
 function cl3Path(cx, cy, size) {
-  const r = size * 0.42;
-  const baseY = cy + r * 0.62, apexY = baseY - r;
+  const R = size * 0.42;
+  const baseY = cy + R * 0.5;
   const p = new Path2D();
-  p.moveTo(cx - r, baseY);
-  p.arc(cx, baseY, r, Math.PI, 0);                          // Kuppel
-  p.lineTo(cx - r, baseY);                                  // Basislinie
-  p.moveTo(cx, apexY); p.lineTo(cx, apexY - r * 0.32);      // Stiel
-  p.moveTo(cx - r * 0.45, apexY - r * 0.32);                // Querbalken
-  p.lineTo(cx + r * 0.45, apexY - r * 0.32);
+
+  // Große Basis-Kuppel
+  p.moveTo(cx - R, baseY);
+  p.arc(cx, baseY, R, Math.PI, 0);
+  p.lineTo(cx - R, baseY);
+
+  // Kleine Kuppel on top
+  const r2 = R * 0.35; // Radius der aufgesetzten kleinen Kuppel
+  
+  // Die y-Koordinate, an der die Eckpunkte der kleinen Kuppel den großen Bogen berühren
+  const smallCenterY = baseY - Math.sqrt(R * R - r2 * r2);
+
+  // Bogen der kleinen Kuppel
+  p.moveTo(cx - r2, smallCenterY);
+  p.arc(cx, smallCenterY, r2, Math.PI, 0);
+
+  // Vertikale Linie (Mast) exakt zwischen den beiden Scheitelpunkten
+  const largeApexY = baseY - R;
+  const smallApexY = smallCenterY - r2;
+
+  p.moveTo(cx, largeApexY);
+  p.lineTo(cx, smallApexY);
+
   return p;
 }
 
 // Zweimal stroken: erst breit in Weiß (Halo), dann schmal in Schwarz. Auf der
 // gefleckten Schaft- bzw. Wolkentextur ist der Strich sonst kaum auszumachen.
+// Der Halo wächst ADDITIV mit der Strichstärke, nicht proportional zur Größe:
+// proportional (0.24*size) fraß er bei kleinen Symbolen die Binnenform auf --
+// die Sanduhrtaille lief zu, die Kuppel wurde ein weißer Klecks.
 function strokeSymbol(ctx, path, size) {
   ctx.save();
   ctx.lineJoin = "round"; ctx.lineCap = "round";
-  ctx.strokeStyle = CB_SYMBOL_HALO; ctx.lineWidth = Math.max(3, size * 0.24);
+  const ink = Math.max(1.2, size * 0.075);
+  ctx.strokeStyle = CB_SYMBOL_HALO; ctx.lineWidth = ink + 2.2;
   ctx.stroke(path);
-  ctx.strokeStyle = CB_SYMBOL_INK; ctx.lineWidth = Math.max(1.2, size * 0.09);
+  ctx.strokeStyle = CB_SYMBOL_INK; ctx.lineWidth = ink;
   ctx.stroke(path);
   ctx.restore();
 }
