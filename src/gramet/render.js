@@ -439,12 +439,26 @@ function precipSpacingPx(rateMmH) {
 const PRECIP_JITTER_X = 0.30, PRECIP_JITTER_Y = 0.32;
 const PRECIP_SIZE_MIN = 0.80, PRECIP_SIZE_SPAN = 0.45;
 
+// Zeitliche Verschiebung des Vorhangs, als Anteil der Stundenspalte nach LINKS.
+// Open-Meteo gibt `precipitation` als Summe der VORANGEHENDEN Stunde aus: der
+// Wert am Zeitstempel t beschreibt t-1h..t. Am Zeitstempel gezeichnet stand der
+// Vorhang also am rechten Rand seines Bezugszeitraums; 0,5 setzt ihn auf dessen
+// Mitte. Bewusst als Stellschraube herausgezogen -- 0 stellt das alte Verhalten
+// wieder her.
+// Vorbehalt: `weather_code` gilt momentan (nicht rückwärts akkumuliert), und
+// Vorhänge, die nur daraus stammen (Menge unter der Schwelle, s.
+// `precipEntries`), werden hier trotzdem mitverschoben -- eine getrennte
+// Behandlung würde die Vorhänge benachbarter Stunden ungleich verteilen.
+const PRECIP_TIME_SHIFT = 0.5;
+
 function drawPrecip(ctx, entries, times, x, y, seed) {
   const dt = times.length > 1 ? times[1] - times[0] : 3600;
   const colW = Math.max(1, x(times[0] + dt) - x(times[0]));
   ctx.save();
   for (const e of entries) {
-    const cx = x(e.t);
+    // Auf den Rahmen begrenzen: die erste Stunde rutscht sonst mit ihrem
+    // halben Versatz links aus dem Chart in die Höhenachse.
+    const cx = clamp(x(e.t - PRECIP_TIME_SHIFT * dt), x.left, x.right);
     const pyBot = y.bot - 4; // knapp innerhalb des Rahmens: Vorhang endet am Boden
     const pyTop = Math.max(y.top, y(Math.max(0, e.zTop)));
     const span = pyBot - pyTop;
@@ -662,6 +676,23 @@ function setupHover(host, canvas, axis, grid, info) {
     const h = y.inv(py);
     const s = sampleAt(grid, i, h);
     const dir = (Math.atan2(-s.u, -s.v) * 180 / Math.PI + 360) % 360;
+    // WW gilt für den Boden (weather_code ist ein Oberflächenfeld), nicht für
+    // die gehoverte Höhe -- daher explizit gekennzeichnet.
+    const code = grid.surface?.wcode?.[i];
+    const ww = Number.isFinite(code)
+      ? `${metarWeather(code)} (ww ${String(code).padStart(2, "0")})`
+      : "N/A";
+    // Menge ebenfalls Boden und zusätzlich rückwärtsgewandt: Open-Meteo gibt
+    // `precipitation` als Summe der VORANGEHENDEN Stunde aus, während ww zum
+    // Zeitstempel gilt. Beides nebeneinander, damit beim Kalibrieren sichtbar
+    // wird, welches der beiden Signale den Vorhang ausgelöst hat (das Gate in
+    // `precipEntries` ist ein ODER aus Menge > PRECIP_MIN_RATE und ww).
+    // Zwei Nachkommastellen, weil die Schwelle bei 0,05 mm/h liegt.
+    const mm = grid.surface?.precip?.[i];
+    const cm = grid.surface?.snow?.[i];
+    const num = (v, d = 2) => v.toLocaleString("de-DE", { maximumFractionDigits: d });
+    const amount = Number.isFinite(mm) ? `${num(mm)} mm` : "N/A";
+    const snow = Number.isFinite(cm) && cm > 0 ? ` · Schnee ${num(cm, 1)} cm` : "";
     tip.style.display = "block";
     tip.style.left = `${px + 12}px`;
     tip.style.top = `${py + 12}px`;
@@ -671,6 +702,8 @@ function setupHover(host, canvas, axis, grid, info) {
       `Temp ${fmtTemp(s.T - 273.15)}`,
       `Wind ${fmtDir(dir)} ${fmtWind(Math.hypot(s.u, s.v))}`,
       `Wolken ${Math.round((s.cloudFrac || 0) * 100)} %`,
+      `WW (Boden) ${ww}`,
+      `Nd (Vorstunde) ${amount}${snow}`,
     ].join("<br>");
   });
   canvas.addEventListener("pointerleave", () => { tip.style.display = "none"; });
