@@ -188,6 +188,137 @@ function paintClouds(ctx, grid, cloudFrac, x, y) {
   ctx.restore();
 }
 
+// --- Cb-Schaft: dieselbe Technik, sandfarben ---------------------------------
+
+/**
+ * Kalibrierparameter des Cb-Schafts, Bedeutung wie in `TUNING` (Tuner-
+ * Konvention). Eigener Satz, weil der Schaft anders aussehen muss als die
+ * Schichtbewölkung: Inneres praktisch deckend (im Original schimmert dort
+ * KEIN Blau durch, s. Referenz-Screenshot), Ellipsen etwas kleiner, Rauschen
+ * gröber und kräftiger, damit die Säulenränder die typischen Beulen bekommen.
+ */
+const CB_TUNING = {
+  wMin: 6, wMax: 14, hMin: 3, hMax: 6,
+  // ~5-fache Überdeckung im Inneren -> Restlöcher < 1 %.
+  density: 90,
+  // Die Schaft-"Maske" ist eine Abstandsrampe (s. `paintCbRun`): 1 tief im
+  // Inneren, 0.5 exakt auf der Rechteckkante, 0 eine Fransenbreite draußen.
+  // threshold 0.5 legt die sichtbare Kante also auf die Geometrie, das
+  // Rauschen verschiebt sie lokal um bis zu +-noiseAmp Rampeneinheiten.
+  // gain ist an noiseAmp GEKOPPELT: 1/(1 - threshold - noiseAmp) ist der
+  // kleinste Wert, bei dem das Innere (ramp = 1) auch beim ungünstigsten
+  // Rauschwert (-noiseAmp) gesättigt bleibt -- darunter stanzt das koharente
+  // Rauschen Löcher in den Schaft (bei einer nur ~28 px schmalen Säule liegt
+  // fast alles im Fransenband, das fiel sofort auf). Wer noiseAmp erhöht,
+  // muss gain mitziehen.
+  threshold: 0.5, gain: 1 / (1 - 0.5 - 0.3),
+  noiseScale: 1 / 14, noiseAmp: 0.3,
+  // Halbe Breite der Abstandsrampe in px (Kante +- fringePx).
+  fringePx: 9,
+  fill: "#e9d5b5", gray: 130, grayAlpha: 0.75, strokeWidth: 1,
+};
+
+/**
+ * Cb-Schäfte mit der Ellipsentechnik zeichnen. `cb` ist das Array aus
+ * `derive.js` (`{base, top}` je Stunde oder null). Aufeinanderfolgende
+ * Cb-Stunden werden zu EINEM Lauf zusammengefasst und mit durchgehender,
+ * zwischen den Stundenmitten interpolierter Ober-/Unterkante gezeichnet --
+ * zeichnete man je Stunde eine eigene Säule, entstünde an jeder gemeinsamen
+ * Kante eine Doppelfranse quer durch die Wolkenmasse.
+ *
+ * Kein Offscreen-Cache wie bei den Schichtwolken: Cb-Läufe sind klein
+ * (wenige tausend Ellipsen selbst bei mehrstündigen Gewitterlagen).
+ * Seed je Lauf aus Ort + Startstunde: Läufe würfeln unabhängig voneinander
+ * (gleiche Überlegung wie beim Niederschlag, s. `render.js` `drawPrecip`).
+ */
+export function drawCbShafts(ctx, grid, cb, x, y) {
+  if (!cb) return;
+  const { meta, times } = grid;
+  const dt = times.length > 1 ? times[1] - times[0] : 3600;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x.left, y.top, x.right - x.left, y.bot - y.top);
+  ctx.clip();
+  ctx.fillStyle = CB_TUNING.fill;
+  const g = CB_TUNING.gray;
+  ctx.strokeStyle = `rgba(${g},${g},${g},${CB_TUNING.grayAlpha})`;
+  ctx.lineWidth = CB_TUNING.strokeWidth;
+
+  for (let i = 0; i < times.length; i++) {
+    if (!cb[i]) continue;
+    let j = i;
+    while (j + 1 < times.length && cb[j + 1]) j++;
+    const pts = [];
+    for (let k = i; k <= j; k++) {
+      pts.push({ cx: x(times[k]), yT: y(cb[k].top), yB: y(Math.max(0, cb[k].base)) });
+    }
+    const seed = hashSeed(`cb:${meta.lat},${meta.lon},${times[i]}`);
+    paintCbRun(ctx, seed, pts, x(times[i] - dt / 2), x(times[j] + dt / 2));
+    i = j;
+  }
+  ctx.restore();
+}
+
+function paintCbRun(ctx, seed, pts, X0, X1) {
+  const T = CB_TUNING;
+  const rng = mulberry32(seed);
+
+  // Ober-/Unterkante an der Stelle `cx`: zwischen den Stundenmitten linear,
+  // davor/danach konstant (halbe Randspalte).
+  const edge = (cx, key) => {
+    if (cx <= pts[0].cx) return pts[0][key];
+    for (let k = 1; k < pts.length; k++) {
+      if (pts[k].cx >= cx) {
+        const a = pts[k - 1], b = pts[k];
+        return a[key] + (cx - a.cx) / (b.cx - a.cx) * (b[key] - a[key]);
+      }
+    }
+    return pts[pts.length - 1][key];
+  };
+
+  // Kandidatenfläche: Lauf-Hülle plus Franse plus halbe Maximalellipse.
+  const yT = Math.min(...pts.map((p) => p.yT)), yB = Math.max(...pts.map((p) => p.yB));
+  const pad = T.fringePx + T.wMax / 2;
+  const rx0 = X0 - pad, ry0 = yT - pad;
+  const rw = (X1 - X0) + 2 * pad, rh = (yB - yT) + 2 * pad;
+  if (!(rw > 0) || !(rh > 0)) return;
+  const attempts = Math.round(T.density * 800 / TUNER_CANVAS_PX2 * rw * rh);
+
+  for (let i = 0; i < attempts; i++) {
+    const cx = rx0 + rng() * rw, cy = ry0 + rng() * rh;
+    // Vorzeichenbehafteter Abstand zur Laufkontur (innen positiv), als Rampe
+    // auf [0,1]: 0.5 exakt auf der Kante, s. Kommentar an CB_TUNING.threshold.
+    const d = Math.min(cx - X0, X1 - cx, cy - edge(cx, "yT"), edge(cx, "yB") - cy);
+    const ramp = clamp(0.5 + d / (2 * T.fringePx), 0, 1);
+    // Rauschen bewusst UNGEDÄMPFT addiert (anders als bei den Schichtwolken):
+    // es soll die Kante verschieben -- Beulen nach außen, Kerben nach innen,
+    // Reichweite +-noiseAmp * 2 * fringePx Pixel. Das Innere schützt nicht
+    // eine Dämpfung, sondern die gain-Kopplung (s. CB_TUNING): selbst beim
+    // ungünstigsten Rauschwert bleibt die Annahme dort bei 1. Fetzen im
+    // Nichts kann es ebenfalls nicht geben, solange noiseAmp < threshold.
+    const v = ramp + T.noiseAmp * cbNoise(seed, cx, cy);
+    if (v <= T.threshold) continue;
+    if (rng() >= Math.min(1, (v - T.threshold) * T.gain)) continue;
+
+    const ew = T.wMin + rng() * (T.wMax - T.wMin);
+    const eh = T.hMin + rng() * (T.hMax - T.hMin);
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, ew / 2, eh / 2, 0, 0, Math.PI * 2);
+    ctx.fill();   // fill -> stroke je Ellipse, wie bei den Schichtwolken.
+    ctx.stroke();
+  }
+}
+
+// Eigene Oktav-Salts (2/3), damit das Schaftrauschen nicht mit dem
+// Schichtwolkenrauschen desselben Seeds korreliert.
+function cbNoise(seed, px, py) {
+  const s = CB_TUNING.noiseScale;
+  const a = valueNoise(seed, px * s, py * s, 2);
+  const b = valueNoise(seed, px * s * FBM_OCTAVE, py * s * FBM_OCTAVE, 3);
+  return (FBM_W1 * a + FBM_W2 * b - 0.5) * 2;
+}
+
 // --- Maske: cloudFrac bilinear im Pixelraum ----------------------------------
 
 /**

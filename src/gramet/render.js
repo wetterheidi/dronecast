@@ -16,7 +16,7 @@
 
 import { sampleAt } from "./grid.js";
 import { contour } from "./derive.js";
-import { drawClouds } from "./texture.js";
+import { drawClouds, drawCbShafts } from "./texture.js";
 import { hashSeed, hashRand } from "./noise.js";
 import { drawWindRow, WIND_ROW_HEIGHT } from "./rows/wind.js";
 import { drawNumberRow, NUMBER_ROW_HEIGHT } from "./rows/numberRow.js";
@@ -48,9 +48,9 @@ const ICING_STYLES = { light: "#2e7d32", moderate: "#1b5e20", severe: "#0d3b10" 
 const TURB_STYLES = { light: "#f9a825", moderate: "#ef6c00", severe: "#c62828" };
 const HAZARD_LEVELS = { light: 1, moderate: 2, severe: 3 };
 
-// Cb-Schaft (Cumulonimbus): sandfarbene Säule + vereinfachtes Gewitter-Glyph,
-// angelehnt an die Ogimet-GRAMET-Darstellung (s. Referenz-Screenshot).
-const CB_SHAFT_COLOR = "rgba(224,178,120,0.5)";
+// Cb (Cumulonimbus): sandfarbener Schaft (Ellipsentechnik, s. `texture.js`
+// `drawCbShafts`) + vereinfachtes Gewitter-Glyph, angelehnt an die
+// Ogimet-GRAMET-Darstellung (s. Referenz-Screenshot).
 const CB_GLYPH_COLOR = "#6b2e2e";
 const CB_ANVIL_FILL = "rgba(255,235,150,0.28)";
 const CB_ANVIL_STROKE = "#c9a227";
@@ -128,7 +128,7 @@ export function renderGramet(host, grid, view, state = {}) {
   const toggles = state.layerToggles ?? {};
   drawBackground(ctx, grid, view, x, mainTop, mainBot);
   drawHazardArea(ctx, grid, view.hazards.icing, ICING_STYLES, x, y);
-  if (toggles.cb !== false) drawCbShaft(ctx, view.cb, times, x, y);
+  if (toggles.cb !== false) drawCbShafts(ctx, grid, view.cb, x, y);
   if (toggles.clouds !== false) drawClouds(ctx, grid, view.cloudFrac, x, y);
   if (toggles.cb !== false) drawCbGlyphs(ctx, view.cb, view.tropopause, times, x, y);
   const seed = hashSeed(`${grid.meta.lat},${grid.meta.lon},${grid.meta.elevation},${times[0]}`);
@@ -283,21 +283,8 @@ function drawHazardArea(ctx, grid, hazardArr, styles, x, y) {
 
 // --- Cumulonimbus (Cb) — HEURISTIK aus derive.js, s. dort ---------------------
 
-// Schaft (sandfarbene Fläche vom Boden/Wolkenbasis bis zum Wolkenoberrand):
-// vor den Wolken gezeichnet, damit die weiße Schraffur darüberliegt (wie im
-// Referenz-GRAMET).
-function drawCbShaft(ctx, cb, times, x, y) {
-  const dt = times.length > 1 ? times[1] - times[0] : 3600;
-  ctx.fillStyle = CB_SHAFT_COLOR;
-  for (let i = 0; i < times.length; i++) {
-    const c = cb[i];
-    if (!c) continue;
-    const x0 = x(times[i] - dt / 2), x1 = x(times[i] + dt / 2);
-    const yTop = y(c.top), yBot = y(Math.max(0, c.base));
-    ctx.fillRect(x0, yTop, x1 - x0, yBot - yTop);
-  }
-}
-
+// Schaft: `drawCbShafts` (texture.js), vor den Wolken gezeichnet, damit die
+// weißen Wolkenellipsen darüberliegen (wie im Referenz-GRAMET).
 // Glyph + Amboss-Andeutung: nach den Wolken gezeichnet (liegt darüber).
 function drawCbGlyphs(ctx, cb, tropopause, times, x, y) {
   const dt = times.length > 1 ? times[1] - times[0] : 3600;
