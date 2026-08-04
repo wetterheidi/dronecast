@@ -46,7 +46,8 @@
       "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --no-sandbox --hide-scrollbars --virtual-time-budget=25000 --window-size=1520,780 --screenshot=gramet-old.png 'http://localhost:5199/__gramet-preview.html?lat=48.14&lon=11.58&model=icon_d2')",
       "Bash(magick gramet-old.png -crop 460x200+300+15 -resize 260% zoom-old.png)",
       "Bash(magick zoom-old.png zoom-new.png -append -bordercolor black -border 2 vergleich.png)",
-      "Bash(curl -s \"https://api.open-meteo.com/v1/forecast?latitude=54.5035&longitude=13.1396&hourly=precipitation,weather_code,snowfall,cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high&models=icon_d2&timeformat=iso8601&timezone=Europe%2FBerlin&forecast_days=3\")"
+      "Bash(curl -s \"https://api.open-meteo.com/v1/forecast?latitude=54.5035&longitude=13.1396&hourly=precipitation,weather_code,snowfall,cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high&models=icon_d2&timeformat=iso8601&timezone=Europe%2FBerlin&forecast_days=3\")",
+      "Bash(node --check src/gramet/hazards/icing.js)"
     ]
   }
 }

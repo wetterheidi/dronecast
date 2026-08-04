@@ -488,6 +488,184 @@ Aus `weather_code` (`hazardRow()`), ohne numerischen Grenzwert:
 
 ---
 
+## 7. GRAMET (Cross-Section entlang der Route)
+
+[src/gramet/](src/gramet/) baut ein eigenes Zeit-Höhen-Gitter aus der bereits
+geladenen Säule (`column.js`) + den Oberflächenwerten und leitet daraus
+Isolinien, Wolken/Niederschlag und Konvektionszellen ab — dieselben
+Grundgrößen wie Abschnitt 1–4, aber flächig über Zeit statt punktuell am
+Operationspunkt. Neu seit dieser Iteration; bislang nirgends sonst
+dokumentiert.
+
+### 7.1 Zeit-Höhen-Gitter
+[src/gramet/grid.js](src/gramet/grid.js), `gridFromColumn()` +
+`derive()`. Level bereits in Aufstiegsreihenfolge aus `column.js` (k=0 ≈
+10 m AGL), Einheiten intern SI. Levelddruck kommt 1:1 aus der Säule
+(`pressure_level{l}`) — die ursprünglich geplante hydrostatische Integration
+aus `pressure_msl` war unnötig, Michaels Server liefert den Leveldruck
+bereits direkt. `derive()` rechnet zusätzlich potentielle Temperatur `θ`,
+Windbetrag `wspd` und `cloudFrac` (über dieselbe dreistufige
+`clouds.js`-Heuristik wie Abschnitt 4.1) sowie — auf gestaffelten
+Zwischenniveaus — Scherung `shear2 = (du/dz)² + (dv/dz)²`,
+Brunt-Väisälä-Frequenz `N² = (g/θ)·dθ/dz` und Richardson-Zahl `Ri = N²/shear2`.
+Diese drei sind bereits berechnet und gecacht, werden aber **noch von
+niemandem konsumiert** — Vorarbeit für das Turbulenzmodul (7.6).
+
+### 7.2 Isolinien & Tropopause
+[src/gramet/derive.js](src/gramet/derive.js).
+
+- **Isothermen** (0/−20/−40 °C): je Zeitspalte werden alle Höhen gesucht, an
+  denen `T` die Schwelle kreuzt (lineare Interpolation zwischen Leveln), dann
+  spaltenübergreifend zu Polylinien verkettet — die nächste Spalte verlängert
+  eine bestehende Linie an ihrem nächstgelegenen Kreuzungspunkt, sofern der
+  Sprung `< ISOTHERM_MAX_JUMP_M = 1500 m` bleibt (sonst neue Linie; verhindert
+  Fehlverbindungen bei mehrdeutigen Kreuzungen, z. B. Inversionen).
+- **Isotachen** (50/75/100 kt): generischer Marching-Squares-Konturierer
+  (`contour()`) auf dem Zeit×Level-Feld `wspd` — bewusst allgemein gehalten,
+  bereits jetzt für andere Felder wiederverwendbar. Sattelfälle (zwei
+  gegenüberliegende Zellecken über der Schwelle) werden über den
+  Zellmittelwert aufgelöst (asymptotic decider), damit keine sich
+  kreuzenden Liniensegmente entstehen.
+- **Tropopause:** WMO-Kriterium — unterstes Level ab 5000 m AGL, ab dem der
+  Temperaturgradient über die gesamten nächsten 2000 m nirgends `> 2 K/km`
+  beträgt. Wird das Gitter vor Erreichen der 2-km-Prüfstrecke abgeschnitten
+  (Domänendeckel), zählt das explizit NICHT als Treffer (sonst
+  Fehlalarm am oberen Rand). Ergebnislinie mit gleitendem 3-Punkt-Mittel
+  geglättet (`smooth3`).
+- **Tag/Nacht-Verlauf:** `sunAltitude()` ([src/astro.js](src/astro.js)) je
+  Spalte, kontinuierlicher Faktor 1 oberhalb 0° Sonnenhöhe, 0 unterhalb −12°
+  (nautische Dämmerung), dazwischen linear — steuert nur die Hintergrund-
+  Einfärbung, keine physikalische Ableitung.
+
+### 7.3 Wolkenbasis/-obergrenze im GRAMET
+[src/gramet/derive.js](src/gramet/derive.js), `cloudBaseAt()`/`cloudTopAt()`.
+Spiegelt `clouds.js` `lowestCloudBase()` (Abschnitt 4.3), rechnet aber direkt
+auf dem bereits am Gitter vorliegenden `cloudFrac` statt erneuter
+`cloudFraction()`-Aufrufe — Basis = unterster zusammenhängender Bereich mit
+`CF ≥ CF_FEW`, bodenberührende Sättigung (`< FOG_BASE_M = 30 m`, gespiegelte
+Konstante) zählt als Nebel, nicht als Wolke.
+
+Der Obergrenzen-Suche (`cloudTopAt`) wurde eine **Lückentoleranz**
+(`CLOUD_TOP_GAP_TOLERANCE_M = 1200 m`) hinzugefügt: kleine trockene
+Zwischenschichten innerhalb dieser Distanz unterbrechen die zusammenhängende
+Schicht nicht mehr. Vorher schnitt eine dünne bodennahe Feuchteschicht die
+eigentlich darüber regnende Wolke fälschlich ab, wodurch der
+Niederschlagsvorhang (7.4) weit unter der sichtbar gezeichneten Wolke endete.
+Eine echte, größere Lücke (z. B. isoliert darüberliegender Cirrus) beendet die
+Schicht weiterhin. `anyCloudTopAt()` sucht zusätzlich das höchste Level im
+GESAMTEN Profil mit `CF ≥ CF_FEW`, als robusterer Fallback, falls die
+Basis-Erkennung selbst nichts findet.
+
+### 7.4 Niederschlagsvorhang
+[src/gramet/derive.js](src/gramet/derive.js), `precipEntries()`. Zwei getrennte
+Rollen statt eines einzigen Mengen-Gates:
+
+- **OB gezeichnet wird:** `weather_code` (als METAR-Kürzel über dieselbe
+  Tabelle wie die Wetter-Zeile, [src/briefing.js](src/briefing.js)
+  `metarWeather()`) oder die Menge (`precipitation > PRECIP_MIN_RATE =
+  0,05 mm/h`) — jede der beiden Quellen reicht allein. Vorher war die Menge
+  allein das Gate; bei sehr leichtem Niederschlag rundet sie oft auf ~0,
+  obwohl `weather_code` ihn noch meldet, wodurch Wetter-Zeile und gezeichneter
+  Vorhang auseinanderliefen.
+- **ALS WAS:** Phase (Regen/Schnee) kommt jetzt primär aus dem METAR-Kürzel
+  (`SN`/`SG`/`FZ…`), nicht mehr nur aus `snowfall > 0`. Meldet nur
+  `weather_code`, aber keine Menge (z. B. „−RA"), wird eine nominale
+  Mindestrate von 0,3 mm/h angenommen, sonst bliebe der Vorhang trotz
+  gemeldetem Niederschlag unsichtbar. Reiner Nebel (`FG`/`FZFG`) zählt
+  explizit nicht als Niederschlag.
+- **WIE HOCH:** Oberkante = `cloudTopAt()` (7.3, jetzt mit Lückentoleranz) ab
+  der erkannten Basis. Nur wenn gar keine Basis gefunden wird (Niederschlag
+  laut `weather_code`/Menge gemeldet, aber keine Wolke im `CF_FEW`-Sinn
+  erkannt), Ersatz über `anyCloudTopAt()`, zuletzt einen festen
+  `PRECIP_FALLBACK_TOP_M = 2000 m` (grobe Annahme für flachen
+  Sprühregen/Nieselregen) — **nie** der Gitterdeckel als Ersatz. Das
+  Maximum aus beiden Quellen zu nehmen wurde bewusst verworfen: es riss den
+  Vorhang bis zu unverbundenem Cirrus weit darüber („bis in die Stratosphäre"-
+  Artefakt).
+
+### 7.5 Konvektion: TCU-/Cb-Spalten
+[src/gramet/derive.js](src/gramet/derive.js) `cbColumns()` +
+[src/gramet/hazards/convection.js](src/gramet/hazards/convection.js). Liefert
+pro Stunde `null` oder `{base, top, kind: "tcu"|"cb"}` für Schaft und Glyph
+(WMO-Symbole CL3 bzw. CL9, reine Zeichenzuordnung in
+[src/gramet/render.js](src/gramet/render.js)).
+
+**Parcel-Theorie (`convection.js`), Schwerpunkt CCL statt LCL.** Portiert aus
+`sounding_data/sounding_viewer.html`, bewusst als eigener geschlossener
+Konstantensatz statt über `clouds.js` (dort leicht andere Magnus-
+Koeffizienten — Mischen würde Isohume und Feuchtadiabate gegeneinander
+verstimmen):
+- **CCL** — erstes Niveau, an dem die Isohume durch den Bodentaupunkt die
+  Umgebungstemperatur erreicht (lineare Interpolation am Kreuzungspunkt) —
+  physikalische Basis der Quellwolke.
+- **TA (Auslösetemperatur)** — CCL-Temperatur trockenadiabatisch auf
+  Bodendruck zurückgeführt. Ersetzt einen früheren festen CAPE-Schwellwert,
+  weil TA die tatsächliche Sperrschicht aus dem Profil auswertet statt eines
+  pauschalen Werts.
+- **EL** — ab CCL feuchtadiabatisch aufwärts (RK4-Integration, 5-hPa-Schritte,
+  Pseudoadiabate aus Mixed-Phase-Sättigungsdampfdruck: Wasser > 0 °C, Eis
+  < −40 °C, dazwischen linear geblendet), CAPE aufintegriert mit virtueller
+  Temperaturkorrektur (Doswell & Rasmussen 1994); EL = erstes Niveau, an dem
+  der Auftrieb nach einer positiven Phase wieder negativ wird.
+- Bodenzustand bevorzugt 2-m-Temperatur/-Taupunkt, Druck vom untersten Level
+  (~10 m AGL, Höhendifferenz gegenüber der CCL-Suchschrittweite
+  vernachlässigbar); fehlen die 2-m-Werte, tritt das unterste Modell-Level an
+  ihre Stelle.
+
+**Ob überhaupt eine Spalte entsteht — drei Wege, jeder für sich hinreichend:**
+1. `weather_code` meldet TS (Gewitter) oder SH/+SH (Schauer) — direktes
+   Modellsignal, verlässlicher als die eigene Parcel-Rechnung.
+2. Thermische Auslösung: `T_2m ≥ TA − TRIGGER_EXCESS_K` (2 K Zuschlag) **und**
+   Mächtigkeit `EL − CCL ≥ TCU_MIN_DEPTH_M = 1500 m` (ein flaches Cu-Feld ist
+   noch keine TCU). Der Zuschlag korrigiert, dass `T_2m` ein
+   Gitterzellen-Mittel ist, während Konvektion aus den wärmsten
+   Thermikblasen startet (überadiabatische Bodenschicht, besonnte Hänge,
+   subskalige Heterogenität — 0,5–2 K wärmer als das Zellmittel), plus dass TA
+   selbst rund die Hälfte des 2-m-Taupunktfehlers erbt. Beide Effekte zeigen
+   in dieselbe Richtung: ein striktes `T_2m ≥ TA` löst systematisch zu spät
+   aus. **`TRIGGER_EXCESS_K` ist nicht kalibriert.**
+3. Auffangpfad mit den alten, ebenfalls unkalibrierten Schwellen
+   `CAPE ≥ CB_CAPE_MIN_JKG = 300 J/kg` oder `max|w| ≥ CB_UPDRAFT_MIN_MS =
+   3 m/s`, nur falls 1. und 2. nichts liefern (z. B. CCL nicht bestimmbar).
+
+**Towering-Hürde (hartes Veto):** der Oberrand muss
+`TCU_MIN_ABOVE_FREEZING_M = 1524 m` (5000 ft, grob das −10-°C-Niveau bei
+Standardgradient, Beginn nennenswerter Vereisung im Turm) über der 0-°C-Grenze
+liegen — sonst entsteht gar keine Konvektionsspalte (weder Schaft noch
+Symbol), auch wenn einer der drei Wege oben angeschlagen hat. Ein flacher
+Schönwetter-Cumulus, der die Frostgrenze kaum erreicht, wäre sonst
+fälschlich als TCU geplottet worden; in labilen Lagen verschmolzen genau
+diese Randstunden den Nachmittag zu einem durchgehenden Block. Ausnahme: ein
+gemeldetes `TS` hebelt die Hürde aus — ein Gewitter ohne vereisten Oberrand
+laut unserer (Fallback-lastigen) Höhenschätzung ist ein Widerspruch, in dem
+die Oberrand-Schätzung die unsicherere Größe ist. Weder diese Hürde noch die
+darunterliegenden Schwellen sind kalibriert.
+
+**Cb vs. TCU:** `kind = "cb"`, wenn `TS` gemeldet wird **oder** der Oberrand
+vergletschert ist (`T ≤ CB_GLACIATION_C = −20 °C`) **und** tropopausennah
+liegt (`< CB_TROPOPAUSE_GAP_M = 1200 m` Abstand) — dort, wo sich tatsächlich
+ein Amboss ausbreiten kann. `+SH` allein zählt bewusst NICHT als Cb-Signal:
+Schauerintensität belegt keinen vergletscherten Oberrand. Sonst `"tcu"`.
+
+**Basis/Oberrand-Fallback-Ketten** (nie der Modelldeckel, gleiches Prinzip wie
+7.4): Oberrand = EL, sonst höchstes vergletschertes `CF ≥ CF_BKN`-Level, sonst
+irgendeine Wolkenspur im Profil, sonst `CB_FALLBACK_TOP_M = 6000 m`. Basis =
+CCL, sonst die allgemeine Wolkenbasis (7.3), sonst 0 — mit der Nebenbedingung
+`Basis < Oberrand` (sonst würde bei hochbasiger Konvektion ohne EL ein
+Fallback-Oberrand unter dem CCL liegen und der Schaft invertiert gezeichnet).
+
+### 7.6 Vereisung & Turbulenz — vorbereitet, noch nicht implementiert
+[src/gramet/hazards/icing.js](src/gramet/hazards/icing.js) und
+[turbulence.js](src/gramet/hazards/turbulence.js) sind reine **Stubs**: beide
+liefern für jede Gitterzelle konstant `"none"`, unabhängig vom tatsächlichen
+Wetter. Die fachlichen Eingangsgrößen liegen bereits bereit — Wolkenfraktion/
+Temperatur/RH für Vereisung, `shear2`/`N²`/Richardson-Zahl für Turbulenz (s.
+7.1) —, aber es findet **keine** Bewertung statt. Zeilen/Hooks, die diese
+Module konsumieren, zeigen also aktuell durchgängig „ohne Befund", nicht
+„geprüft und unauffällig".
+
+---
+
 ## Bekannte Näherungen — Kurzübersicht
 
 Ausführliche Diskussion und geplante Verfeinerungen stehen in
@@ -505,3 +683,6 @@ vereinfachende Annahme steckt:
 | Böen (1) | nur am Boden, keine Hochrechnung auf Flughöhe |
 | Go/No-Go-Schwellenwerte | Platzhalterprofil, keine geprüften Herstellerwerte |
 | Vereisung, Turbulenz | in der Go/No-Go-Tabelle noch nicht abgebildet |
+| GRAMET Konvektionsschwellen (7.5) | `TRIGGER_EXCESS_K`, Towering-Hürde, CAPE-/Updraft-Auffangpfad — sämtlich unkalibriert |
+| GRAMET Niederschlags-Fallback-Obergrenze (7.4) | 2000 m, grobe Annahme für flachen Niesel-/Sprühregen ohne erkannte Wolkenspur |
+| GRAMET Vereisung/Turbulenz (7.6) | Stubs, liefern konstant "none" — Eingangsgrößen bereit, Algorithmus fehlt |

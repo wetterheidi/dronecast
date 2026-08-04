@@ -91,7 +91,7 @@ export function deriveView(grid) {
     cloudBase,
     precip: precipEntries(grid, cloudBase),
     cb: cbColumns(grid, d.cloudFrac, cloudBase, tropopauseLine),
-    hazards: { icing: icing.computeGrid(grid), turbulence: turbulence.computeGrid(grid) },
+    hazards: { icing: icing.computeGrid(grid, d.cloudFrac), turbulence: turbulence.computeGrid(grid) },
   };
 }
 

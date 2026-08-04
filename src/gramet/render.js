@@ -87,7 +87,7 @@ const ROW_DEFS = {
   },
 };
 
-const DEFAULT_ROWS = ["wind", "tempdew", "gust", "pressure", "weather"];
+const DEFAULT_ROWS = ["wind", "gust", "tempdew", "pressure", "weather"];
 
 export function renderGramet(host, grid, view, state = {}) {
   host.innerHTML = "";
