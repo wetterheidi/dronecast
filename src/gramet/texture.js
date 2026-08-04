@@ -191,25 +191,44 @@ function paintClouds(ctx, grid, cloudFrac, x, y) {
 // --- Cb/TCU: Schaft und Amboss -----------------------------------------------
 
 /**
- * Die Konvektionssäule wird als SILHOUETTE gezeichnet, nicht als Rechteck mit
- * rundum gleicher Franse. Drei Kanten, drei verschiedene Charaktere -- genau
- * das macht eine Säule als Cb/TCU erkennbar, gerade wenn sie über viele
- * Stunden durchläuft und sonst nur ein sandfarbener Fleck wäre:
+ * Konvektion wird als EINZELNE ZELLEN gezeichnet, nicht als durchgehende Säule
+ * über den ganzen konvektiven Zeitraum. Ein labiler Nachmittag liefert leicht
+ * acht bis zehn Stunden am Stück; als ein Gebiet gezeichnet wurde daraus ein
+ * kompakter sandfarbener Block über den halben Chart (s. Feedback). Das ist
+ * auch fachlich schief: eine Gewitterzelle lebt 30-60 Minuten, was das Modell
+ * über Stunden zeigt, ist eine FOLGE von Zellen, kein einzelnes Gebilde.
+ *
+ * `cbCells` legt deshalb über jeden Lauf einen Zellrhythmus (gesetzter Seed,
+ * s. CB_CELL_*): Zellmitten wandern in Abständen von ein bis knapp drei
+ * Stundenbreiten durch den Lauf, jede Zelle ist knapp eine Stundenbreite breit.
+ * Dazwischen bleibt Lücke, der Hintergrund kommt durch, die Türme stehen
+ * einzeln. Der Lauf als Ganzes bleibt trotzdem ablesbar: die Zellen füllen
+ * genau seine Zeitspanne.
+ *
+ * WAS DAS HEISST: die Zahl der Türme ist NICHT die Zahl der konvektiven
+ * Stunden, und eine Lücke zwischen zwei Türmen bedeutet NICHT, dass es dort
+ * keine Konvektion gibt. Die stundenscharfe Aussage steht in der Wetter-Zeile
+ * und im Niederschlagsvorhang; der Schaft zeigt Charakter und Zeitraum.
+ *
+ * Jede Zelle wird als SILHOUETTE gezeichnet, nicht als Rechteck mit rundum
+ * gleicher Franse -- drei Kanten, drei Charaktere:
  *
  *   - UNTERKANTE hart und waagerecht abgeschnitten. Kondensationsniveau ist
  *     eine Fläche, keine Zufallsgrenze; eine ausgefranste Cb-Basis gibt es in
  *     der Natur nicht. Umgesetzt als Clip auf die Basislinie (nicht als
  *     Abstandsrampe) -- so werden auch die Ellipsen, deren Mittelpunkt knapp
  *     darüber liegt, sauber gekappt statt darunter herauszuhängen.
- *   - OBERKANTE gewellt, mit einer Kerbe zwischen je zwei Stunden
- *     (`turretEdge`): der Lauf zerfällt optisch wieder in einzelne Quelltürme.
- *     Die Wellen gehen nur nach UNTEN, nie über den Modelloberrand hinaus --
- *     sonst stieße der Schaft durch den flachen Ambossdeckel.
- *   - SEITEN weich, wie bisher über Rampe + Rauschen.
+ *   - OBERKANTE als Blumenkohlkuppe aus zwei bis drei überlappenden Kuppeln
+ *     (`cellTopEdge`, untere Einhüllende). Die Auslenkung geht nur nach UNTEN,
+ *     nie über den Modelloberrand hinaus -- sonst stieße der Schaft durch den
+ *     flachen Ambossdeckel.
+ *   - SEITEN weich, über Rampe + Rauschen.
  *
  * Der Amboss ist eine eigene Region mit umgekehrter Härte (flacher Deckel oben,
- * weiche Unterseite) und sitzt seitlich über den Schaft hinaus -- s.
- * `drawCbAnvils`.
+ * weiche Unterseite) und sitzt seitlich über die Zelle hinaus -- s.
+ * `drawCbAnvils`. Er bekommt bewusst KEINE Lücke aufgezwungen: benachbarte
+ * Ambosse dürfen zu einem Schirm verschmelzen, das ist an einem Gewittertag
+ * genau das Bild. Getrennt sind die Türme darunter.
  */
 
 /**
@@ -277,73 +296,140 @@ const ANVIL_OVERSHOOT = CB_TUNING.noiseAmp * 2 * CB_TUNING.fringePx + CB_TUNING.
 // beschattete Unterseite einer Konvektionswolke.
 const CB_BASE_LINE = "rgba(108,92,72,0.85)";
 
+// --- Zellrhythmus ------------------------------------------------------------
+// Alle Angaben als [min, max] in STUNDENBREITEN (Pixelabstand zweier
+// Stundenmitten), aus dem Lauf-Seed gezogen. Zwei Bedingungen gleichzeitig:
+//   - Der Abstand muss deutlich über der Summe zweier halber Zellbreiten
+//     liegen, sonst schließt sich die Lücke und der Block ist zurück. Im
+//     ungünstigsten Fall bleiben hier 2.2 - 2*0.75 = 0.7 Stundenbreiten Luft.
+//   - Die Zelle muss breit genug sein, um als Turm zu lesen. Bei ~30 px je
+//     Stunde und einem 12 km tiefen Schaft (mehrere hundert Pixel) wirkte eine
+//     halbe Stundenbreite wie ein Stab, nicht wie eine Quellwolke. Breiter als
+//     hier geht nicht, ohne die Zeitdauer zu verfälschen.
+// Nicht kalibriert, rein optisch gewählt.
+const CB_CELL_SPACING_H = [2.2, 3.4];
+const CB_CELL_HALFWIDTH_H = [0.5, 0.75];
+// Einrückung der ersten Zellmitte ab Laufbeginn -- ohne sie klebte die erste
+// Zelle immer an der Laufkante und der Rhythmus sähe getaktet aus.
+const CB_CELL_FIRST_H = [0.45, 0.85];
+// Läufe bis zu dieser Länge (in Stundenbreiten) bekommen genau eine, mittig
+// gesetzte Zelle -- bei zwei Stunden Konvektion sind zwei Türme mit Lücke
+// bereits eine Überzeichnung.
+const CB_CELL_SINGLE_MAX_H = 1.5;
+// Absolute Untergrenzen in Pixeln. Bei langen Vorhersagezeiträumen schrumpft
+// die Stundenbreite auf wenige Pixel; ohne Boden würden Türme schmaler als ihr
+// eigenes Randrauschen (+-noiseAmp*2*fringePx ~ 5 px) und verkämen zu Fusseln.
+const CB_CELL_MIN_HALFWIDTH_PX = 7;
+const CB_CELL_MIN_SPACING_PX = 26;
+
 /**
- * Cb-/TCU-Schäfte mit der Ellipsentechnik zeichnen. `cb` ist das Array aus
- * `derive.js` (`{base, top, kind}` je Stunde oder null). Aufeinanderfolgende
- * Stunden werden zu EINEM Lauf zusammengefasst und mit durchgehender,
- * zwischen den Stundenmitten interpolierter Ober-/Unterkante gezeichnet --
- * zeichnete man je Stunde eine eigene Säule, entstünde an jeder gemeinsamen
- * Kante eine Doppelfranse quer durch die Wolkenmasse.
+ * Zellmitten und -breiten eines Laufs. Rein aus (Seed, Laufgrenzen,
+ * Stundenbreite) -- deterministisch, damit Schaft, Amboss und Symbol dieselbe
+ * Zerlegung sehen.
+ */
+function cellLayout(seed, X0, X1, hourPx) {
+  const rng = mulberry32(seed ^ 0x5bf03635);
+  const span = X1 - X0;
+  const pickHW = () => Math.max(CB_CELL_MIN_HALFWIDTH_PX,
+    hourPx * (CB_CELL_HALFWIDTH_H[0] + (CB_CELL_HALFWIDTH_H[1] - CB_CELL_HALFWIDTH_H[0]) * rng()));
+  const single = () => [{ cx: (X0 + X1) / 2, hw: Math.min(span / 2, pickHW()) }];
+
+  if (span <= hourPx * CB_CELL_SINGLE_MAX_H) return single();
+
+  const out = [];
+  let cx = X0 + hourPx * (CB_CELL_FIRST_H[0] + (CB_CELL_FIRST_H[1] - CB_CELL_FIRST_H[0]) * rng());
+  while (cx < X1) {
+    out.push({ cx, hw: pickHW() });
+    cx += Math.max(CB_CELL_MIN_SPACING_PX,
+      hourPx * (CB_CELL_SPACING_H[0] + (CB_CELL_SPACING_H[1] - CB_CELL_SPACING_H[0]) * rng()));
+  }
+  // Kann bei extrem schmalen Stunden passieren (Einrückung > Laufbreite) -- ein
+  // Lauf ganz ohne Zelle wäre verschwundene Konvektion.
+  return out.length ? out : single();
+}
+
+/**
+ * Konvektionszellen aus dem Stundenarray `cb` (aus `derive.js`,
+ * `{base, top, kind}` je Stunde oder null). EINMAL berechnen und an
+ * `drawCbShafts`, `drawCbAnvils` und die Symbolzeichnung im Renderer
+ * weiterreichen -- Amboss und Symbol müssen exakt auf demselben Turm sitzen,
+ * eine zweite unabhängige Ziehung würde sie versetzen.
  *
- * Kein Offscreen-Cache wie bei den Schichtwolken: Cb-Läufe sind klein
- * (wenige tausend Ellipsen selbst bei mehrstündigen Gewitterlagen).
  * Seed je Lauf aus Ort + Startstunde: Läufe würfeln unabhängig voneinander
  * (gleiche Überlegung wie beim Niederschlag, s. `render.js` `drawPrecip`).
  */
-export function drawCbShafts(ctx, grid, cb, x, y) {
-  if (!cb) return;
-  const { times } = grid;
+export function cbCells(grid, cb, x, y) {
+  if (!cb) return [];
+  const { meta, times } = grid;
   const dt = times.length > 1 ? times[1] - times[0] : 3600;
-
-  ctx.save();
-  clipChart(ctx, x, y);
-  setSpotStyle(ctx, CB_TUNING);
+  const cells = [];
 
   for (const [i, j] of runsOf(cb, (c) => !!c)) {
-    paintShaft(ctx, runGeometry(grid, cb, x, y, i, j, dt));
+    const pts = [];
+    for (let k = i; k <= j; k++) {
+      pts.push({ cx: x(times[k]), yT: y(cb[k].top), yB: y(Math.max(0, cb[k].base)) });
+    }
+    const X0 = x(times[i] - dt / 2), X1 = x(times[j] + dt / 2);
+    const hourPx = pts.length > 1 ? (pts[1].cx - pts[0].cx) : (X1 - X0);
+    const runSeed = hashSeed(`cb:${meta.lat},${meta.lon},${times[i]}`);
+
+    for (const { cx, hw } of cellLayout(runSeed, X0, X1, hourPx)) {
+      const x0 = cx - hw, x1 = cx + hw;
+      // Zelle erbt Oberrand/Basis der Stunden, über denen sie steht: Oberrand
+      // der höchste (kleinstes y) im überdeckten Bereich, damit die Kuppe nicht
+      // unter einen benachbarten, höheren Modellwert rutscht; Basis als
+      // interpolierte Linie, sie darf über die Zelle leicht kippen.
+      const yTop = Math.min(edgeAt(pts, "yT", x0), edgeAt(pts, "yT", cx), edgeAt(pts, "yT", x1));
+      const bot = (px) => edgeAt(pts, "yB", px);
+      const yBot = Math.max(bot(x0), bot(x1));
+      // Stunde, die der Zellmitte am nächsten liegt -- sie bestimmt Typ (Amboss
+      // ja/nein) und Symbol.
+      let hour = i;
+      for (let k = i; k <= j; k++) {
+        if (Math.abs(pts[k - i].cx - cx) < Math.abs(pts[hour - i].cx - cx)) hour = k;
+      }
+      // Seed je ZELLE, nicht je Lauf: sonst trügen alle Türme eines Nachmittags
+      // dieselbe Kuppelform und dasselbe Randrauschen.
+      const seed = hashSeed(`cbcell:${meta.lat},${meta.lon},${times[i]}:${Math.round(cx)}`);
+      cells.push({
+        hour, t: times[hour], kind: cb[hour].kind,
+        cx, hw, x0, x1, yTop, yBot, hourPx, seed,
+        top: cellTopEdge(seed, yTop, cx, hw),
+        bot,
+      });
+    }
   }
-  ctx.restore();
+  return cells;
 }
 
 /**
- * Geometrie eines Schaftlaufs. Bewusst rein aus (grid, cb, Skalen, i, j)
- * abgeleitet und ohne Zustand -- `drawCbAnvils` ruft sie für DENSELBEN Lauf
- * noch einmal auf und bekommt bitweise dieselbe Turmkante (gleicher Seed,
- * gleiche Eingaben). Nur so kann die Ambossunterseite den Kuppeln des Schafts
- * folgen, statt Lücken über den Einkerbungen offen zu lassen.
+ * Schäfte der Zellen zeichnen. Kein Offscreen-Cache wie bei den Schichtwolken:
+ * die Zellen sind klein (wenige tausend Ellipsen selbst bei einem
+ * durchkonvektiven Tag).
  */
-function runGeometry(grid, cb, x, y, i, j, dt) {
-  const { meta, times } = grid;
-  const pts = [];
-  for (let k = i; k <= j; k++) {
-    pts.push({ cx: x(times[k]), yT: y(cb[k].top), yB: y(Math.max(0, cb[k].base)) });
-  }
-  const X0 = x(times[i] - dt / 2), X1 = x(times[j] + dt / 2);
-  const yTop = Math.min(...pts.map((p) => p.yT));
-  const yBot = Math.max(...pts.map((p) => p.yB));
-  const seed = hashSeed(`cb:${meta.lat},${meta.lon},${times[i]}`);
-  const cellPx = pts.length > 1 ? (pts[1].cx - pts[0].cx) : (X1 - X0);
-  return {
-    pts, X0, X1, yTop, yBot, seed,
-    top: turretEdge(seed, pts, X0, X1, yBot - yTop, cellPx),
-    bot: (cx) => edgeAt(pts, "yB", cx),
-  };
+export function drawCbShafts(ctx, cells, x, y) {
+  ctx.save();
+  clipChart(ctx, x, y);
+  setSpotStyle(ctx, CB_TUNING);
+  for (const cell of cells) paintCell(ctx, cell);
+  ctx.restore();
 }
 
-function paintShaft(ctx, geom) {
-  const { pts, X0, X1, yTop, yBot, seed, top, bot } = geom;
-  if (!(X1 > X0) || !(yBot > yTop)) return;
+function paintCell(ctx, cell) {
+  const { x0, x1, yTop, yBot, seed, top, bot } = cell;
+  if (!(x1 > x0) || !(yBot > yTop)) return;
 
-  paintRegion(ctx, seed, CB_TUNING, { x0: X0, x1: X1, hardBot: true, salt: [2, 3], top, bot });
+  paintRegion(ctx, seed, CB_TUNING, { x0, x1, hardBot: true, salt: [2, 3], top, bot });
 
   // Die harte Kante zusätzlich als Linie nachziehen: der Clip allein
   // hinterlässt eine Treppe aus angeschnittenen Ellipsenrändern, erst der
   // Strich macht daraus die eine, durchgehende Wolkenbasis.
   ctx.save();
   ctx.beginPath();
-  ctx.moveTo(X0, bot(X0));
-  for (const p of pts) ctx.lineTo(p.cx, p.yB);
-  ctx.lineTo(X1, bot(X1));
+  for (let s = 0; s <= 4; s++) {
+    const px = x0 + (x1 - x0) * s / 4;
+    if (s === 0) ctx.moveTo(px, bot(px)); else ctx.lineTo(px, bot(px));
+  }
   ctx.strokeStyle = CB_BASE_LINE;
   ctx.lineWidth = 1.5;
   ctx.stroke();
@@ -359,37 +445,27 @@ function paintShaft(ctx, geom) {
  * Läufe hier nur über `kind === "cb"`: TCU haben per Definition keinen Amboss.
  * Ein Lauf aus tcu,tcu,cb,cb bekommt also nur über der Cb-Hälfte einen Deckel.
  */
-export function drawCbAnvils(ctx, grid, cb, x, y) {
-  if (!cb) return;
-  const { meta, times } = grid;
-  const dt = times.length > 1 ? times[1] - times[0] : 3600;
-  const cellW = Math.abs(x(times[0] + dt) - x(times[0]));
-
+export function drawCbAnvils(ctx, cells, x, y) {
   ctx.save();
   clipChart(ctx, x, y);
   setSpotStyle(ctx, ANVIL_TUNING);
 
-  for (const [i, j] of runsOf(cb, (c) => c && c.kind === "cb")) {
-    // Turmkante des UMGEBENDEN Schaftlaufs holen (ein Lauf kann tcu- und
-    // cb-Stunden mischen) -- die Ambossunterseite muss ihr folgen.
-    let a = i, b = j;
-    while (a > 0 && cb[a - 1]) a--;
-    while (b + 1 < times.length && cb[b + 1]) b++;
-    const shaft = runGeometry(grid, cb, x, y, a, b, dt);
-
-    const X0 = x(times[i] - dt / 2), X1 = x(times[j] + dt / 2);
-    let yTop = Infinity, yBot = -Infinity;
-    for (let k = i; k <= j; k++) {
-      yTop = Math.min(yTop, y(cb[k].top));
-      yBot = Math.max(yBot, y(Math.max(0, cb[k].base)));
-    }
-    yTop -= ANVIL_OVERSHOOT;
+  for (const cell of cells) {
+    if (cell.kind !== "cb") continue;
+    const { x0: X0, x1: X1, hourPx, yBot } = cell;
+    // Deckel über den höchsten Modellwert der Zelle: die weiche Kante der Kuppe
+    // streut nach oben (s. ANVIL_OVERSHOOT), diese Fusseln sollen nicht über
+    // dem flachen Deckel stehen.
+    const yTop = cell.yTop - ANVIL_OVERSHOOT;
+    // Die Ambossunterseite folgt der Kuppe DIESER Zelle -- deshalb kommt `top`
+    // aus dem Zellobjekt und wird nicht neu gezogen.
+    const shaft = cell;
     if (!(X1 > X0) || !(yBot > yTop)) continue;
 
     const depth = clamp(ANVIL_DEPTH_FRAC * (yBot - yTop), ANVIL_DEPTH_MIN, ANVIL_DEPTH_MAX);
-    // Zusätzlich an der Lauflänge gedeckelt: eine einzelne Cb-Stunde bekäme
-    // sonst einen Deckel dreimal so breit wie ihr Schaft (Pilz statt Amboss).
-    const flare = clamp(Math.min(ANVIL_FLARE_CELLS * cellW, 0.75 * (X1 - X0)),
+    // An der Zellbreite gedeckelt, sonst bekäme ein schmaler Turm einen Deckel
+    // dreimal so breit wie er selbst (Pilz statt Amboss).
+    const flare = clamp(Math.min(ANVIL_FLARE_CELLS * hourPx, 0.75 * (X1 - X0)),
       ANVIL_FLARE_MIN, ANVIL_FLARE_MAX);
     // Unterseite: über dem Schaft volle Dicke, nach außen keilförmig auf die
     // Spitzendicke auslaufend (Exponent < 1 -> konkav, wie ein echter Amboss).
@@ -402,8 +478,7 @@ export function drawCbAnvils(ctx, grid, cb, x, y) {
       return Math.min(Math.max(wedge, shaft.top(cx)), yTop + ANVIL_MAX_DROP * depth);
     };
 
-    const seed = hashSeed(`anvil:${meta.lat},${meta.lon},${times[i]}`);
-    paintRegion(ctx, seed, ANVIL_TUNING, {
+    paintRegion(ctx, cell.seed ^ 0x1f123bb5, ANVIL_TUNING, {
       x0: X0 - flare, x1: X1 + flare, hardTop: true, salt: [4, 5],
       top: () => yTop, bot,
     });
@@ -412,44 +487,46 @@ export function drawCbAnvils(ctx, grid, cb, x, y) {
 }
 
 /**
- * Oberkante eines Schaftlaufs als Quellturm-Profil: je Stunde eine Kuppel
- * (Ellipsenbogen), die Kante ist deren UNTERE EINHÜLLENDE (Minimum in y).
- * Weil die Kuppeln breiter sind als der Stundenabstand, überschneiden sie sich
- * und hinterlassen zwischen zwei Türmen eine Einkerbung -- genau die Kontur
- * eines mehrzelligen Quellwolkenfeldes.
+ * Oberkante EINER Zelle als Blumenkohlkuppe: zwei bis drei überlappende
+ * Kuppeln (Ellipsenbögen), die Kante ist deren UNTERE EINHÜLLENDE (Minimum in
+ * y). Bewusst nicht eine glatte Halbkugel -- die verrät sich sofort als
+ * gezeichnete Form; die Einhüllende gibt runde Kuppen mit scharfen Kerben
+ * dazwischen, genau die Kontur eines Quellturms.
  *
- * Bewusst NICHT als Stützstellen-Interpolation zwischen Scheitel und Kerbe:
- * damit werden die Scheitel flach und die Flanken steil, der Lauf sah aus wie
- * eine Zinnenmauer. Die Einhüllende macht es umgekehrt richtig herum -- runde
- * Kuppen, scharfe Kerben.
+ * Alle Maße skalieren mit der halben ZELLBREITE, nicht mit der Schafttiefe.
+ * Die Tiefe wäre hier die falsche Bezugsgröße: ein 12 km hoher Turm ist auf der
+ * gestauchten Höhenachse mehrere hundert Pixel tief, eine daran gekoppelte
+ * Kuppelamplitude liefe über einen 30 px breiten Turm zu einer Nadelspitze aus.
+ * An der Breite gekoppelt bleibt die Kuppe rund, egal wie hoch der Turm ist.
  *
- * Wichtig: die Auslenkung geht nur nach UNTEN (kein Punkt liegt über dem
- * gerechneten Oberrand). Ein Turm ÜBER dem Modellwert würde den flachen
- * Ambossdeckel durchstoßen, der auf dem höchsten Oberrand des Laufs sitzt.
- *
- * Die Amplitude muss deutlich über der Rauschweite des Randes liegen
- * (+-noiseAmp*2*fringePx ~ 5 px), sonst verwäscht das Rauschen die Kerben und
- * der Lauf sieht wieder aus wie ein glatter Klotz.
+ * Wichtig: die Auslenkung geht nur nach UNTEN (kein Punkt liegt über `yT`, dem
+ * gerechneten Oberrand). Ein Scheitel ÜBER dem Modellwert würde den flachen
+ * Ambossdeckel durchstoßen, der genau darauf sitzt.
  */
-function turretEdge(seed, pts, X0, X1, depthPx, cellPx) {
+function cellTopEdge(seed, yT, cx, hw) {
   const rng = mulberry32(seed ^ 0x9e3779b9);
-  const amp = clamp(depthPx * 0.2, 14, 60);
-  const domes = pts.map((p) => ({
-    cx: p.cx,
-    // Halbe Kuppelbreite knapp über halbem Stundenabstand: die Kuppeln
-    // überlappen gerade so, dass die Kerbe rund die halbe Amplitude tief wird.
-    // Deutlich breiter (>= 0.7) und die Kerben verschwinden fast ganz.
-    w: Math.max(6, cellPx * (0.52 + 0.14 * rng())),
-    a: amp * (0.75 + 0.5 * rng()),
-    // Scheitel dürfen nur nach unten abweichen (s. Ambossdeckel oben).
-    y: p.yT + amp * 0.25 * rng(),
-  }));
-  // Wo keine Kuppel greift (Laufrand, oder wenn die Stunden weiter auseinander
-  // liegen als die Kuppeln breit sind), liegt die Kante auf Schulterhöhe.
-  return (cx) => {
-    let best = edgeAt(pts, "yT", cx) + amp;
+  const n = 2 + Math.floor(rng() * 2);
+  const domes = [];
+  for (let d = 0; d < n; d++) {
+    const u = n === 1 ? 0 : -1 + 2 * d / (n - 1);
+    domes.push({
+      cx: cx + u * hw * 0.55 + (rng() - 0.5) * hw * 0.2,
+      // Halbe Kuppelbreite so, dass die äußerste Kuppel (Mitte bei 0.55*hw)
+      // über die Zellflanke bei hw hinausreicht -- sonst bliebe dort ein
+      // abgeschnittener Absatz statt einer Rundung.
+      w: hw * (0.65 + 0.4 * rng()),
+      a: hw * (0.55 + 0.45 * rng()),
+      // Scheitel dürfen nur nach unten abweichen (s. Ambossdeckel oben).
+      y: yT + hw * 0.3 * rng(),
+    });
+  }
+  // Wo keine Kuppel greift (jenseits der Flanken), liegt die Kante auf
+  // Schulterhöhe -- deutlich unter den Scheiteln, damit die Region dort ausläuft.
+  const shoulder = yT + hw * 1.1;
+  return (px) => {
+    let best = shoulder;
     for (const d of domes) {
-      const u = (cx - d.cx) / d.w;
+      const u = (px - d.cx) / d.w;
       if (u <= -1 || u >= 1) continue;
       const yq = d.y + d.a * (1 - Math.sqrt(1 - u * u));
       if (yq < best) best = yq;

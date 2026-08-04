@@ -16,7 +16,7 @@
 
 import { sampleAt } from "./grid.js";
 import { contour } from "./derive.js";
-import { drawClouds, drawCbShafts, drawCbAnvils } from "./texture.js";
+import { drawClouds, cbCells, drawCbShafts, drawCbAnvils } from "./texture.js";
 import { hashSeed, hashRand } from "./noise.js";
 import { drawWindRow, WIND_ROW_HEIGHT } from "./rows/wind.js";
 import { drawNumberRow, NUMBER_ROW_HEIGHT } from "./rows/numberRow.js";
@@ -130,11 +130,14 @@ export function renderGramet(host, grid, view, state = {}) {
   const toggles = state.layerToggles ?? {};
   drawBackground(ctx, grid, view, x, mainTop, mainBot);
   drawHazardArea(ctx, grid, view.hazards.icing, ICING_STYLES, x, y);
-  if (toggles.cb !== false) drawCbShafts(ctx, grid, view.cb, x, y);
+  // Zellzerlegung einmal ziehen: Schaft, Amboss und Symbol müssen auf demselben
+  // Turm sitzen (s. `cbCells`).
+  const cells = toggles.cb !== false ? cbCells(grid, view.cb, x, y) : [];
+  if (toggles.cb !== false) drawCbShafts(ctx, cells, x, y);
   if (toggles.clouds !== false) drawClouds(ctx, grid, view.cloudFrac, x, y);
   if (toggles.cb !== false) {
-    drawCbAnvils(ctx, grid, view.cb, x, y);
-    drawCbGlyphs(ctx, view.cb, times, x, y);
+    drawCbAnvils(ctx, cells, x, y);
+    drawCbGlyphs(ctx, cells);
   }
   const seed = hashSeed(`${grid.meta.lat},${grid.meta.lon},${grid.meta.elevation},${times[0]}`);
   if (toggles.precip !== false) drawPrecip(ctx, view.precip, times, x, y, seed);
@@ -299,17 +302,23 @@ function drawHazardArea(ctx, grid, hazardArr, styles, x, y) {
 // bewusst gesetzt (so vorgegeben) und passt zur Klassifikation in derive.js
 // insofern, als eine ausgelöste, mächtige Zelle ohne vergletscherten Oberrand
 // genau der calvus-Stufe entspricht.
-function drawCbGlyphs(ctx, cb, times, x, y) {
-  const dt = times.length > 1 ? times[1] - times[0] : 3600;
-  for (let i = 0; i < times.length; i++) {
-    const c = cb[i];
-    if (!c) continue;
-    const cx = x(times[i]), cellW = x(times[i] + dt / 2) - x(times[i] - dt / 2);
-    const yTop = y(c.top), yBot = y(Math.max(0, c.base));
+// Ein Symbol je Zelle, nicht mehr je Stunde: seit `cbCells` die Läufe in
+// einzelne Türme zerlegt, ist die Zelle die zeichnerische Einheit, und die
+// Symbole verteilen sich mit den Türmen von selbst. Der Mindestabstand darunter
+// ist nur noch die Rückfallebene für sehr schmale Stunden (langer
+// Vorhersagezeitraum), wo die Türme selbst schon fast aneinanderstoßen.
+const GLYPH_MIN_GAP = 1.4; // Vielfaches der Symbolgröße zwischen zwei Mitten
+
+function drawCbGlyphs(ctx, cells) {
+  let lastX = -Infinity;
+  for (const c of cells) {
     // Größer als der alte Glyph: die Kartensymbole sind reine Strichzeichnung,
     // unter ~22 px läuft der Halo in die Binnenform und der Umriss verklumpt.
-    const cy = yTop + (yBot - yTop) * 0.45, size = Math.min(24, cellW * 0.95);
-    strokeSymbol(ctx, c.kind === "cb" ? cl9Path(cx, cy, size) : cl3Path(cx, cy, size), size);
+    const size = Math.min(24, c.hw * 1.9);
+    if (c.cx - lastX < size * GLYPH_MIN_GAP) continue;
+    const cy = c.yTop + (c.yBot - c.yTop) * 0.45;
+    strokeSymbol(ctx, c.kind === "cb" ? cl9Path(c.cx, cy, size) : cl3Path(c.cx, cy, size), size);
+    lastX = c.cx;
   }
 }
 

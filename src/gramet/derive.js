@@ -41,6 +41,16 @@ const CB_TROPOPAUSE_GAP_M = 1200;
 // erst ab dieser Mächtigkeit (EL - CCL) eine Spalte -- flache Schönwetter-
 // Cumulusfelder sind keine TCU. Nicht kalibriert.
 const TCU_MIN_DEPTH_M = 1500;
+// "Towering"-Hürde: der Oberrand muss um diesen Betrag ÜBER der 0-°C-Grenze
+// liegen, sonst entsteht überhaupt keine Konvektionsspalte -- weder Schaft noch
+// Symbol. Eine Quellwolke, die die Frostgrenze kaum erreicht, ist schlicht
+// Cumulus; sie als TCU zu plotten ist meteorologisch falsch, und in labilen
+// Lagen verschmolzen genau diese Randstunden den Nachmittag zu einem
+// durchgehenden Block (s. Feedback). 5000 ft entsprechen bei Standardgradient
+// grob dem -10-°C-Niveau, also dem Beginn nennenswerter Vereisung im Turm.
+// Vorgabe, nicht kalibriert. Wirkt zusätzlich zu TCU_MIN_DEPTH_M: dort geht es
+// um die Gesamtmächtigkeit CCL->EL, hier um die Lage des Oberrands.
+const TCU_MIN_ABOVE_FREEZING_M = 1524; // 5000 ft
 // Zuschlag beim Vergleich T_2m gegen die Auslösetemperatur (`convection.js`
 // liefert TA roh). `t2m` ist ein Gitterzellen-MITTEL, Konvektion startet aber
 // aus den wärmsten Thermikblasen -- überadiabatische Bodenschicht, besonnte
@@ -405,6 +415,12 @@ function precipEntries(grid, cloudBase) {
  * `CB_FALLBACK_TOP_M` — bewusst nie der Modelldeckel (s. `precipEntries`).
  * Basis: CCL, ersatzweise die allgemeine Wolkenbasis.
  *
+ * Über allen drei Wegen liegt die Towering-Hürde: der Oberrand muss
+ * `TCU_MIN_ABOVE_FREEZING_M` über der 0-°C-Grenze stehen. Sie ist ein hartes
+ * Veto — eine Stunde, die daran scheitert, bekommt gar keinen Eintrag, also
+ * auch keinen Schaft. Ihr Schauer bleibt trotzdem sichtbar: er läuft über die
+ * normale Wolkendarstellung und `precipEntries`.
+ *
  * TCU vs. Cb: Cb nur bei TS im weather_code oder wenn der Oberrand
  * vergletschert (T <= CB_GLACIATION_C) UND tropopausennah ist — also dort, wo
  * sich tatsächlich ein Amboss ausbreiten kann. +SH zählt bewusst NICHT als
@@ -451,6 +467,17 @@ function cbColumns(grid, cloudFrac, cloudBase, tropopauseLine) {
       out.push(null); continue;
     }
 
+    // Towering-Hürde (s. TCU_MIN_ABOVE_FREEZING_M). TS im weather_code hebelt
+    // sie aus: ein gemeldetes Gewitter ohne vereisten Oberrand ist ein
+    // Widerspruch, in dem unsere Oberrand-Schätzung (Fallback-Kette bis hinab
+    // zu CB_FALLBACK_TOP_M) die unsicherere Größe ist -- die Zelle ganz zu
+    // unterschlagen wäre der größere Fehler.
+    const freezingZ = convectiveFreezingHeightAt(grid, i);
+    const towering = Number.isFinite(freezingZ) && top - freezingZ >= TCU_MIN_ABOVE_FREEZING_M;
+    if (!towering && !wxThunder) {
+      out.push(null); continue;
+    }
+
     const topTC = tempAtHeight(grid, i, top);
     const glaciated = Number.isFinite(topTC) && topTC <= CB_GLACIATION_C;
     const tropZ = tropAt(tropopauseLine, times[i]);
@@ -459,6 +486,26 @@ function cbColumns(grid, cloudFrac, cloudBase, tropopauseLine) {
     out.push({ base, top, kind });
   }
   return out;
+}
+
+/**
+ * 0-°C-Grenze (m AGL) für die Towering-Prüfung. `freezingHeightAt` sucht die
+ * Kreuzung von warm nach kalt und liefert NaN, wenn es keine gibt -- für den
+ * Niederschlagsvorhang ist das richtig so (keine Schneefallgrenze im Bild),
+ * hier braucht es eine Entscheidung: liegt schon der Boden im Frost, ist die
+ * Grenze 0 m AGL und die ganze Wolke zählt als vereist. Bleibt das Profil bis
+ * zum Gitterdeckel über 0 °C, gibt es keine Frostgrenze und damit auch keinen
+ * vereisten Turm -- dann NaN, die Hürde schlägt zu.
+ */
+function convectiveFreezingHeightAt(grid, i) {
+  const z = freezingHeightAt(grid, i);
+  if (Number.isFinite(z)) return z;
+  const { nk } = grid;
+  for (let k = 0; k < nk; k++) {
+    const T = grid.T[i * nk + k];
+    if (Number.isFinite(T)) return T - KELVIN < 0 ? 0 : NaN;
+  }
+  return NaN;
 }
 
 /** Umgebungstemperatur (°C) in Höhe `zM` (m AGL), linear zwischen Levels. */

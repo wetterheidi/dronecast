@@ -34,7 +34,18 @@
       "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --hide-scrollbars --window-size=900,620 --virtual-time-budget=4000 --screenshot=/private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/7f789b5a-e945-4778-96ad-f3144f11e20c/scratchpad/cb4.png http://localhost:5199/_cbpreview.html)",
       "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --hide-scrollbars --window-size=900,620 --virtual-time-budget=4000 --screenshot=/private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/7f789b5a-e945-4778-96ad-f3144f11e20c/scratchpad/cb5.png http://localhost:5199/_cbpreview.html)",
       "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --hide-scrollbars --window-size=920,420 --virtual-time-budget=3000 --screenshot=/private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/7f789b5a-e945-4778-96ad-f3144f11e20c/scratchpad/g1.png file:///Users/wetterheidi/Documents/Git/droneforecast/_glyphs.html)",
-      "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --hide-scrollbars --window-size=760,300 --virtual-time-budget=3000 --screenshot=/private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/7f789b5a-e945-4778-96ad-f3144f11e20c/scratchpad/g2.png file:///Users/wetterheidi/Documents/Git/droneforecast/_glyphs.html)"
+      "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --hide-scrollbars --window-size=760,300 --virtual-time-budget=3000 --screenshot=/private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/7f789b5a-e945-4778-96ad-f3144f11e20c/scratchpad/g2.png file:///Users/wetterheidi/Documents/Git/droneforecast/_glyphs.html)",
+      "Bash(node \"/private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/a121f424-da55-4a75-a3cb-f36ac738feec/scratchpad/tcu-ab.mjs\")",
+      "Bash(node \"/private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/a121f424-da55-4a75-a3cb-f36ac738feec/scratchpad/tcu-scan.mjs\")",
+      "Bash(node \"/private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/a121f424-da55-4a75-a3cb-f36ac738feec/scratchpad/cells-test.mjs\")",
+      "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --no-sandbox --hide-scrollbars --virtual-time-budget=25000 --window-size=1520,780 --screenshot=/private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/a121f424-da55-4a75-a3cb-f36ac738feec/scratchpad/gramet-new.png 'http://localhost:5199/__gramet-preview.html?lat=48.14&lon=11.58&model=icon_d2')",
+      "Bash(python3 -c \"import PIL; print\\('PIL ok'\\)\")",
+      "Bash(magick gramet-new.png -crop 400x180+300+15 -resize 300% zoom-new.png)",
+      "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --no-sandbox --hide-scrollbars --virtual-time-budget=25000 --window-size=1520,780 --screenshot=gramet-new.png 'http://localhost:5199/__gramet-preview.html?lat=48.14&lon=11.58&model=icon_d2')",
+      "Bash(magick gramet-new.png -crop 460x200+300+15 -resize 260% zoom-new.png)",
+      "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --no-sandbox --hide-scrollbars --virtual-time-budget=25000 --window-size=1520,780 --screenshot=gramet-old.png 'http://localhost:5199/__gramet-preview.html?lat=48.14&lon=11.58&model=icon_d2')",
+      "Bash(magick gramet-old.png -crop 460x200+300+15 -resize 260% zoom-old.png)",
+      "Bash(magick zoom-old.png zoom-new.png -append -bordercolor black -border 2 vergleich.png)"
     ]
   }
 }
