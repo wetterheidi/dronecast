@@ -19,7 +19,14 @@
       "Bash(node count-clouds.mjs)",
       "Bash(node test-cb.mjs)",
       "Bash(node debug-cb.mjs)",
-      "Bash(node debug-cb2.mjs)"
+      "Bash(node debug-cb2.mjs)",
+      "Bash(node /private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/dbe61e31-b3eb-460c-b469-4ee09cf74bb5/scratchpad/check-convection.mjs)",
+      "Bash(node /private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/dbe61e31-b3eb-460c-b469-4ee09cf74bb5/scratchpad/check-derive.mjs)",
+      "Bash(node /private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/dbe61e31-b3eb-460c-b469-4ee09cf74bb5/scratchpad/check-ta-sensitivity.mjs)",
+      "Bash(sed -i '' 's/ausgelöst=\\\\${r.triggered}/ausgelöst\\(±2K\\)=\\\\${r.tSfcC >= r.taC - 2}/' check-convection.mjs)",
+      "Bash(node check-convection.mjs)",
+      "Bash(sed -i '' 's/{ label: \"labil, nicht ausgelöst\", tSfcC: 25, lapse: 7, t2m: 28, td2m: 15, wcode: 0 }/{ label: \"labil, T2m 28 \\(knapp drunter\\)\", tSfcC: 25, lapse: 7, t2m: 28, td2m: 15, wcode: 0 },\\\\n  { label: \"labil, T2m 29 \\(Zuschlag greift\\)\", tSfcC: 25, lapse: 7, t2m: 29, td2m: 15, wcode: 0 }/' check-derive.mjs)",
+      "Bash(node check-derive.mjs)"
     ]
   }
 }

@@ -11,6 +11,7 @@ import { sunAltitude } from "../astro.js";
 import { metarWeather } from "../briefing.js";
 import * as icing from "./hazards/icing.js";
 import * as turbulence from "./hazards/turbulence.js";
+import * as convection from "./hazards/convection.js";
 
 const KELVIN = 273.15;
 const KT_PER_MS = 1.94384;
@@ -19,18 +20,38 @@ const ISOTHERM_MAX_JUMP_M = 1500; // m je Spaltenschritt, s. METHODIK/Plan
 const ISOTHERM_THRESHOLDS_C = [0, -20, -40];
 const ISOTACH_THRESHOLDS_KT = [50, 75, 100];
 
-// CB-Erkennung: HEURISTIK, kein Modell-Flag (Open-Meteo liefert keine direkte
-// Konvektions-/Cb-Kennung). Kombiniert Oberflächen-CAPE mit vergletschertem
-// Wolkenoberrand (T <= -20 °C bei CF >= CF_BKN) ODER einem kräftigen Updraft
-// irgendwo im Profil. Schwellwerte nicht kalibriert — grober erster Ansatz,
-// per Screenshot-Vergleich mit echten GRAMETs nachzuschärfen (s. M3-Hinweis
-// in render.js zur Wolkentextur-Kalibrierung).
+// Konvektions-Spalten (TCU/Cb): primär Parcel-Theorie aus `hazards/
+// convection.js` (CCL als Basis, Auslösetemperatur als Trigger, EL als
+// Obergrenze) plus `weather_code` als hartes Modellsignal -- TS => Cb,
+// SH/+SH => mindestens TCU. Die folgenden CAPE-/Updraft-Schwellen sind nur
+// noch Auffangpfad, falls beides nichts liefert (z. B. CCL nicht bestimmbar);
+// sie sind wie bisher NICHT kalibriert.
 const CB_CAPE_MIN_JKG = 300;
 const CB_UPDRAFT_MIN_MS = 3;
-// Ersatz-Oberrand, wenn weder ein vergletschertes Wolkenniveau noch überhaupt
-// eine Wolkenspur im Profil gefunden wird (z. B. Gewitter nur via weather_code
-// gemeldet) -- NICHT der Modelldeckel, s. PRECIP_FALLBACK_TOP_M.
+// Ersatz-Oberrand, wenn weder ein EL noch ein vergletschertes Wolkenniveau
+// noch überhaupt eine Wolkenspur im Profil gefunden wird (z. B. Gewitter nur
+// via weather_code gemeldet) -- NICHT der Modelldeckel, s. PRECIP_FALLBACK_TOP_M.
 const CB_FALLBACK_TOP_M = 6000;
+// Cb-Abgrenzung: der Oberrand muss vergletschert sein (Amboss besteht aus
+// Eis) UND nah genug an die Tropopause reichen, dass sich die Wolke dort
+// ausbreitet. Sonst bleibt es TCU (Cumulus congestus, keine Ambossandeutung).
+const CB_GLACIATION_C = -20;
+const CB_TROPOPAUSE_GAP_M = 1200;
+// Rein thermisch ausgelöste Konvektion (ohne SH/TS im weather_code) bekommt
+// erst ab dieser Mächtigkeit (EL - CCL) eine Spalte -- flache Schönwetter-
+// Cumulusfelder sind keine TCU. Nicht kalibriert.
+const TCU_MIN_DEPTH_M = 1500;
+// Zuschlag beim Vergleich T_2m gegen die Auslösetemperatur (`convection.js`
+// liefert TA roh). `t2m` ist ein Gitterzellen-MITTEL, Konvektion startet aber
+// aus den wärmsten Thermikblasen -- überadiabatische Bodenschicht, besonnte
+// Hänge und subskalige Heterogenität lassen sie 0,5-2 K wärmer aufsteigen als
+// das Zellmittel. Dazu kommt, dass TA selbst rund die Hälfte des
+// 2-m-Taupunktfehlers erbt (±1 K in Td -> ∓0,55 K in TA, gemessen). Alle
+// Effekte zeigen in dieselbe Richtung: ein striktes T_2m >= TA löst
+// systematisch zu spät aus, und bei trockener Konvektion (weather_code meldet
+// dann NSW, kein SH) ist dieser Pfad der einzige Weg zur Spalte. Nicht
+// kalibriert.
+const TRIGGER_EXCESS_K = 2;
 
 // Fällt keine Wolke im CF_FEW-Sinn im Profil auf (Niederschlag aber laut
 // weather_code/Menge gemeldet), Ersatz-Obergrenze für den Niederschlags-
@@ -59,7 +80,7 @@ export function deriveView(grid) {
     cloudFrac: d.cloudFrac,
     cloudBase,
     precip: precipEntries(grid, cloudBase),
-    cb: cbColumns(grid, d.cloudFrac, cloudBase),
+    cb: cbColumns(grid, d.cloudFrac, cloudBase, tropopauseLine),
     hazards: { icing: icing.computeGrid(grid), turbulence: turbulence.computeGrid(grid) },
   };
 }
@@ -366,16 +387,32 @@ function precipEntries(grid, cloudBase) {
 }
 
 /**
- * CB-Spalten (Cumulonimbus) — `weather_code` meldet Gewitter (TS-Kürzel)
- * direkt aus dem Modell, das ist das verlässlichste Signal. HEURISTISCHER
- * Ersatz, wenn kein TS-Code vorliegt: CAPE über Schwelle + vergletscherter
- * Wolkenoberrand (CF >= CF_BKN bei T <= -20 °C), oder ein kräftiger Updraft
- * irgendwo im Profil. Liefert pro Stunde entweder `null` oder `{ base, top }`
- * (m AGL) für den Cb-Schaft im Renderer. CAPE-/Updraft-Schwellen (nicht der
- * weather_code-Pfad) nicht kalibriert.
+ * Konvektions-Spalten (TCU/Cumulonimbus). Liefert pro Stunde `null` oder
+ * `{ base, top, kind }` mit `kind = "tcu" | "cb"` (m AGL) für Schaft und Glyph
+ * im Renderer.
+ *
+ * OB eine Spalte entsteht, entscheiden drei Wege:
+ *   1. `weather_code` — TS (Gewitter) oder SH/+SH (Schauer) sind direkte
+ *      Modellaussagen über konvektiven Charakter und damit das verlässlichste
+ *      Signal; sie gelten unabhängig davon, ob unsere Parcel-Rechnung auslöst.
+ *   2. Thermische Auslösung aus `hazards/convection.js` (T_2m >= TA) mit
+ *      hinreichender Mächtigkeit CCL->EL.
+ *   3. Auffangpfad mit den alten, unkalibrierten CAPE-/Updraft-Schwellen, wenn
+ *      1. und 2. nichts liefern (z. B. CCL nicht bestimmbar).
+ *
+ * WIE HOCH sie reicht: EL aus der Parcel-Rechnung, sonst (Fallback-Kette) der
+ * höchste vergletscherte Wolkenlevel, sonst irgendeine Wolkenspur, sonst
+ * `CB_FALLBACK_TOP_M` — bewusst nie der Modelldeckel (s. `precipEntries`).
+ * Basis: CCL, ersatzweise die allgemeine Wolkenbasis.
+ *
+ * TCU vs. Cb: Cb nur bei TS im weather_code oder wenn der Oberrand
+ * vergletschert (T <= CB_GLACIATION_C) UND tropopausennah ist — also dort, wo
+ * sich tatsächlich ein Amboss ausbreiten kann. +SH zählt bewusst NICHT als
+ * Cb-Signal: Schauerintensität allein belegt keinen vergletscherten Oberrand.
  */
-function cbColumns(grid, cloudFrac, cloudBase) {
+function cbColumns(grid, cloudFrac, cloudBase, tropopauseLine) {
   const { nk, times, surface } = grid;
+  const conv = convection.computeColumns(grid);
   const out = [];
   for (let i = 0; i < times.length; i++) {
     let maxAbsW = 0, deepTop = NaN;
@@ -383,24 +420,77 @@ function cbColumns(grid, cloudFrac, cloudBase) {
       const ix = i * nk + k;
       const w = grid.w[ix];
       if (Number.isFinite(w) && Math.abs(w) > maxAbsW) maxAbsW = Math.abs(w);
-      if (cloudFrac[ix] >= CF_BKN && (grid.T[ix] - KELVIN) <= -20) {
+      if (cloudFrac[ix] >= CF_BKN && (grid.T[ix] - KELVIN) <= CB_GLACIATION_C) {
         const z = grid.z[ix];
         if (!Number.isFinite(deepTop) || z > deepTop) deepTop = z;
       }
     }
     const label = Number.isFinite(surface?.wcode?.[i]) ? metarWeather(surface.wcode[i]) : "N/A";
     const wxThunder = label.includes("TS");
+    const wxShower = label.includes("SH");
     const cape = surface?.cape ? surface.cape[i] : NaN;
     const capeSignal = Number.isFinite(cape) && cape >= CB_CAPE_MIN_JKG && Number.isFinite(deepTop);
     const updraftSignal = maxAbsW >= CB_UPDRAFT_MIN_MS;
-    if (!wxThunder && !capeSignal && !updraftSignal) { out.push(null); continue; }
-    // Kein Modelldeckel als Fallback (derselbe Fehler wie beim Niederschlag,
-    // s. precipEntries) -- erst der höchste Level mit irgendeiner
-    // Wolkenspur, sonst ein plausibler mittlerer Cb-Oberrand.
+
+    const c = conv[i];
     const anyTop = anyCloudTopAt(grid, cloudFrac, i);
-    const top = Number.isFinite(deepTop) ? deepTop : Number.isFinite(anyTop) ? anyTop : CB_FALLBACK_TOP_M;
-    const base = Number.isFinite(cloudBase[i]) ? cloudBase[i] : 0;
-    out.push({ base, top });
+    const top = Number.isFinite(c?.elZ) ? c.elZ
+      : Number.isFinite(deepTop) ? deepTop
+        : Number.isFinite(anyTop) ? anyTop : CB_FALLBACK_TOP_M;
+    // Basis muss unter dem Oberrand liegen -- bei hochbasiger Konvektion ohne
+    // EL kann der Fallback-Oberrand sonst unter dem CCL landen und der Schaft
+    // würde invertiert gezeichnet. Dann lieber die allgemeine Wolkenbasis.
+    const base = [c?.cclZ, cloudBase[i], 0].find((b) => Number.isFinite(b) && b < top) ?? 0;
+    // Thermische Auslösung: T_2m erreicht die Auslösetemperatur (mit Zuschlag,
+    // s. TRIGGER_EXCESS_K). Zusätzlich Mächtigkeit gefordert -- ein flaches
+    // Cu-Feld ist noch keine TCU. Mit SH/TS im weather_code entfällt beides.
+    const triggered = Number.isFinite(c?.taC) && c.tSfcC >= c.taC - TRIGGER_EXCESS_K;
+    const thermalSignal = triggered && top - base >= TCU_MIN_DEPTH_M;
+
+    if (!wxThunder && !wxShower && !thermalSignal && !capeSignal && !updraftSignal) {
+      out.push(null); continue;
+    }
+
+    const topTC = tempAtHeight(grid, i, top);
+    const glaciated = Number.isFinite(topTC) && topTC <= CB_GLACIATION_C;
+    const tropZ = tropAt(tropopauseLine, times[i]);
+    const nearTropopause = Number.isFinite(tropZ) && tropZ - top < CB_TROPOPAUSE_GAP_M;
+    const kind = wxThunder || (glaciated && nearTropopause) ? "cb" : "tcu";
+    out.push({ base, top, kind });
   }
   return out;
+}
+
+/** Umgebungstemperatur (°C) in Höhe `zM` (m AGL), linear zwischen Levels. */
+function tempAtHeight(grid, i, zM) {
+  const { nk } = grid;
+  let prevZ = NaN, prevT = NaN;
+  for (let k = 0; k < nk; k++) {
+    const ix = i * nk + k, z = grid.z[ix], T = grid.T[ix];
+    if (!Number.isFinite(z) || !Number.isFinite(T)) continue;
+    if (z >= zM) {
+      if (!Number.isFinite(prevZ)) return T - KELVIN;
+      const f = (zM - prevZ) / (z - prevZ);
+      return prevT + f * (T - prevT) - KELVIN;
+    }
+    prevZ = z; prevT = T;
+  }
+  return Number.isFinite(prevT) ? prevT - KELVIN : NaN; // oberhalb des Gitters
+}
+
+/** Tropopausenhöhe zur Zeit `t` aus der (ggf. lückenhaften) Polylinie;
+ *  NaN außerhalb des erfassten Bereichs. Spiegelt `tropAt()` in render.js —
+ *  dort für die Amboss-Platzierung, hier für die TCU/Cb-Abgrenzung. */
+function tropAt(line, t) {
+  if (!line || line.length < 2) return NaN;
+  if (t <= line[0].t) return line[0].t === t ? line[0].z : NaN;
+  for (let i = 1; i < line.length; i++) {
+    if (line[i].t >= t) {
+      const a = line[i - 1], b = line[i];
+      if (t - a.t > 2 * (b.t - a.t || 1)) return NaN; // Lücke in der Linie
+      const f = (t - a.t) / (b.t - a.t);
+      return a.z + f * (b.z - a.z);
+    }
+  }
+  return NaN;
 }

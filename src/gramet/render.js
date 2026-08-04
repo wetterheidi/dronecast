@@ -281,11 +281,14 @@ function drawHazardArea(ctx, grid, hazardArr, styles, x, y) {
   }
 }
 
-// --- Cumulonimbus (Cb) — HEURISTIK aus derive.js, s. dort ---------------------
+// --- Konvektion (TCU/Cb) — Klassifikation in derive.js, s. dort --------------
 
 // Schaft: `drawCbShafts` (texture.js), vor den Wolken gezeichnet, damit die
 // weißen Wolkenellipsen darüberliegen (wie im Referenz-GRAMET).
 // Glyph + Amboss-Andeutung: nach den Wolken gezeichnet (liegt darüber).
+// `kind` kommt aus derive.js: "cb" bekommt Gewitter-Glyph und (bei
+// Tropopausennähe) die Amboss-Andeutung, "tcu" nur den Quellwolken-Turm --
+// per Definition ohne Amboss und ohne Blitz.
 function drawCbGlyphs(ctx, cb, tropopause, times, x, y) {
   const dt = times.length > 1 ? times[1] - times[0] : 3600;
   for (let i = 0; i < times.length; i++) {
@@ -293,8 +296,10 @@ function drawCbGlyphs(ctx, cb, tropopause, times, x, y) {
     if (!c) continue;
     const cx = x(times[i]), cellW = x(times[i] + dt / 2) - x(times[i] - dt / 2);
     const yTop = y(c.top), yBot = y(Math.max(0, c.base));
-    drawCbGlyph(ctx, cx, yTop + (yBot - yTop) * 0.45, Math.min(18, cellW * 0.8));
+    const cy = yTop + (yBot - yTop) * 0.45, size = Math.min(18, cellW * 0.8);
+    if (c.kind === "tcu") { drawTcuGlyph(ctx, cx, cy, size); continue; }
 
+    drawCbGlyph(ctx, cx, cy, size);
     // Reicht der Cb-Oberrand nahe an die Tropopause heran (< 1200 m
     // Abstand), Amboss-Andeutung wie im Original (gelb gestrichelte Fläche).
     const tropZ = tropAt(tropopause, times[i]);
@@ -302,6 +307,23 @@ function drawCbGlyphs(ctx, cb, tropopause, times, x, y) {
       drawAnvilHint(ctx, cx, y(Math.min(c.top, tropZ)), Math.max(20, cellW));
     }
   }
+}
+
+// TCU (Cumulus congestus): zwei Quellballen über flacher Basis — bewusst ohne
+// Amboss-Trapez und ohne Blitz, das ist der Unterschied zum Cb-Glyph.
+function drawTcuGlyph(ctx, cx, cy, size) {
+  ctx.save();
+  ctx.fillStyle = CB_GLYPH_COLOR;
+  const w = size * 0.5, h = size * 0.55, yShoulder = cy + h * 0.1;
+  ctx.beginPath();
+  ctx.moveTo(cx - w, cy + h);
+  ctx.lineTo(cx - w, yShoulder);
+  ctx.arc(cx - w * 0.5, yShoulder, w * 0.5, Math.PI, 0);
+  ctx.arc(cx + w * 0.5, yShoulder, w * 0.5, Math.PI, 0);
+  ctx.lineTo(cx + w, cy + h);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
 }
 
 function drawCbGlyph(ctx, cx, cy, size) {
