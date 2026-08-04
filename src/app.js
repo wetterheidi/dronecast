@@ -906,9 +906,14 @@ function turbulenceBandMaxAt(grid, i, hMinM, hMaxM) {
   const { nk } = grid;
   const layers = [];
   for (let k = 0; k < nm; k++) {
-    const z0 = grid.z[i * nk + k], z1 = grid.z[i * nk + k + 1];
+    const ix0 = i * nk + k, ix1 = i * nk + k + 1;
+    const z0 = grid.z[ix0], z1 = grid.z[ix1];
     if (!Number.isFinite(z0) || !Number.isFinite(z1)) continue;
-    layers.push({ h: (z0 + z1) / 2, tfi: tfiAt(ri[i * nm + k], shear2[i * nm + k]) });
+    // Windstärke-Gate braucht die mittlere Windgeschwindigkeit der Schicht
+    // (komponentenweise gemittelt, Betrag danach, wie `layerWindSpeed` in
+    // hazards/turbulence.js).
+    const windSpeed = Math.hypot((grid.u[ix0] + grid.u[ix1]) / 2, (grid.v[ix0] + grid.v[ix1]) / 2);
+    layers.push({ h: (z0 + z1) / 2, tfi: tfiAt(ri[i * nm + k], shear2[i * nm + k], windSpeed) });
   }
   if (!layers.length) return { tfi: NaN, bandBottomM: null, bandTopM: null };
 

@@ -56,7 +56,8 @@
       "Bash(node drive.js)",
       "Bash(convert gramet_partial.png -crop 700x300+0+90 -resize 200% crop_partial.png)",
       "Bash(convert gramet_all_on.png -crop 700x300+0+90 -resize 200% crop_all.png)",
-      "Bash(magick gramet_all_on.png -crop 700x300+0+90 -resize 200% crop_all2.png)"
+      "Bash(magick gramet_all_on.png -crop 700x300+0+90 -resize 200% crop_all2.png)",
+      "Bash(node --check src/gramet/hazards/turbulence.js)"
     ]
   }
 }

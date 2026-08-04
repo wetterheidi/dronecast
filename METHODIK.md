@@ -519,6 +519,28 @@ Intensität. `gonogotable.js` rendert `subtext` generisch als kleinere zweite
 Zeile unter dem Hauptwert (`.gng-subtext`, `css/style.css`) — bislang nur von
 der Vereisungszeile genutzt.
 
+### 6.8 Turbulenz-Zeile (`turbulenceRow()`, analog 6.7)
+
+„Turbulenz (10 m–Flughöhe)" wertet dieselbe Physik wie das GRAMET
+(`hazards/turbulence.js` `tfiAt`, s. 7.6) auf ein Bandmaximum zwischen 10 m
+und `opHeightM` aus, Aufbau der Zelle (Kategorie-Label + Ampel + Höhenband
+als `subtext`) identisch zu 6.7. **Ein Unterschied zur Vereisungs- (und
+Wind-)Reduktion:** `turbulenceBandMaxAt()` in `app.js` resampelt NICHT auf
+Stützhöhen (`bandHeights()`, alle ~50 m), sondern iteriert direkt über die
+echten Modellschichten, deren Mittelpunkt im Band liegt — Ri/Scherung sind
+selbst schon Differenzenquotienten über die jeweilige Schichtdicke zwischen
+zwei Modell-Leveln (7.1); ein Resampling würde nur künstliche, nicht durch
+Daten gestützte Zwischenwerte zwischen den eigentlichen Messpunkten erzeugen.
+Bei sehr niedriger Flughöhe (gröbere Levelauflösung am unteren Rand als das
+Band breit ist, keine Schicht-Mittelhöhe fällt hinein) Fallback auf die dem
+Bandzentrum nächstgelegene Schicht — sonst bliebe die Zeile ausgerechnet bei
+niedrigen `maxHeight`-Einstellungen leer, dem für Drohnen häufigsten Fall.
+
+**Warum keine eigene Böen-Zeile dupliziert wird:** Böen liegen nur am Boden
+vor (1) und werden bewusst nicht auf Flughöhe hochgerechnet — die Turbulenz-
+Zeile deckt exakt die Lücke darüber ab (dynamische/thermische Instabilität
+im Flugband), keine der beiden Zeilen wiederholt die andere.
+
 ---
 
 ## 7. GRAMET (Cross-Section entlang der Route)
@@ -541,8 +563,11 @@ Windbetrag `wspd` und `cloudFrac` (über dieselbe dreistufige
 `clouds.js`-Heuristik wie Abschnitt 4.1) sowie — auf gestaffelten
 Zwischenniveaus — Scherung `shear2 = (du/dz)² + (dv/dz)²`,
 Brunt-Väisälä-Frequenz `N² = (g/θ)·dθ/dz` und Richardson-Zahl `Ri = N²/shear2`.
-Diese drei sind bereits berechnet und gecacht, werden aber **noch von
-niemandem konsumiert** — Vorarbeit für das Turbulenzmodul (7.6).
+Diese drei sind Eingangsgrößen des Turbulenzmoduls (7.7): `ri`/`shear2`
+liegen NUR auf diesen Zwischenniveaus vor (`nm = nk-1` Werte je Zeitspalte,
+nicht auf den `nk` Original-Leveln) — jeder Verbraucher, der eine
+Level-indizierte Größe braucht (z. B. die GRAMET-Kontur), muss die beiden
+angrenzenden Schichtwerte selbst auf ein Level zurückführen, s. 7.6.
 
 ### 7.2 Isolinien & Tropopause
 [src/gramet/derive.js](src/gramet/derive.js).
@@ -687,12 +712,8 @@ CCL, sonst die allgemeine Wolkenbasis (7.3), sonst 0 — mit der Nebenbedingung
 `Basis < Oberrand` (sonst würde bei hochbasiger Konvektion ohne EL ein
 Fallback-Oberrand unter dem CCL liegen und der Schaft invertiert gezeichnet).
 
-### 7.6 Vereisung (Icing-Potential-Index) & Turbulenz
-[src/gramet/hazards/icing.js](src/gramet/hazards/icing.js) ist implementiert,
-[turbulence.js](src/gramet/hazards/turbulence.js) bleibt ein reiner **Stub**
-(liefert konstant `"none"`; `shear2`/`N²`/Richardson-Zahl liegen bereit, s.
-7.1, aber es findet noch keine Bewertung statt — die Turbulenz-Zeile im
-GRAMET zeigt also „ohne Befund", nicht „geprüft und unauffällig").
+### 7.6 Vereisung (Icing-Potential-Index)
+[src/gramet/hazards/icing.js](src/gramet/hazards/icing.js).
 
 **Architektur, bewusst physik-/UI-getrennt:** die Vereisungsdiagnose soll
 sowohl das GRAMET-Meteogramm als auch später die Go/No-Go-Tabelle bedienen —
@@ -749,6 +770,99 @@ NCAR-CIP-Ansatz) — `w` liegt über `grid.w` bereit, aber bewusst nicht in V1;
 echte Kalibrierung aller Schwellen (T-Fenster wie IPI-Kategorien) mit realen
 Vereisungsfällen.
 
+### 7.7 Turbulenz (Turbulence-Flag-Index)
+[src/gramet/hazards/turbulence.js](src/gramet/hazards/turbulence.js).
+
+**Bewusste Abgrenzung zur Böen-Zeile/zum Böen-Overlay:** Böen liegen nur am
+Boden vor (1) und werden nicht auf Flughöhe hochgerechnet. Der TFI deckt
+gezielt die Lücke DARÜBER ab — dynamische und thermische Instabilität im
+Flugband zwischen 10 m und Betriebshöhe. Keine der beiden Größen dupliziert
+die andere.
+
+**Turbulence-Flag-Index, Rohwert `raw = g(Ri) · s(|dV/dz|)`**, pro
+Modellschicht (Ri/Scherung liegen nur auf den gestaffelten Zwischenniveaus
+vor, s. 7.1):
+- **g(Ri)** — Miles-Howard-Kriterium für Kelvin-Helmholtz-Instabilität: `1`
+  für `Ri ≤ 0,25` (inklusive `Ri < 0`, also labiler/überadiabatischer
+  Schichtung, z. B. bodennaher Tagesthermik — ein Index deckt damit
+  mechanische UND thermische Turbulenz ab, ohne zwei getrennte Diagnosen);
+  linear `1 → 0` zwischen `0,25` und `1,0`; `0` darüber (Turbulenz gilt als
+  zunehmend unwahrscheinlich).
+- **s(|dV/dz|)** — Scher-Gate: `0` unterhalb `0,02 s⁻¹` (≈ 2 m/s je 100 m),
+  linear auf `1` ab `0,05 s⁻¹`. Nötig, weil Ri als Verhältnis bei Scherung
+  nahe 0 numerisch instabil wird (`grid.js` `derive()` setzt `ri = NaN`
+  bereits bei `shear2 ≤ 1e-8` als reinen Divisionsschutz, s. 7.1) — ohne
+  dieses Gate würde eine völlig ruhige, schwach stabile Schicht fälschlich
+  als Turbulenz erkannt. Das Gate wird deshalb VOR `g(Ri)` ausgewertet: bei
+  `s = 0` wird sofort `0` zurückgegeben, statt `g(NaN) · 0 = NaN` zu bilden.
+
+**Windstärke-Gate `w(V)` — TFI = `raw`, falls `raw ≤ TFI_MODERATE (0,30)`,
+sonst `TFI_MODERATE + (raw − TFI_MODERATE) · w(V)`.** Ergänzt nach einem
+Praxis-Check (2026-08-04): `g`/`s` sind reine Onset-Kriterien (sagen nur,
+DASS sich Kelvin-Helmholtz-Wellen bilden können) und sättigen beide schnell
+auf `1` — ohne Korrektur war „severe" schon bei knapp erfülltem Ri- UND
+Scher-Kriterium erreichbar, unabhängig von der absoluten Windgeschwindigkeit
+(beobachtet: bodennahe „severe"-Flächen bei durchweg ≤ 10 kt Wind). `w(V)`
+(`V` = mittlere Windgeschwindigkeit der Schicht, komponentenweise aus u/v
+gemittelt, Betrag danach) ist `0` unterhalb `5 m/s` (≈ 10 kt), linear auf `1`
+ab `10 m/s` (≈ 19 kt) — **erste Schätzung, ausdrücklich zur Nachjustierung
+vorgesehen.** Bewusst NICHT als weiterer multiplikativer Faktor auf den
+GESAMTEN Index (das würde auch „light"/„moderate" bei jeder Kalmenlage
+unterdrücken), sondern nur auf den Anteil oberhalb der „moderate"-Schwelle:
+bei Windstille bleibt „moderate" weiterhin erreichbar, nur „severe" braucht
+zusätzlich spürbaren Wind.
+
+**Kategorisierung:** `tfiCategory()` bildet den TFI (0…1) auf
+`none/light/moderate/severe` ab, Schwellen `0,15/0,30/0,60` — **nicht
+kalibriert**, exakt nach demselben Muster wie die IPI-Schwellen (7.6)
+gemeinsam für GRAMET-Kontur und Go/No-Go-Ampel definiert.
+
+**Rendering (GRAMET):** anders als bei Vereisung (Punktgrößen T/cloudFrac an
+jedem Level direkt bekannt) liegen Ri/Scherung nur AUF DEN SCHICHTEN
+zwischen zwei Modell-Leveln vor. `computeGrid()` gibt daher jedem Level das
+Maximum der beiden angrenzenden Schichten (unten/oben; Rand-Level haben nur
+eine) — reine Zuordnungsregel, keine Interpolation zwischen Schichten.
+Kontur-Fläche wie bei Vereisung (`drawHazardArea()`, 7.6-Muster), Symbol
+(ICAO-SIGWX „mäßige Turbulenz", Dachform) nur auf der stärksten Kategorie
+(`severe`), analog zum Vereisungssymbol nur auf `severe`-Flächen.
+
+**Go/No-Go-Bandmaximum:** implementiert, s. 6.8.
+
+**Bekannte Grenzen der Diagnose (wichtig für die Interpretation):**
+- **Feuchtlabilität/Konvektion wird NICHT erkannt.** `Ri` basiert auf der
+  TROCKENEN potenziellen Temperatur `θ` (7.1). In und um hochreichende
+  Konvektion (Cb/TCU, 7.5) ist das grobaufgelöste Modell-Mittelprofil
+  außerhalb der eigentlichen Aufwindkerne meist neutral bis leicht stabil
+  geschichtet (`dθ/dz ≥ 0`), obwohl daneben erhebliche konvektive Böigkeit
+  herrscht — bedingte (feuchte) Instabilität ist physikalisch ein anderer
+  Mechanismus als die hier diagnostizierte Kelvin-Helmholtz-Scherinstabilität
+  und zeigt sich im trockenen `θ`-Gradienten nicht. Die TFI-Fläche bleibt
+  deshalb in und um Schauer-/Gewitterzellen typischerweise leer — das ist
+  **kein Befund für „unauffällig"**, sondern eine Diagnoselücke; die
+  Cb/TCU-Symbole selbst tragen die Turbulenzwarnung für diesen Fall bereits
+  implizit (ein Cb bedeutet für jeden Piloten erwartete Turbulenz, ohne dass
+  der TFI das zusätzlich markieren müsste).
+- **Bodennahe, nächtliche Flächen sind meist ein Low-Level-Jet-Effekt, kein
+  Artefakt.** Tagsüber durchmischt die konvektive Grenzschicht den Impuls
+  (Wind wird mit der Höhe homogenisiert, wenig lokale Scherung knapp über
+  Grund). Nachts entkoppelt die stabile Grenzschicht die Bodenreibung vom
+  freien Wind darüber; genau dort kann sich Scherung konzentrieren, bis `Ri`
+  trotz starker Stabilität die kritische Schwelle unterschreitet. Häufungen
+  im Band 30–300 m in den Nachtstunden (erkennbar am Tag/Nacht-Verlauf des
+  Hintergrunds, s. 7.3) sind damit meteorologisch plausibel und decken exakt
+  die Lücke ab, für die die Zeile gedacht ist (Höhen, in denen es keine
+  Böen-Beobachtung gibt, aber Drohnen typischerweise fliegen).
+- **Onset-Kriterium ≠ Intensität — inzwischen über `w(V)` teilkompensiert,
+  nicht gelöst.** Physikalisch ist das Miles-Howard-Kriterium korrekt als
+  Instabilitäts-ONSET (wann können sich Kelvin-Helmholtz-Wellen bilden),
+  sagt aber nichts über die resultierende Turbulenzintensität (EDR) aus.
+  Das Windstärke-Gate (oben) verhindert nur, dass „severe" bei insgesamt
+  schwachem Wind vergeben wird — es skaliert NICHT die tatsächliche
+  Intensität, und die Gate-Schwellen (5/10 m/s) selbst sind eine erste
+  Schätzung ohne Referenzfälle. Operative Turbulenz-Indizes (z. B. Ellrod
+  TI, GTG) verwenden zusätzlich Deformation und weitere Terme; hier bislang
+  nicht nachgebildet.
+
 ---
 
 ## Bekannte Näherungen — Kurzübersicht
@@ -768,8 +882,8 @@ vereinfachende Annahme steckt:
 | Böen (1) | nur am Boden, keine Hochrechnung auf Flughöhe |
 | Go/No-Go-Schwellenwerte | Platzhalterprofil, keine geprüften Herstellerwerte |
 | Vereisungs-Bandmaximum (6.7) | Stützstellen-Sampling wie Wind-Bandmaximum, kein exaktes Profilmaximum; feste statt drohnenspezifischer Schwelle |
-| Turbulenz | in der Go/No-Go-Tabelle noch nicht abgebildet, GRAMET-Stub (7.6) |
+| Turbulenz-Bandmaximum (6.8) | echte Modellschichten statt Stützstellen-Sampling (bewusst, s. 6.8), aber grobe Levelauflösung am unteren Rand kann bei sehr niedriger Flughöhe nur eine Schicht treffen |
 | GRAMET Konvektionsschwellen (7.5) | `TRIGGER_EXCESS_K`, Towering-Hürde, CAPE-/Updraft-Auffangpfad — sämtlich unkalibriert |
 | GRAMET Niederschlags-Fallback-Obergrenze (7.4) | 2000 m, grobe Annahme für flachen Niesel-/Sprühregen ohne erkannte Wolkenspur |
 | GRAMET Vereisung (7.6) | `f_T`-Fenster und IPI-Kategorie-Schwellen (0,15/0,30/0,45) unkalibriert; `cloudFrac` statt eigener LWC-Größe |
-| GRAMET Turbulenz (7.6) | Stub, liefert konstant "none" — Eingangsgrößen (`shear2`/`N²`/Ri, s. 7.1) bereit, Algorithmus fehlt |
+| GRAMET Turbulenz (7.7) | `Ri`/Scher-Gate-Schwellen (0,25/1,0 bzw. 0,02/0,05 s⁻¹), Windstärke-Gate (5/10 m/s) und TFI-Kategorie-Schwellen (0,15/0,30/0,60) unkalibriert; sieht KEINE feuchte/konvektive Instabilität (nur trockenes `θ`); Onset-Kriterium weiterhin ohne echte Intensitätsskalierung, s. 7.7 |

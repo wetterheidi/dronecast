@@ -29,6 +29,27 @@
  *
  * Schwellen (Ri-Fenster wie TFI-Kategorien) NICHT kalibriert -- Platzhalter
  * wie an anderer Stelle im Modul, s. METHODIK.md.
+ *
+ * Bekannte Grenzen (METHODIK.md 7.7): der TFI sieht keine feuchte/konvektive
+ * Instabilität (nur trockenes theta -- Cb/TCU-Türme bleiben deshalb i. d. R.
+ * ohne Kontur, das ist eine Diagnoselücke, kein "unauffällig").
+ *
+ * w(V): Windstärke-Gate (Ergänzung nach Praxis-Check, 2026-08-04 im Gespräch
+ * aufgefallen -- s. IDEEN.md "Turbulenz als eigene Zeile"). `g(Ri)` und
+ * `s(|dV/dz|)` sind beides reine Onset-Kriterien (sagen NUR, dass sich
+ * Kelvin-Helmholtz-Wellen bilden KÖNNEN, nichts über die resultierende
+ * Intensität) und sättigen beide schnell auf 1 -- ohne Korrektur wäre
+ * "severe" schon bei knapp erfülltem Ri- UND Scher-Kriterium erreichbar,
+ * unabhängig von der absoluten Windgeschwindigkeit (beobachtet: bodennahe
+ * "severe"-Flächen bei durchweg <= 10 kt Wind, meteorologisch als reines
+ * Scherungssignal plausibel, aber als Kategorie "stark" zu alarmierend). `w`
+ * wirkt deshalb NICHT als weiterer multiplikativer Faktor auf den ganzen
+ * Index (das würde auch "light"/"moderate" bei jedem Kalmenfall unter den
+ * Tisch fallen lassen), sondern kappt nur den Anteil OBERHALB der
+ * "moderate"-Schwelle: 0 unterhalb 5 m/s (≈ 10 kt), linear auf 1 ab 10 m/s
+ * (≈ 19 kt). Bei Windstille bleibt "moderate" also weiterhin erreichbar,
+ * "severe" braucht zusätzlich spürbaren Wind. Schwellen selbst ein erster
+ * Ansatz, ausdrücklich zur Nachjustierung vorgesehen.
  */
 
 const RI_CRIT = 0.25;   // Miles-Howard-Schwelle -- g(Ri) = 1 bis hierhin (inkl. Ri < 0)
@@ -36,6 +57,9 @@ const RI_MAX = 1.0;     // ab hier g(Ri) = 0
 
 const SHEAR_GATE_LO = 0.02; // s^-1 -- s() = 0 unterhalb
 const SHEAR_GATE_HI = 0.05; // s^-1 -- s() = 1 ab hier
+
+const WIND_GATE_LO = 5;  // m/s (≈ 10 kt) -- w() = 0 unterhalb
+const WIND_GATE_HI = 10; // m/s (≈ 19 kt) -- w() = 1 ab hier
 
 // Gemeinsame Kategorie-Schwellen für alle Verbraucher (GRAMET, Go/No-Go).
 // "light" ist ein weicherer Karten-Onset (analog Vereisung), kollabiert in
@@ -58,16 +82,29 @@ function gRi(ri) {
   return (RI_MAX - ri) / (RI_MAX - RI_CRIT);
 }
 
+function wWind(windSpeed) {
+  if (!Number.isFinite(windSpeed)) return 0;
+  if (windSpeed <= WIND_GATE_LO) return 0;
+  if (windSpeed >= WIND_GATE_HI) return 1;
+  return (windSpeed - WIND_GATE_LO) / (WIND_GATE_HI - WIND_GATE_LO);
+}
+
 /**
- * Turbulence-Flag-Index (0..1) einer Schicht -- reine Funktion von Ri und
- * Scherquadrat (beide aus `grid.js` `derive()`), unabhängig von Grid/
- * Zeitachse/Rendering. Scher-Gate zuerst (s. Modulkopf) -- vermeidet
- * `NaN * 0` bei der Ri-Divisionsschutz-NaN.
+ * Turbulence-Flag-Index (0..1) einer Schicht -- reine Funktion von Ri,
+ * Scherquadrat (beide aus `grid.js` `derive()`) und mittlerer Windgeschwin-
+ * digkeit der Schicht (m/s, komponentenweise aus u/v der beiden Rand-Level
+ * gemittelt, s. Aufrufer), unabhängig von Grid/Zeitachse/Rendering.
+ * Scher-Gate zuerst (s. Modulkopf) -- vermeidet `NaN * 0` bei der
+ * Ri-Divisionsschutz-NaN. Windstärke-Gate NUR auf den Anteil oberhalb
+ * `TFI_MODERATE` angewandt (s. Modulkopf) -- "moderate" bleibt bei
+ * Windstille erreichbar, nur "severe" braucht zusätzlich spürbaren Wind.
  */
-export function tfiAt(ri, shear2) {
+export function tfiAt(ri, shear2, windSpeed) {
   const s = sShear(shear2);
   if (s === 0) return 0;
-  return gRi(ri) * s;
+  const raw = gRi(ri) * s;
+  if (raw <= TFI_MODERATE) return raw;
+  return TFI_MODERATE + (raw - TFI_MODERATE) * wWind(windSpeed);
 }
 
 /** TFI (0..1) -> Kategorie, gemeinsame Schwellen für alle Verbraucher. */
@@ -104,6 +141,14 @@ export function tfiStatus(tfi) {
   return "red";
 }
 
+// Mittlere Windgeschwindigkeit einer Schicht (Level k/k+1): komponentenweise
+// gemittelt, Betrag erst danach gebildet (wie `windfield.js`, METHODIK.md
+// Abschnitt 1), nicht die beiden Level-Beträge gemittelt.
+function layerWindSpeed(grid, i, k) {
+  const ix0 = i * grid.nk + k, ix1 = ix0 + 1;
+  return Math.hypot((grid.u[ix0] + grid.u[ix1]) / 2, (grid.v[ix0] + grid.v[ix1]) / 2);
+}
+
 /**
  * Pro Gitterzelle (nt*nk) die Hazard-Kategorie für die GRAMET-Kontur. Anders
  * als bei Vereisung (`icing.js` `computeGrid`, Punktgrößen T/cloudFrac an
@@ -112,7 +157,9 @@ export function tfiStatus(tfi) {
  * `derive()`). Ein Level erbt daher das Maximum der beiden angrenzenden
  * Schichten (unten/oben) -- Rand-Level (k=0 bzw. k=nk-1) haben nur eine
  * angrenzende Schicht. `ri`/`shear2` kommen als bereits abgeleitete Arrays
- * herein (wie `cloudFrac` bei icing.js) statt hier erneut berechnet zu werden.
+ * herein (wie `cloudFrac` bei icing.js) statt hier erneut berechnet zu werden;
+ * die Windgeschwindigkeit fürs Windstärke-Gate (s. Modulkopf) wird dagegen
+ * direkt aus `grid.u`/`grid.v` gebildet, da sie nur hier gebraucht wird.
  */
 export function computeGrid(grid, ri, shear2, nm) {
   const { nk, times } = grid, nt = times.length;
@@ -120,8 +167,12 @@ export function computeGrid(grid, ri, shear2, nm) {
   for (let i = 0; i < nt; i++) {
     for (let k = 0; k < nk; k++) {
       let tfi = -1; // Sentinel: keine angrenzende Schicht -> "none"
-      if (k > 0) tfi = Math.max(tfi, tfiAt(ri[i * nm + k - 1], shear2[i * nm + k - 1]));
-      if (k < nm) tfi = Math.max(tfi, tfiAt(ri[i * nm + k], shear2[i * nm + k]));
+      if (k > 0) {
+        tfi = Math.max(tfi, tfiAt(ri[i * nm + k - 1], shear2[i * nm + k - 1], layerWindSpeed(grid, i, k - 1)));
+      }
+      if (k < nm) {
+        tfi = Math.max(tfi, tfiAt(ri[i * nm + k], shear2[i * nm + k], layerWindSpeed(grid, i, k)));
+      }
       out[i * nk + k] = tfiCategory(tfi < 0 ? NaN : tfi);
     }
   }

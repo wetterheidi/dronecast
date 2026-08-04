@@ -51,24 +51,32 @@ BKN 5–7 · OVC 8.
 
 ## Gefahrenbereiche in der Cross-Section visualisieren
 
-**Status:** vorgemerkt · **Vehikel:** Wind-/Temperatur-Cross-Section (die
-vertikale Struktur macht diese Gefahren überhaupt erst sichtbar).
+**Status:** Vereisung + Turbulenz **gebaut** — allerdings nicht in der
+Wind-/Temperatur-Cross-Section wie hier ursprünglich skizziert, sondern im
+GRAMET-Meteogramm ([src/gramet/](src/gramet/), Konturflächen +
+WMO-nahe Symbole, s. METHODIK.md 7.6/7.7). Reine Windscherung (ohne
+Richtungsscherung, als eigenständige Zone unabhängig von Ri) ist weiterhin
+offen.
 
-Idee: kritische Zonen als Overlay (schraffiert/umrandet) über die
-Cross-Section legen, aus den vorhandenen Modell-Level-Daten diagnostiziert:
+Ursprüngliche Idee: kritische Zonen als Overlay (schraffiert/umrandet) über
+die Cross-Section legen, aus den vorhandenen Modell-Level-Daten
+diagnostiziert:
 
 - **Vereisung:** Zonen mit `0 °C … −15 °C` **und** hoher Feuchte / in Wolke
   (RH ≥ ~90 %). Klassisches Struktureis-Fenster. (Vgl. „atmospheric ice
-  growth" im Beispiel-Screenshot.)
+  growth" im Beispiel-Screenshot.) → gebaut als Icing-Potential-Index,
+  METHODIK.md 7.6.
 - **Windscherung:** Betrag des vertikalen Windgradienten `|dV/dz|` zwischen
   benachbarten Leveln; v. a. bodennah (Low-Level-Windshear) drohnenrelevant.
-  Auch Richtungsscherung (Drehung mit der Höhe) erfassen.
+  Auch Richtungsscherung (Drehung mit der Höhe) erfassen. → **weiterhin
+  offen** als eigene Cross-Section-Größe; der Scherungsbetrag steckt zwar im
+  Turbulenz-Index (unten), aber nur als Gate, nicht als eigene sichtbare
+  Größe, und Richtungsscherung fließt gar nicht ein.
 - **Turbulenz:** Proxy aus Scherung + statischer Stabilität (Richardson-Zahl
   `Ri = (g/θ)(dθ/dz) / (dV/dz)²`; kleine Ri → turbulent), alternativ
-  einfacher Scherungs-/Böigkeits-Proxy.
-
-Alle drei Größen sind aus `u/v`, `T`, `RH`, `height_agl` je Level ableitbar —
-keine neuen Datenquellen nötig. Als Farbstufen oder Konturen im Panel.
+  einfacher Scherungs-/Böigkeits-Proxy. → gebaut als Turbulence-Flag-Index
+  (TFI), METHODIK.md 7.7 — inkl. bekannter Grenzen (kein Befund bei
+  Feuchtlabilität/Konvektion, Onset- statt Intensitätskriterium, s. dort).
 
 ## Weather Briefing: Ausbau
 
@@ -99,14 +107,30 @@ Button „Tabelle (Go/No-Go)") · **Motivation:** bewusst zurückgestellte
 Parameter/Ausbauten aus der Erstumsetzung, siehe Planungsgespräch.
 
 ### Vereisung als eigene Zeile
-T/RH-Band `0 °C … −15 °C` mit hoher Feuchte (RH ≥ ~90 %) aus den Modell-
-Leveln — siehe „Gefahrenbereiche in der Cross-Section" oben. In V1 bewusst
-ausgelassen, da die Schwellenkalibrierung ohne Referenzfälle unsicher ist.
+**Gebaut**, s. METHODIK.md 6.7 (`icingRow()`) — Bandmaximum des Icing-
+Potential-Index zwischen 10 m und Flughöhe, mit Höhenband als Subtext.
+Schwellenkalibrierung weiterhin offen (nie geprüfte Referenzfälle, s.
+„Bekannte Näherungen" in METHODIK.md).
 
 ### Turbulenz als eigene Zeile
-Scherungs-/Richardson-Zahl-Proxy (`Ri = (g/θ)(dθ/dz) / (dV/dz)²`), ebenfalls
-aus den Modell-Leveln ableitbar — siehe Cross-Section-Idee oben. Gleiches
-Kalibrierungsproblem wie Vereisung.
+**Gebaut**, s. METHODIK.md 6.8 (`turbulenceRow()`) — Bandmaximum des
+Turbulence-Flag-Index (TFI), analog Vereisung, aber über die echten
+Modellschichten statt Stützstellen-Sampling reduziert.
+
+**Windstärke-Gate (2026-08-04 nachgerüstet):** ursprünglich erreichte der
+TFI „severe" schon, sobald Ri knapp unter 0,25 UND die Scherung knapp über
+0,05 s⁻¹ lag — unabhängig von der absoluten Windgeschwindigkeit. Bei einer
+geprüften Vorhersage lag „severe" bodennah nachts bei durchweg ≤ 10 kt
+Windgeschwindigkeit — plausibel als reines Scherungs-Onset-Signal
+(Miles-Howard-Kriterium sagt nur, DASS sich Kelvin-Helmholtz-Wellen bilden
+können, nichts über die resultierende Intensität/EDR), aber zu alarmierend
+für die Kategorie „stark". Abhilfe: dritter Faktor `w(V)`
+(mittlere Windgeschwindigkeit der Schicht), der NUR den Anteil oberhalb der
+„moderate"-Schwelle kappt (`TFI = TFI_MODERATE + (raw − TFI_MODERATE) ·
+w(V)`, s. METHODIK.md 7.7) — „moderate" bleibt bei Windstille erreichbar,
+„severe" braucht zusätzlich ≥ 10 m/s. Schwellen (5/10 m/s) **ausdrücklich
+ein erster Ansatz** ohne Referenzfälle, zur Nachjustierung vorgesehen,
+sobald mehr Vorhersagen gegengeprüft sind.
 
 ### Böen auf Flughöhe hochrechnen
 V1 zeigt Böen nur als Bodenwert (10 m, klar gelabelt) — das Modell liefert

@@ -623,7 +623,12 @@ function drawPrecip(ctx, entries, times, x, y, seed) {
       const px = clamp(cx + jx, x.left + 3, x.right - 3);
       // Phase aus der Höhe, die dieses Pixel tatsächlich meint.
       const z = y.inv(py);
-      const snowHere = e.type === "sn" || (Number.isFinite(e.freezingZ) && z > e.freezingZ);
+      // Oberhalb der Nullgradgrenze immer Schnee (physikalisch, unabhängig
+      // vom Boden-METAR), darunter immer Regen -- `type` entscheidet nur,
+      // wenn keine Nullgradgrenze im Profil gefunden wurde (s. Feedback:
+      // "sn" durfte den ganzen Vorhang bis zum Boden einfärben, auch weit
+      // unterhalb der Nullgradgrenze).
+      const snowHere = Number.isFinite(e.freezingZ) ? z > e.freezingZ : e.type === "sn";
       const size = PRECIP_SIZE_MIN + hashRand(seed, col, s, 2) * PRECIP_SIZE_SPAN;
       const rot = hashRand(seed, col, s, 3);
       // Flocke: Drehung über 60° reicht, ein 3-Strich-Stern ist so periodisch.

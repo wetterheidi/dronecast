@@ -389,8 +389,12 @@ function precipEntries(grid, cloudBase) {
     const top = cloudTopAt(grid, cloudFrac, i, cloudBase[i]);
     const anyTop = anyCloudTopAt(grid, cloudFrac, i);
     const zTop = Number.isFinite(top) ? top : Number.isFinite(anyTop) ? anyTop : PRECIP_FALLBACK_TOP_M;
+    // `snowfall` nur als Fallback, wenn der METAR-Code gar keine Aussage
+    // macht (`!hasWx`) -- sonst überstimmt ein einzelner, oft marginaler
+    // Modellwert einen expliziten "RA"/"SHRA"-Code (s. Feedback: Schnee bis
+    // zum Boden bei 23°C Bodentemperatur und Nullgradgrenze auf 4000m).
     const isSnow = label.includes("SN") || label.includes("SG")
-      || (Number.isFinite(surface.snow[i]) && surface.snow[i] > 0);
+      || (!hasWx && Number.isFinite(surface.snow[i]) && surface.snow[i] > 0);
     // Nominale Mindestrate, wenn nur weather_code (nicht die Menge) den
     // Niederschlag anzeigt -- sonst bliebe der Vorhang trotz "-RA" unsichtbar.
     const rate = hasAmount ? amt : 0.3;
