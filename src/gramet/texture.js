@@ -188,7 +188,29 @@ function paintClouds(ctx, grid, cloudFrac, x, y) {
   ctx.restore();
 }
 
-// --- Cb-Schaft: dieselbe Technik, sandfarben ---------------------------------
+// --- Cb/TCU: Schaft und Amboss -----------------------------------------------
+
+/**
+ * Die Konvektionssäule wird als SILHOUETTE gezeichnet, nicht als Rechteck mit
+ * rundum gleicher Franse. Drei Kanten, drei verschiedene Charaktere -- genau
+ * das macht eine Säule als Cb/TCU erkennbar, gerade wenn sie über viele
+ * Stunden durchläuft und sonst nur ein sandfarbener Fleck wäre:
+ *
+ *   - UNTERKANTE hart und waagerecht abgeschnitten. Kondensationsniveau ist
+ *     eine Fläche, keine Zufallsgrenze; eine ausgefranste Cb-Basis gibt es in
+ *     der Natur nicht. Umgesetzt als Clip auf die Basislinie (nicht als
+ *     Abstandsrampe) -- so werden auch die Ellipsen, deren Mittelpunkt knapp
+ *     darüber liegt, sauber gekappt statt darunter herauszuhängen.
+ *   - OBERKANTE gewellt, mit einer Kerbe zwischen je zwei Stunden
+ *     (`turretEdge`): der Lauf zerfällt optisch wieder in einzelne Quelltürme.
+ *     Die Wellen gehen nur nach UNTEN, nie über den Modelloberrand hinaus --
+ *     sonst stieße der Schaft durch den flachen Ambossdeckel.
+ *   - SEITEN weich, wie bisher über Rampe + Rauschen.
+ *
+ * Der Amboss ist eine eigene Region mit umgekehrter Härte (flacher Deckel oben,
+ * weiche Unterseite) und sitzt seitlich über den Schaft hinaus -- s.
+ * `drawCbAnvils`.
+ */
 
 /**
  * Kalibrierparameter des Cb-Schafts, Bedeutung wie in `TUNING` (Tuner-
@@ -201,8 +223,8 @@ const CB_TUNING = {
   wMin: 6, wMax: 14, hMin: 3, hMax: 6,
   // ~5-fache Überdeckung im Inneren -> Restlöcher < 1 %.
   density: 90,
-  // Die Schaft-"Maske" ist eine Abstandsrampe (s. `paintCbRun`): 1 tief im
-  // Inneren, 0.5 exakt auf der Rechteckkante, 0 eine Fransenbreite draußen.
+  // Die Schaft-"Maske" ist eine Abstandsrampe (s. `paintRegion`): 1 tief im
+  // Inneren, 0.5 exakt auf der weichen Kante, 0 eine Fransenbreite draußen.
   // threshold 0.5 legt die sichtbare Kante also auf die Geometrie, das
   // Rauschen verschiebt sie lokal um bis zu +-noiseAmp Rampeneinheiten.
   // gain ist an noiseAmp GEKOPPELT: 1/(1 - threshold - noiseAmp) ist der
@@ -219,9 +241,46 @@ const CB_TUNING = {
 };
 
 /**
- * Cb-Schäfte mit der Ellipsentechnik zeichnen. `cb` ist das Array aus
- * `derive.js` (`{base, top}` je Stunde oder null). Aufeinanderfolgende
- * Cb-Stunden werden zu EINEM Lauf zusammengefasst und mit durchgehender,
+ * Amboss: gleiche Technik, aber vergletschert -- heller (fast weiß, mit einem
+ * Rest Sandton, damit er sich vom reinen Weiß der Schichtbewölkung absetzt),
+ * flachere und breitere Ellipsen für den faserigen Cirrus-Charakter, gröberes
+ * und schwächeres Rauschen (die Ambossränder wehen aus, sie beulen nicht).
+ */
+const ANVIL_TUNING = {
+  wMin: 8, wMax: 20, hMin: 3, hMax: 5,
+  density: 70,
+  threshold: 0.5, gain: 1 / (1 - 0.5 - 0.25),
+  noiseScale: 1 / 18, noiseAmp: 0.25,
+  fringePx: 8,
+  fill: "#f3ebdc", gray: 140, grayAlpha: 0.7, strokeWidth: 1,
+};
+
+// Ambossgeometrie in Pixeln. Die Ausladung skaliert mit der STUNDENBREITE (und
+// ist zusätzlich an der Lauflänge gedeckelt, s. Aufrufstelle): würde sie an der
+// Lauflänge hängen, bekäme eine sechsstündige Gewitterlage einen absurd weit
+// ausgezogenen Deckel. Die Dicke skaliert mit der Schafttiefe, gedeckelt, damit
+// flache Zellen keinen Deckel im Verhältnis 1:1 bekommen.
+const ANVIL_DEPTH_FRAC = 0.22, ANVIL_DEPTH_MIN = 16, ANVIL_DEPTH_MAX = 60;
+const ANVIL_FLARE_CELLS = 0.9, ANVIL_FLARE_MIN = 18, ANVIL_FLARE_MAX = 80;
+// Restdicke an der Ambossspitze (Anteil der vollen Dicke) -- die Unterseite
+// läuft nach außen keilförmig aus, das ist die Ambossform.
+const ANVIL_TIP_FRAC = 0.15;
+// Wie weit die Ambossunterseite höchstens nach unten gezogen wird, um an einen
+// tiefer liegenden Schaftoberrand anzuschließen (Vielfaches der Dicke).
+const ANVIL_MAX_DROP = 2.5;
+// Der Ambossdeckel liegt um diesen Betrag ÜBER dem höchsten Schaftoberrand:
+// dessen weiche Kante streut um +-noiseAmp*2*fringePx plus halbe Ellipse nach
+// oben, und genau diese Fusseln sollen nicht über dem flachen Deckel stehen.
+const ANVIL_OVERSHOOT = CB_TUNING.noiseAmp * 2 * CB_TUNING.fringePx + CB_TUNING.hMax / 2;
+
+// Farbe der nachgezogenen Wolkenbasis -- dunkler als die Schaftfüllung, wie die
+// beschattete Unterseite einer Konvektionswolke.
+const CB_BASE_LINE = "rgba(108,92,72,0.85)";
+
+/**
+ * Cb-/TCU-Schäfte mit der Ellipsentechnik zeichnen. `cb` ist das Array aus
+ * `derive.js` (`{base, top, kind}` je Stunde oder null). Aufeinanderfolgende
+ * Stunden werden zu EINEM Lauf zusammengefasst und mit durchgehender,
  * zwischen den Stundenmitten interpolierter Ober-/Unterkante gezeichnet --
  * zeichnete man je Stunde eine eigene Säule, entstünde an jeder gemeinsamen
  * Kante eine Doppelfranse quer durch die Wolkenmasse.
@@ -233,63 +292,228 @@ const CB_TUNING = {
  */
 export function drawCbShafts(ctx, grid, cb, x, y) {
   if (!cb) return;
-  const { meta, times } = grid;
+  const { times } = grid;
   const dt = times.length > 1 ? times[1] - times[0] : 3600;
 
   ctx.save();
-  ctx.beginPath();
-  ctx.rect(x.left, y.top, x.right - x.left, y.bot - y.top);
-  ctx.clip();
-  ctx.fillStyle = CB_TUNING.fill;
-  const g = CB_TUNING.gray;
-  ctx.strokeStyle = `rgba(${g},${g},${g},${CB_TUNING.grayAlpha})`;
-  ctx.lineWidth = CB_TUNING.strokeWidth;
+  clipChart(ctx, x, y);
+  setSpotStyle(ctx, CB_TUNING);
 
-  for (let i = 0; i < times.length; i++) {
-    if (!cb[i]) continue;
-    let j = i;
-    while (j + 1 < times.length && cb[j + 1]) j++;
-    const pts = [];
-    for (let k = i; k <= j; k++) {
-      pts.push({ cx: x(times[k]), yT: y(cb[k].top), yB: y(Math.max(0, cb[k].base)) });
-    }
-    const seed = hashSeed(`cb:${meta.lat},${meta.lon},${times[i]}`);
-    paintCbRun(ctx, seed, pts, x(times[i] - dt / 2), x(times[j] + dt / 2));
-    i = j;
+  for (const [i, j] of runsOf(cb, (c) => !!c)) {
+    paintShaft(ctx, runGeometry(grid, cb, x, y, i, j, dt));
   }
   ctx.restore();
 }
 
-function paintCbRun(ctx, seed, pts, X0, X1) {
-  const T = CB_TUNING;
-  const rng = mulberry32(seed);
-
-  // Ober-/Unterkante an der Stelle `cx`: zwischen den Stundenmitten linear,
-  // davor/danach konstant (halbe Randspalte).
-  const edge = (cx, key) => {
-    if (cx <= pts[0].cx) return pts[0][key];
-    for (let k = 1; k < pts.length; k++) {
-      if (pts[k].cx >= cx) {
-        const a = pts[k - 1], b = pts[k];
-        return a[key] + (cx - a.cx) / (b.cx - a.cx) * (b[key] - a[key]);
-      }
-    }
-    return pts[pts.length - 1][key];
+/**
+ * Geometrie eines Schaftlaufs. Bewusst rein aus (grid, cb, Skalen, i, j)
+ * abgeleitet und ohne Zustand -- `drawCbAnvils` ruft sie für DENSELBEN Lauf
+ * noch einmal auf und bekommt bitweise dieselbe Turmkante (gleicher Seed,
+ * gleiche Eingaben). Nur so kann die Ambossunterseite den Kuppeln des Schafts
+ * folgen, statt Lücken über den Einkerbungen offen zu lassen.
+ */
+function runGeometry(grid, cb, x, y, i, j, dt) {
+  const { meta, times } = grid;
+  const pts = [];
+  for (let k = i; k <= j; k++) {
+    pts.push({ cx: x(times[k]), yT: y(cb[k].top), yB: y(Math.max(0, cb[k].base)) });
+  }
+  const X0 = x(times[i] - dt / 2), X1 = x(times[j] + dt / 2);
+  const yTop = Math.min(...pts.map((p) => p.yT));
+  const yBot = Math.max(...pts.map((p) => p.yB));
+  const seed = hashSeed(`cb:${meta.lat},${meta.lon},${times[i]}`);
+  const cellPx = pts.length > 1 ? (pts[1].cx - pts[0].cx) : (X1 - X0);
+  return {
+    pts, X0, X1, yTop, yBot, seed,
+    top: turretEdge(seed, pts, X0, X1, yBot - yTop, cellPx),
+    bot: (cx) => edgeAt(pts, "yB", cx),
   };
+}
 
-  // Kandidatenfläche: Lauf-Hülle plus Franse plus halbe Maximalellipse.
-  const yT = Math.min(...pts.map((p) => p.yT)), yB = Math.max(...pts.map((p) => p.yB));
+function paintShaft(ctx, geom) {
+  const { pts, X0, X1, yTop, yBot, seed, top, bot } = geom;
+  if (!(X1 > X0) || !(yBot > yTop)) return;
+
+  paintRegion(ctx, seed, CB_TUNING, { x0: X0, x1: X1, hardBot: true, salt: [2, 3], top, bot });
+
+  // Die harte Kante zusätzlich als Linie nachziehen: der Clip allein
+  // hinterlässt eine Treppe aus angeschnittenen Ellipsenrändern, erst der
+  // Strich macht daraus die eine, durchgehende Wolkenbasis.
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(X0, bot(X0));
+  for (const p of pts) ctx.lineTo(p.cx, p.yB);
+  ctx.lineTo(X1, bot(X1));
+  ctx.strokeStyle = CB_BASE_LINE;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * Ambosse über die Cb-Läufe legen. Bewusst ein eigener Durchgang NACH den
+ * Schichtwolken (s. `render.js`): der Amboss liegt definitionsgemäß im
+ * Cirrus-Stockwerk, würde er wie der Schaft vor den Wolken gezeichnet, malte
+ * ihn das weiße Ellipsenfeld dort sofort wieder zu und die Form wäre weg.
+ *
+ * Läufe hier nur über `kind === "cb"`: TCU haben per Definition keinen Amboss.
+ * Ein Lauf aus tcu,tcu,cb,cb bekommt also nur über der Cb-Hälfte einen Deckel.
+ */
+export function drawCbAnvils(ctx, grid, cb, x, y) {
+  if (!cb) return;
+  const { meta, times } = grid;
+  const dt = times.length > 1 ? times[1] - times[0] : 3600;
+  const cellW = Math.abs(x(times[0] + dt) - x(times[0]));
+
+  ctx.save();
+  clipChart(ctx, x, y);
+  setSpotStyle(ctx, ANVIL_TUNING);
+
+  for (const [i, j] of runsOf(cb, (c) => c && c.kind === "cb")) {
+    // Turmkante des UMGEBENDEN Schaftlaufs holen (ein Lauf kann tcu- und
+    // cb-Stunden mischen) -- die Ambossunterseite muss ihr folgen.
+    let a = i, b = j;
+    while (a > 0 && cb[a - 1]) a--;
+    while (b + 1 < times.length && cb[b + 1]) b++;
+    const shaft = runGeometry(grid, cb, x, y, a, b, dt);
+
+    const X0 = x(times[i] - dt / 2), X1 = x(times[j] + dt / 2);
+    let yTop = Infinity, yBot = -Infinity;
+    for (let k = i; k <= j; k++) {
+      yTop = Math.min(yTop, y(cb[k].top));
+      yBot = Math.max(yBot, y(Math.max(0, cb[k].base)));
+    }
+    yTop -= ANVIL_OVERSHOOT;
+    if (!(X1 > X0) || !(yBot > yTop)) continue;
+
+    const depth = clamp(ANVIL_DEPTH_FRAC * (yBot - yTop), ANVIL_DEPTH_MIN, ANVIL_DEPTH_MAX);
+    // Zusätzlich an der Lauflänge gedeckelt: eine einzelne Cb-Stunde bekäme
+    // sonst einen Deckel dreimal so breit wie ihr Schaft (Pilz statt Amboss).
+    const flare = clamp(Math.min(ANVIL_FLARE_CELLS * cellW, 0.75 * (X1 - X0)),
+      ANVIL_FLARE_MIN, ANVIL_FLARE_MAX);
+    // Unterseite: über dem Schaft volle Dicke, nach außen keilförmig auf die
+    // Spitzendicke auslaufend (Exponent < 1 -> konkav, wie ein echter Amboss).
+    // Über dem Schaft zusätzlich bis auf dessen Turmkante heruntergezogen,
+    // sonst klaffte über jeder Einkerbung ein blauer Spalt.
+    const bot = (cx) => {
+      const t = cx < X0 ? (X0 - cx) / flare : cx > X1 ? (cx - X1) / flare : 0;
+      const wedge = yTop + depth * (1 - (1 - ANVIL_TIP_FRAC) * Math.pow(clamp(t, 0, 1), 0.65));
+      if (t > 0) return wedge;
+      return Math.min(Math.max(wedge, shaft.top(cx)), yTop + ANVIL_MAX_DROP * depth);
+    };
+
+    const seed = hashSeed(`anvil:${meta.lat},${meta.lon},${times[i]}`);
+    paintRegion(ctx, seed, ANVIL_TUNING, {
+      x0: X0 - flare, x1: X1 + flare, hardTop: true, salt: [4, 5],
+      top: () => yTop, bot,
+    });
+  }
+  ctx.restore();
+}
+
+/**
+ * Oberkante eines Schaftlaufs als Quellturm-Profil: je Stunde eine Kuppel
+ * (Ellipsenbogen), die Kante ist deren UNTERE EINHÜLLENDE (Minimum in y).
+ * Weil die Kuppeln breiter sind als der Stundenabstand, überschneiden sie sich
+ * und hinterlassen zwischen zwei Türmen eine Einkerbung -- genau die Kontur
+ * eines mehrzelligen Quellwolkenfeldes.
+ *
+ * Bewusst NICHT als Stützstellen-Interpolation zwischen Scheitel und Kerbe:
+ * damit werden die Scheitel flach und die Flanken steil, der Lauf sah aus wie
+ * eine Zinnenmauer. Die Einhüllende macht es umgekehrt richtig herum -- runde
+ * Kuppen, scharfe Kerben.
+ *
+ * Wichtig: die Auslenkung geht nur nach UNTEN (kein Punkt liegt über dem
+ * gerechneten Oberrand). Ein Turm ÜBER dem Modellwert würde den flachen
+ * Ambossdeckel durchstoßen, der auf dem höchsten Oberrand des Laufs sitzt.
+ *
+ * Die Amplitude muss deutlich über der Rauschweite des Randes liegen
+ * (+-noiseAmp*2*fringePx ~ 5 px), sonst verwäscht das Rauschen die Kerben und
+ * der Lauf sieht wieder aus wie ein glatter Klotz.
+ */
+function turretEdge(seed, pts, X0, X1, depthPx, cellPx) {
+  const rng = mulberry32(seed ^ 0x9e3779b9);
+  const amp = clamp(depthPx * 0.2, 14, 60);
+  const domes = pts.map((p) => ({
+    cx: p.cx,
+    // Halbe Kuppelbreite knapp über halbem Stundenabstand: die Kuppeln
+    // überlappen gerade so, dass die Kerbe rund die halbe Amplitude tief wird.
+    // Deutlich breiter (>= 0.7) und die Kerben verschwinden fast ganz.
+    w: Math.max(6, cellPx * (0.52 + 0.14 * rng())),
+    a: amp * (0.75 + 0.5 * rng()),
+    // Scheitel dürfen nur nach unten abweichen (s. Ambossdeckel oben).
+    y: p.yT + amp * 0.25 * rng(),
+  }));
+  // Wo keine Kuppel greift (Laufrand, oder wenn die Stunden weiter auseinander
+  // liegen als die Kuppeln breit sind), liegt die Kante auf Schulterhöhe.
+  return (cx) => {
+    let best = edgeAt(pts, "yT", cx) + amp;
+    for (const d of domes) {
+      const u = (cx - d.cx) / d.w;
+      if (u <= -1 || u >= 1) continue;
+      const yq = d.y + d.a * (1 - Math.sqrt(1 - u * u));
+      if (yq < best) best = yq;
+    }
+    return best;
+  };
+}
+
+/**
+ * Ellipsentextur in ein Gebiet zwischen zwei x-abhängigen Kanten füllen.
+ *
+ * `reg.hardTop`/`reg.hardBot` schalten die jeweilige Kante von "weich" auf
+ * "hart": weiche Kanten gehen über die Abstandsrampe + Rauschen (sie fransen
+ * aus, deshalb wird auch über die Kante hinaus gestreut), harte Kanten stehen
+ * im CLIP-Pfad und schneiden die Ellipsen exakt auf der Geometrie ab. Der
+ * Clip-Pfad folgt darum nur den harten Kanten; in den weichen Richtungen ist
+ * er großzügig um die Fransenbreite aufgeweitet.
+ */
+function paintRegion(ctx, seed, T, reg) {
+  const { x0, x1, top, bot, hardTop = false, hardBot = false, salt = [2, 3] } = reg;
+  const rng = mulberry32(seed);
   const pad = T.fringePx + T.wMax / 2;
-  const rx0 = X0 - pad, ry0 = yT - pad;
-  const rw = (X1 - X0) + 2 * pad, rh = (yB - yT) + 2 * pad;
-  if (!(rw > 0) || !(rh > 0)) return;
-  const attempts = Math.round(T.density * 800 / TUNER_CANVAS_PX2 * rw * rh);
+  const xL = x0 - pad, xR = x1 + pad;
+  if (!(xR > xL)) return;
 
+  // Kanten abtasten: sie sind nichtlinear (Türme, Ambosskeil), Bounding-Box
+  // und Clip-Pfad brauchen sie also diskretisiert.
+  const SAMPLES = 96;
+  const xs = new Float64Array(SAMPLES + 1);
+  const tops = new Float64Array(SAMPLES + 1), bots = new Float64Array(SAMPLES + 1);
+  let yMin = Infinity, yMax = -Infinity;
+  for (let s = 0; s <= SAMPLES; s++) {
+    const cx = xL + (xR - xL) * s / SAMPLES;
+    xs[s] = cx; tops[s] = top(cx); bots[s] = bot(cx);
+    if (tops[s] < yMin) yMin = tops[s];
+    if (bots[s] > yMax) yMax = bots[s];
+  }
+  // Jenseits einer harten Kante lohnt nur noch eine halbe Ellipse Streubreite
+  // (weiter draußen liegende Mittelpunkte ragen ohnehin nicht mehr herein).
+  const ry0 = yMin - (hardTop ? T.hMax / 2 : pad);
+  const ry1 = yMax + (hardBot ? T.hMax / 2 : pad);
+  if (!(ry1 > ry0)) return;
+
+  ctx.save();
+  ctx.beginPath();
+  if (hardTop) {
+    ctx.moveTo(xs[0], tops[0]);
+    for (let s = 1; s <= SAMPLES; s++) ctx.lineTo(xs[s], tops[s]);
+  } else { ctx.moveTo(xL, ry0); ctx.lineTo(xR, ry0); }
+  if (hardBot) for (let s = SAMPLES; s >= 0; s--) ctx.lineTo(xs[s], bots[s]);
+  else { ctx.lineTo(xR, ry1); ctx.lineTo(xL, ry1); }
+  ctx.closePath();
+  ctx.clip();
+
+  const attempts = Math.round(T.density * 800 / TUNER_CANVAS_PX2 * (xR - xL) * (ry1 - ry0));
   for (let i = 0; i < attempts; i++) {
-    const cx = rx0 + rng() * rw, cy = ry0 + rng() * rh;
-    // Vorzeichenbehafteter Abstand zur Laufkontur (innen positiv), als Rampe
-    // auf [0,1]: 0.5 exakt auf der Kante, s. Kommentar an CB_TUNING.threshold.
-    const d = Math.min(cx - X0, X1 - cx, cy - edge(cx, "yT"), edge(cx, "yB") - cy);
+    const cx = xL + rng() * (xR - xL), cy = ry0 + rng() * (ry1 - ry0);
+    // Vorzeichenbehafteter Abstand zu den WEICHEN Kanten (innen positiv), als
+    // Rampe auf [0,1]: 0.5 exakt auf der Kante, s. Kommentar an
+    // CB_TUNING.threshold. Harte Kanten bleiben außen vor -- dort soll die
+    // Dichte bis zur Schnittlinie voll bleiben, gekappt wird per Clip.
+    let d = Math.min(cx - x0, x1 - cx);
+    if (!hardTop) d = Math.min(d, cy - top(cx));
+    if (!hardBot) d = Math.min(d, bot(cx) - cy);
     const ramp = clamp(0.5 + d / (2 * T.fringePx), 0, 1);
     // Rauschen bewusst UNGEDÄMPFT addiert (anders als bei den Schichtwolken):
     // es soll die Kante verschieben -- Beulen nach außen, Kerben nach innen,
@@ -297,7 +521,7 @@ function paintCbRun(ctx, seed, pts, X0, X1) {
     // eine Dämpfung, sondern die gain-Kopplung (s. CB_TUNING): selbst beim
     // ungünstigsten Rauschwert bleibt die Annahme dort bei 1. Fetzen im
     // Nichts kann es ebenfalls nicht geben, solange noiseAmp < threshold.
-    const v = ramp + T.noiseAmp * cbNoise(seed, cx, cy);
+    const v = ramp + T.noiseAmp * regionNoise(seed, cx, cy, T.noiseScale, salt);
     if (v <= T.threshold) continue;
     if (rng() >= Math.min(1, (v - T.threshold) * T.gain)) continue;
 
@@ -308,14 +532,51 @@ function paintCbRun(ctx, seed, pts, X0, X1) {
     ctx.fill();   // fill -> stroke je Ellipse, wie bei den Schichtwolken.
     ctx.stroke();
   }
+  ctx.restore();
 }
 
-// Eigene Oktav-Salts (2/3), damit das Schaftrauschen nicht mit dem
-// Schichtwolkenrauschen desselben Seeds korreliert.
-function cbNoise(seed, px, py) {
-  const s = CB_TUNING.noiseScale;
-  const a = valueNoise(seed, px * s, py * s, 2);
-  const b = valueNoise(seed, px * s * FBM_OCTAVE, py * s * FBM_OCTAVE, 3);
+/** Aufeinanderfolgende Stunden mit `pred` zu Läufen `[i, j]` zusammenfassen. */
+function runsOf(arr, pred) {
+  const runs = [];
+  for (let i = 0; i < arr.length; i++) {
+    if (!pred(arr[i])) continue;
+    let j = i;
+    while (j + 1 < arr.length && pred(arr[j + 1])) j++;
+    runs.push([i, j]);
+    i = j;
+  }
+  return runs;
+}
+
+/** Stützwert `key` an der Stelle `cx`, linear; außerhalb konstant. */
+function edgeAt(pts, key, cx) {
+  if (cx <= pts[0].cx) return pts[0][key];
+  for (let k = 1; k < pts.length; k++) {
+    if (pts[k].cx >= cx) {
+      const a = pts[k - 1], b = pts[k];
+      return a[key] + (cx - a.cx) / (b.cx - a.cx) * (b[key] - a[key]);
+    }
+  }
+  return pts[pts.length - 1][key];
+}
+
+function clipChart(ctx, x, y) {
+  ctx.beginPath();
+  ctx.rect(x.left, y.top, x.right - x.left, y.bot - y.top);
+  ctx.clip();
+}
+
+function setSpotStyle(ctx, T) {
+  ctx.fillStyle = T.fill;
+  ctx.strokeStyle = `rgba(${T.gray},${T.gray},${T.gray},${T.grayAlpha})`;
+  ctx.lineWidth = T.strokeWidth;
+}
+
+// Eigene Oktav-Salts je Region (Schaft 2/3, Amboss 4/5), damit die Rauschfelder
+// desselben Seeds nicht miteinander korrelieren.
+function regionNoise(seed, px, py, s, salt) {
+  const a = valueNoise(seed, px * s, py * s, salt[0]);
+  const b = valueNoise(seed, px * s * FBM_OCTAVE, py * s * FBM_OCTAVE, salt[1]);
   return (FBM_W1 * a + FBM_W2 * b - 0.5) * 2;
 }
 

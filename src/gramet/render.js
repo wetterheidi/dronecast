@@ -16,7 +16,7 @@
 
 import { sampleAt } from "./grid.js";
 import { contour } from "./derive.js";
-import { drawClouds, drawCbShafts } from "./texture.js";
+import { drawClouds, drawCbShafts, drawCbAnvils } from "./texture.js";
 import { hashSeed, hashRand } from "./noise.js";
 import { drawWindRow, WIND_ROW_HEIGHT } from "./rows/wind.js";
 import { drawNumberRow, NUMBER_ROW_HEIGHT } from "./rows/numberRow.js";
@@ -48,12 +48,14 @@ const ICING_STYLES = { light: "#2e7d32", moderate: "#1b5e20", severe: "#0d3b10" 
 const TURB_STYLES = { light: "#f9a825", moderate: "#ef6c00", severe: "#c62828" };
 const HAZARD_LEVELS = { light: 1, moderate: 2, severe: 3 };
 
-// Cb (Cumulonimbus): sandfarbener Schaft (Ellipsentechnik, s. `texture.js`
-// `drawCbShafts`) + vereinfachtes Gewitter-Glyph, angelehnt an die
-// Ogimet-GRAMET-Darstellung (s. Referenz-Screenshot).
-const CB_GLYPH_COLOR = "#6b2e2e";
-const CB_ANVIL_FILL = "rgba(255,235,150,0.28)";
-const CB_ANVIL_STROKE = "#c9a227";
+// Cb/TCU: sandfarbener Schaft + Amboss (Ellipsentechnik, s. `texture.js`), dazu
+// als Kennzeichnung die WOLKENSYMBOLE DER BODENEINTRAGUNGSSYSTEMATIK (WMO-
+// Schlüssel C_L) statt eines frei erfundenen Glyphs -- die kennt jeder
+// Meteorologe von der Bodenkarte. Reine Strichzeichnung in Schwarz, wie auf
+// der Karte; darunter ein weißer Halo, sonst geht der dünne Strich in der
+// gefleckten Wolkentextur unter.
+const CB_SYMBOL_INK = "#12161c";
+const CB_SYMBOL_HALO = "rgba(255,255,255,0.9)";
 
 const ROW_DEFS = {
   wind: {
@@ -130,7 +132,10 @@ export function renderGramet(host, grid, view, state = {}) {
   drawHazardArea(ctx, grid, view.hazards.icing, ICING_STYLES, x, y);
   if (toggles.cb !== false) drawCbShafts(ctx, grid, view.cb, x, y);
   if (toggles.clouds !== false) drawClouds(ctx, grid, view.cloudFrac, x, y);
-  if (toggles.cb !== false) drawCbGlyphs(ctx, view.cb, view.tropopause, times, x, y);
+  if (toggles.cb !== false) {
+    drawCbAnvils(ctx, grid, view.cb, x, y);
+    drawCbGlyphs(ctx, view.cb, times, x, y);
+  }
   const seed = hashSeed(`${grid.meta.lat},${grid.meta.lon},${grid.meta.elevation},${times[0]}`);
   if (toggles.precip !== false) drawPrecip(ctx, view.precip, times, x, y, seed);
   drawHazardArea(ctx, grid, view.hazards.turbulence, TURB_STYLES, x, y);
@@ -284,12 +289,17 @@ function drawHazardArea(ctx, grid, hazardArr, styles, x, y) {
 // --- Konvektion (TCU/Cb) — Klassifikation in derive.js, s. dort --------------
 
 // Schaft: `drawCbShafts` (texture.js), vor den Wolken gezeichnet, damit die
-// weißen Wolkenellipsen darüberliegen (wie im Referenz-GRAMET).
-// Glyph + Amboss-Andeutung: nach den Wolken gezeichnet (liegt darüber).
-// `kind` kommt aus derive.js: "cb" bekommt Gewitter-Glyph und (bei
-// Tropopausennähe) die Amboss-Andeutung, "tcu" nur den Quellwolken-Turm --
-// per Definition ohne Amboss und ohne Blitz.
-function drawCbGlyphs(ctx, cb, tropopause, times, x, y) {
+// weißen Wolkenellipsen darüberliegen (wie im Referenz-GRAMET). Amboss und
+// Symbol danach, sie sollen oben liegen.
+//
+// `kind` aus derive.js bestimmt das Symbol:
+//   "cb"  -> C_L 9 (Cumulonimbus capillatus, mit Amboss)
+//   "tcu" -> C_L 3 (Cumulonimbus calvus, noch ohne Amboss)
+// Streng nach Schlüssel wäre eine Cumulus congestus C_L 2; C_L 3 ist hier
+// bewusst gesetzt (so vorgegeben) und passt zur Klassifikation in derive.js
+// insofern, als eine ausgelöste, mächtige Zelle ohne vergletscherten Oberrand
+// genau der calvus-Stufe entspricht.
+function drawCbGlyphs(ctx, cb, times, x, y) {
   const dt = times.length > 1 ? times[1] - times[0] : 3600;
   for (let i = 0; i < times.length; i++) {
     const c = cb[i];
@@ -297,85 +307,55 @@ function drawCbGlyphs(ctx, cb, tropopause, times, x, y) {
     const cx = x(times[i]), cellW = x(times[i] + dt / 2) - x(times[i] - dt / 2);
     const yTop = y(c.top), yBot = y(Math.max(0, c.base));
     const cy = yTop + (yBot - yTop) * 0.45, size = Math.min(18, cellW * 0.8);
-    if (c.kind === "tcu") { drawTcuGlyph(ctx, cx, cy, size); continue; }
-
-    drawCbGlyph(ctx, cx, cy, size);
-    // Reicht der Cb-Oberrand nahe an die Tropopause heran (< 1200 m
-    // Abstand), Amboss-Andeutung wie im Original (gelb gestrichelte Fläche).
-    const tropZ = tropAt(tropopause, times[i]);
-    if (Number.isFinite(tropZ) && tropZ - c.top < 1200) {
-      drawAnvilHint(ctx, cx, y(Math.min(c.top, tropZ)), Math.max(20, cellW));
-    }
+    strokeSymbol(ctx, c.kind === "cb" ? cl9Path(cx, cy, size) : cl3Path(cx, cy, size), size);
   }
 }
 
-// TCU (Cumulus congestus): zwei Quellballen über flacher Basis — bewusst ohne
-// Amboss-Trapez und ohne Blitz, das ist der Unterschied zum Cb-Glyph.
-function drawTcuGlyph(ctx, cx, cy, size) {
-  ctx.save();
-  ctx.fillStyle = CB_GLYPH_COLOR;
-  const w = size * 0.5, h = size * 0.55, yShoulder = cy + h * 0.1;
-  ctx.beginPath();
-  ctx.moveTo(cx - w, cy + h);
-  ctx.lineTo(cx - w, yShoulder);
-  ctx.arc(cx - w * 0.5, yShoulder, w * 0.5, Math.PI, 0);
-  ctx.arc(cx + w * 0.5, yShoulder, w * 0.5, Math.PI, 0);
-  ctx.lineTo(cx + w, cy + h);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
+/**
+ * C_L 9 — Cumulonimbus mit Amboss. Kartensymbol: waagerechter Deckel oben,
+ * waagerechte Basis unten, dazwischen zur Mitte hin eingeschnürte Flanken
+ * (Sanduhr-Umriss).
+ */
+function cl9Path(cx, cy, size) {
+  const w = size * 0.42, h = size * 0.48;
+  const p = new Path2D();
+  p.moveTo(cx - w, cy - h); p.lineTo(cx + w, cy - h);      // Ambossdeckel
+  p.moveTo(cx - w, cy + h); p.lineTo(cx + w, cy + h);      // Basis
+  p.moveTo(cx - w, cy - h); p.lineTo(cx, cy);              // Flanken zur Taille
+  p.lineTo(cx + w, cy - h);
+  p.moveTo(cx - w, cy + h); p.lineTo(cx, cy);
+  p.lineTo(cx + w, cy + h);
+  return p;
 }
 
-function drawCbGlyph(ctx, cx, cy, size) {
-  ctx.save();
-  ctx.strokeStyle = CB_GLYPH_COLOR; ctx.fillStyle = CB_GLYPH_COLOR; ctx.lineWidth = 1.3;
-  // Amboss-Kappe (Trapez).
-  ctx.beginPath();
-  ctx.moveTo(cx - size * 0.6, cy - size * 0.5);
-  ctx.lineTo(cx + size * 0.6, cy - size * 0.5);
-  ctx.lineTo(cx + size * 0.3, cy - size * 0.1);
-  ctx.lineTo(cx - size * 0.3, cy - size * 0.1);
-  ctx.closePath();
-  ctx.fill();
-  // Stamm.
-  ctx.beginPath(); ctx.moveTo(cx, cy - size * 0.1); ctx.lineTo(cx, cy + size * 0.3); ctx.stroke();
-  // Blitz.
-  ctx.beginPath();
-  ctx.moveTo(cx - size * 0.15, cy + size * 0.3);
-  ctx.lineTo(cx + size * 0.1, cy + size * 0.55);
-  ctx.lineTo(cx - size * 0.05, cy + size * 0.55);
-  ctx.lineTo(cx + size * 0.2, cy + size * 0.85);
-  ctx.stroke();
-  ctx.restore();
+/**
+ * C_L 3 — Cumulonimbus calvus. Kartensymbol: Quellwolkenkuppel auf flacher
+ * Basis, darüber der kurze Stiel mit Querbalken (der beginnende, noch nicht
+ * ausgebreitete Oberrand).
+ */
+function cl3Path(cx, cy, size) {
+  const r = size * 0.42;
+  const baseY = cy + r * 0.62, apexY = baseY - r;
+  const p = new Path2D();
+  p.moveTo(cx - r, baseY);
+  p.arc(cx, baseY, r, Math.PI, 0);                          // Kuppel
+  p.lineTo(cx - r, baseY);                                  // Basislinie
+  p.moveTo(cx, apexY); p.lineTo(cx, apexY - r * 0.32);      // Stiel
+  p.moveTo(cx - r * 0.45, apexY - r * 0.32);                // Querbalken
+  p.lineTo(cx + r * 0.45, apexY - r * 0.32);
+  return p;
 }
 
-function drawAnvilHint(ctx, cx, cy, w) {
+// Zweimal stroken: erst breit in Weiß (Halo), dann schmal in Schwarz. Auf der
+// gefleckten Schaft- bzw. Wolkentextur ist der Strich sonst kaum auszumachen.
+function strokeSymbol(ctx, path, size) {
   ctx.save();
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, Math.max(10, w * 0.9), 12, 0, 0, Math.PI * 2);
-  ctx.fillStyle = CB_ANVIL_FILL;
-  ctx.fill();
-  ctx.setLineDash([4, 2]);
-  ctx.strokeStyle = CB_ANVIL_STROKE; ctx.lineWidth = 1.3;
-  ctx.stroke();
-  ctx.setLineDash([]);
+  ctx.lineJoin = "round"; ctx.lineCap = "round";
+  ctx.strokeStyle = CB_SYMBOL_HALO; ctx.lineWidth = Math.max(3, size * 0.24);
+  ctx.stroke(path);
+  ctx.strokeStyle = CB_SYMBOL_INK; ctx.lineWidth = Math.max(1.2, size * 0.09);
+  ctx.stroke(path);
   ctx.restore();
-}
-
-// Tropopausenhöhe zur Zeit `t` aus der (ggf. lückenhaften) Polylinie
-// interpolieren; NaN, wenn `t` außerhalb des erfassten Bereichs liegt.
-function tropAt(line, t) {
-  if (!line || line.length < 2) return NaN;
-  if (t <= line[0].t) return line[0].t === t ? line[0].z : NaN;
-  for (let i = 1; i < line.length; i++) {
-    if (line[i].t >= t) {
-      const a = line[i - 1], b = line[i];
-      if (t - a.t > 2 * (b.t - a.t || 1)) return NaN; // Lücke in der Linie
-      const f = (t - a.t) / (b.t - a.t);
-      return a.z + f * (b.z - a.z);
-    }
-  }
-  return NaN;
 }
 
 // --- Niederschlag --------------------------------------------------------------

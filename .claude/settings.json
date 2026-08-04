@@ -26,7 +26,13 @@
       "Bash(sed -i '' 's/ausgelöst=\\\\${r.triggered}/ausgelöst\\(±2K\\)=\\\\${r.tSfcC >= r.taC - 2}/' check-convection.mjs)",
       "Bash(node check-convection.mjs)",
       "Bash(sed -i '' 's/{ label: \"labil, nicht ausgelöst\", tSfcC: 25, lapse: 7, t2m: 28, td2m: 15, wcode: 0 }/{ label: \"labil, T2m 28 \\(knapp drunter\\)\", tSfcC: 25, lapse: 7, t2m: 28, td2m: 15, wcode: 0 },\\\\n  { label: \"labil, T2m 29 \\(Zuschlag greift\\)\", tSfcC: 25, lapse: 7, t2m: 29, td2m: 15, wcode: 0 }/' check-derive.mjs)",
-      "Bash(node check-derive.mjs)"
+      "Bash(node check-derive.mjs)",
+      "Bash(node --check src/gramet/texture.js)",
+      "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --hide-scrollbars --window-size=900,620 --virtual-time-budget=4000 --screenshot=/private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/7f789b5a-e945-4778-96ad-f3144f11e20c/scratchpad/cb1.png http://localhost:5199/_cbpreview.html)",
+      "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --hide-scrollbars --window-size=900,620 --virtual-time-budget=4000 --screenshot=/private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/7f789b5a-e945-4778-96ad-f3144f11e20c/scratchpad/cb2.png http://localhost:5199/_cbpreview.html)",
+      "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --hide-scrollbars --window-size=900,620 --virtual-time-budget=4000 --screenshot=/private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/7f789b5a-e945-4778-96ad-f3144f11e20c/scratchpad/cb3.png http://localhost:5199/_cbpreview.html)",
+      "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --hide-scrollbars --window-size=900,620 --virtual-time-budget=4000 --screenshot=/private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/7f789b5a-e945-4778-96ad-f3144f11e20c/scratchpad/cb4.png http://localhost:5199/_cbpreview.html)",
+      "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --hide-scrollbars --window-size=900,620 --virtual-time-budget=4000 --screenshot=/private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/7f789b5a-e945-4778-96ad-f3144f11e20c/scratchpad/cb5.png http://localhost:5199/_cbpreview.html)"
     ]
   }
 }
