@@ -2,10 +2,10 @@
  * Vereisungs-Diagnose — Icing-Potential-Index (IPI) = f_T(T) * cloudFrac,
  * pro Zelle. Physik bewusst als reine Funktion (`ipiAt`) von den Verbrauchern
  * getrennt: GRAMET (`computeGrid`, hier) kategorisiert pro Gitterzelle für die
- * Kontur-Fläche (s. render.js `drawHazardArea`/`HAZARD_LEVELS`), Go/No-Go soll
- * `ipiAt`/`ipiCategory` später auf ein Bandmaximum zwischen 10 m und der
- * Flughöhe anwenden (analog `windBandMaxAt` in app.js) — dieselbe Physik,
- * dieselben Schwellen, zwei unabhängige Reduktionen.
+ * Kontur-Fläche (s. render.js `drawHazardArea`/`HAZARD_LEVELS`), Go/No-Go
+ * wendet `ipiAt`/`ipiStatus` auf ein Bandmaximum zwischen 10 m und der
+ * Flughöhe an (`icingBandMaxAt` in app.js, analog `windBandMaxAt`) — dieselbe
+ * Physik, dieselben Schwellen, zwei unabhängige Reduktionen.
  *
  * f_T: weiches Trapez statt harter 0…−15-Box — Onset 0…−2 °C (Klareis am
  * gefährlichsten knapp unter 0, großer Tropfen/hoher LWC), Kernfenster
@@ -58,6 +58,18 @@ export function ipiCategory(ipi) {
   if (ipi < IPI_MODERATE) return "light";
   if (ipi < IPI_SEVERE) return "moderate";
   return "severe";
+}
+
+/**
+ * IPI (0..1) -> Go/No-Go-Ampel (green/yellow/red), s. gonogo.js. Dieselben
+ * Schwellen wie `ipiCategory` (IPI_MODERATE/IPI_SEVERE) -- nur auf drei statt
+ * vier Stufen zusammengefasst (none/light -> green), da Go/No-Go keine
+ * Ampelfarbe für "Spur von Vereisung" kennt.
+ */
+export function ipiStatus(ipi) {
+  if (!Number.isFinite(ipi) || ipi < IPI_MODERATE) return "green";
+  if (ipi < IPI_SEVERE) return "yellow";
+  return "red";
 }
 
 /**

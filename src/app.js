@@ -6,9 +6,10 @@ import { renderMeteogram } from "./meteogram.js";
 import { fetchColumn, buildField } from "./column.js";
 import { cloudCeiling, cloudLayers, groundFog } from "./clouds.js";
 import { renderCrossSection } from "./crosssection.js";
-import { gridFromColumn } from "./gramet/grid.js";
+import { gridFromColumn, sampleAt } from "./gramet/grid.js";
 import { deriveView } from "./gramet/derive.js";
 import { renderGramet, exportPng as exportGrametPng } from "./gramet/render.js";
+import { ipiAt } from "./gramet/hazards/icing.js";
 import { buildBriefingHtml, buildBriefingContent } from "./briefing.js";
 import { evaluate as evaluateGoNoGo } from "./gonogo.js";
 import { renderGoNoGoTable } from "./gonogotable.js";
@@ -617,9 +618,24 @@ async function openGoNoGo() {
         : null;
     } catch { state.data.cloudCeiling = null; state.data.groundFog = null; }
   }
+  // Vereisung: IPI-Bandmaximum aus derselben Säule, kein eigener Request
+  // (s. `icingBandMaxAt`). Gitter wird mit GRAMET geteilt (`state.data.gmGrid`)
+  // -- bei bereits geöffnetem GRAMET fällt der Aufbau ganz weg.
+  if (state.data.icingBandMax === undefined) {
+    try {
+      const col = await ensureColumn();
+      const { lat, lon } = state.point;
+      if (!state.data.gmGrid) state.data.gmGrid = gridFromColumn(col, state.data.surface, lat, lon);
+      const grid = state.data.gmGrid;
+      const sameLength = grid.times.length === state.data.surface.time.length;
+      state.data.icingBandMax = sameLength
+        ? state.data.surface.time.map((_, i) => icingBandMaxAt(grid, i, 10, settings.maxHeight))
+        : null;
+    } catch { state.data.icingBandMax = null; }
+  }
   renderGoNoGoTable(el("gng-body"), evaluateGoNoGo(
     state.data.surface, state.data.windBandMax, getProfile(settings.droneProfile), settings.maxHeight,
-    state.data.cloudCeiling ?? null, state.data.groundFog ?? null,
+    state.data.cloudCeiling ?? null, state.data.groundFog ?? null, state.data.icingBandMax ?? null,
   ));
 }
 el("gng-close").addEventListener("click", () => { el("gonogo").hidden = true; });
@@ -801,6 +817,23 @@ function bandHeights(hMinM, hMaxM) {
   const out = [];
   for (let i = 0; i < n; i++) out.push(hMinM + (hMaxM - hMinM) * i / (n - 1));
   return out;
+}
+
+const KELVIN = 273.15;
+
+// Maximaler Icing-Potential-Index zwischen hMinM und hMaxM zur Stunde `i` --
+// dieselben Stützhöhen wie beim Windbandmaximum (`bandHeights`), aber
+// SYNCHRON: anders als `windBandMaxAt` (WindField, eigene Requests) sitzt
+// `grid` bereits vollständig geladen im Speicher (`gridFromColumn` auf der
+// ohnehin gecachten Säule, s. `renderGm`) -- reine Interpolation, s.
+// METHODIK.md 7.6.
+function icingBandMaxAt(grid, i, hMinM, hMaxM) {
+  let max = 0;
+  for (const h of bandHeights(hMinM, hMaxM)) {
+    const s = sampleAt(grid, i, h);
+    max = Math.max(max, ipiAt(s.T - KELVIN, s.cloudFrac));
+  }
+  return max;
 }
 
 // Briefing: Overlay (Oberfläche + Höhendaten heute), analog zu den anderen

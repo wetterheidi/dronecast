@@ -11,6 +11,7 @@
 
 import { cloudBaseAgl } from "./clouds.js";
 import { fmtHeight } from "./units.js";
+import { ipiStatus } from "./gramet/hazards/icing.js";
 
 const KMH_TO_MS = 1 / 3.6;
 
@@ -32,10 +33,18 @@ const KMH_TO_MS = 1 / 3.6;
  *                     `{fog, freezing} | null` aus der Säule (clouds.js
  *                     `groundFog`) — physikalischer Nebelnachweis aus QW/QI,
  *                     ergänzt (nicht ersetzt) die `weather_code`-Erkennung.
+ * @param icingBandMaxArr Optionales Array parallel zu surface.time: Maximum
+ *                     des Icing-Potential-Index (0..1, `hazards/icing.js`
+ *                     `ipiAt`) zwischen 10 m und opHeightM, analog
+ *                     `windBandMax` aber synchron aus der bereits geladenen
+ *                     Säule bestimmt (`icingBandMaxAt` in app.js) — keine
+ *                     eigene Fetch-Pipeline nötig.
  * @returns { time, rows: [{id,label,kind,cells:[{status,value|text}]}],
  *            conclusion: [{status, limitingId}] }
  */
-export function evaluate(surface, windBandMax, profile, opHeightM, cloudCeilingArr = null, groundFogArr = null) {
+export function evaluate(
+  surface, windBandMax, profile, opHeightM, cloudCeilingArr = null, groundFogArr = null, icingBandMaxArr = null,
+) {
   const time = surface.time;
   const v = surface.vars;
   const T = v.temperature_2m, Td = v.dew_point_2m, ccLow = v.cloud_cover_low;
@@ -59,6 +68,8 @@ export function evaluate(surface, windBandMax, profile, opHeightM, cloudCeilingA
       time.map((_, i) => (precipArr ? precipArr[i] ?? null : null))),
     rangeRow("temperature", "Temperatur", "temp", L.tempMin, L.tempMax, profile.marginPct,
       time.map((_, i) => (T ? T[i] ?? null : null))),
+    indexRow("icing", `Vereisung (10 m–${fmtHeight(opHeightM)})`, "index",
+      time.map((_, i) => (icingBandMaxArr ? icingBandMaxArr[i] ?? null : null)), ipiStatus),
     hazardRow(time, wc, visArr, groundFogArr),
   ];
 
@@ -76,6 +87,17 @@ function numericRow(id, label, kind, limit, defaultMarginPct, valuesRaw, opts = 
     return { status: evalThreshold(val, limit, defaultMarginPct), value: val };
   });
   return { id, label, kind, limit, cells };
+}
+
+// Wie `numericRow`, aber ohne Profil-Grenzwert: der Status kommt direkt aus
+// `statusFn(val)` -- für Größen mit fest verdrahteten (nicht drohnenspezifischen)
+// Schwellen wie den Icing-Potential-Index (`ipiStatus`, hazards/icing.js).
+function indexRow(id, label, kind, valuesRaw, statusFn) {
+  const cells = valuesRaw.map((val) => {
+    if (val == null || !Number.isFinite(val)) return { status: "na", value: null };
+    return { status: statusFn(val), value: val };
+  });
+  return { id, label, kind, cells };
 }
 
 // Ein Wert, zwei Grenzen (min UND max, z. B. Betriebstemperatur nach unten

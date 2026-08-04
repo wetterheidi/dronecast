@@ -101,6 +101,7 @@ function formatCell(kind, cell) {
     case "temp": return fmtTemp(v);
     case "vis": return `${(v / 1000).toFixed(1)} km`;
     case "precip": return `${v.toFixed(1)} mm/h`;
+    case "index": return `${Math.round(v * 100)} %`;
     default: return String(v);
   }
 }

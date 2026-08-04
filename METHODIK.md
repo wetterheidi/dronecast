@@ -486,6 +486,21 @@ Aus `weather_code` (`hazardRow()`), ohne numerischen Grenzwert:
   Sicht-Zeile die Lage bereits numerisch ab — keine doppelte Bewertung),
 - sonst **grün** (kein Hazard-Code).
 
+### 6.7 Vereisungs-Zeile (`indexRow()`, feste statt profilabhängige Schwelle)
+„Vereisung (10 m–Flughöhe)" wertet dieselbe Physik wie das GRAMET (`hazards/
+icing.js` `ipiAt`, s. 7.6) auf ein **Bandmaximum** zwischen 10 m und
+`opHeightM` aus — Stützstellen-Sampling wie beim Windmaximum (6, `bandHeights`
+in `app.js`), aber **synchron**: `icingBandMaxAt()` interpoliert direkt auf
+dem bereits geladenen GRAMET-Gitter (`state.data.gmGrid`, mit GRAMET geteilt —
+kein eigener Request, keine WindField-Anbindung nötig). Status kommt aus
+`ipiStatus()` (grün < 0,30, gelb < 0,45, sonst rot — dieselben Schwellen wie
+`ipiCategory()` im GRAMET, nur ohne die dortige „none"/"light"-Unterscheidung,
+da Go/No-Go keine eigene Ampelfarbe für „Spur von Vereisung" hat). Anders als
+bei `numericRow` ist die Schwelle **nicht profilabhängig** — es gibt (noch)
+keine drohnenspezifische Vereisungstoleranz, daher `indexRow()` statt
+`numericRow()`/`evalThreshold()`. Fehlt das Bandmaximum (Säule nicht geladen),
+bleibt die Zeile `"na"` — nie stillschweigend grün (6.2).
+
 ---
 
 ## 7. GRAMET (Cross-Section entlang der Route)
@@ -706,12 +721,15 @@ Vereisungssymbol (U-Bogen mit zwei vertikalen Linien) je zusammenhängender
 `severe`-Fläche, an deren Schwerpunkt, mit Mindestabstand analog zu den
 Cb-Glyphen (7.5).
 
-**Noch offen:** Go/No-Go-Bandmaximum (analog `windBandMaxAt`, 1) über
-`ipiAt`/`ipiCategory`, aus der ohnehin geladenen Säule (`state.data.col`) statt
-einer neuen Fetch-Pipeline; Aufwind-Bonus `f_w(w)` (Hebung repliziert SLW, wie
-im NCAR-CIP-Ansatz) — `w` liegt über `grid.w` bereit, aber bewusst nicht in
-V1; echte Kalibrierung aller Schwellen (T-Fenster wie IPI-Kategorien) mit
-realen Vereisungsfällen.
+**Go/No-Go-Bandmaximum:** implementiert, s. 6.7 (`icingBandMaxAt()` in
+`app.js`, Zeile „Vereisung (10 m–Flughöhe)" in `gonogo.js`) — dieselbe Physik
+(`ipiAt`), eigene Reduktion (Bandmaximum statt Kontur) und eigene
+Kategorisierung (`ipiStatus`, drei statt vier Stufen).
+
+**Noch offen:** Aufwind-Bonus `f_w(w)` (Hebung repliziert SLW, wie im
+NCAR-CIP-Ansatz) — `w` liegt über `grid.w` bereit, aber bewusst nicht in V1;
+echte Kalibrierung aller Schwellen (T-Fenster wie IPI-Kategorien) mit realen
+Vereisungsfällen.
 
 ---
 
@@ -731,7 +749,8 @@ vereinfachende Annahme steckt:
 | Wind-Bandmaximum (1) | Stützstellen-Sampling, kein exaktes Profilmaximum |
 | Böen (1) | nur am Boden, keine Hochrechnung auf Flughöhe |
 | Go/No-Go-Schwellenwerte | Platzhalterprofil, keine geprüften Herstellerwerte |
-| Vereisung, Turbulenz | in der Go/No-Go-Tabelle noch nicht abgebildet (Vereisung: Bandmaximum offen, s. 7.6) |
+| Vereisungs-Bandmaximum (6.7) | Stützstellen-Sampling wie Wind-Bandmaximum, kein exaktes Profilmaximum; feste statt drohnenspezifischer Schwelle |
+| Turbulenz | in der Go/No-Go-Tabelle noch nicht abgebildet, GRAMET-Stub (7.6) |
 | GRAMET Konvektionsschwellen (7.5) | `TRIGGER_EXCESS_K`, Towering-Hürde, CAPE-/Updraft-Auffangpfad — sämtlich unkalibriert |
 | GRAMET Niederschlags-Fallback-Obergrenze (7.4) | 2000 m, grobe Annahme für flachen Niesel-/Sprühregen ohne erkannte Wolkenspur |
 | GRAMET Vereisung (7.6) | `f_T`-Fenster und IPI-Kategorie-Schwellen (0,15/0,30/0,45) unkalibriert; `cloudFrac` statt eigener LWC-Größe |
