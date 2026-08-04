@@ -84,10 +84,22 @@ function conclusionRow(conclusion, labelById) {
   return tr;
 }
 
+// `subtext` (optional): kleinere zweite Zeile unter dem Hauptwert -- bislang
+// nur die Vereisungszeile (Höhenband der stärksten Vereisung, s. gonogo.js
+// `icingRow`), generisch gehalten für den Fall weiterer Zeilen mit Zusatzinfo.
 function cellContent(kind, cell) {
   const td = document.createElement("td");
   td.className = `gng-cell go-${cell.status}`;
-  td.textContent = formatCell(kind, cell);
+  if (cell.subtext) {
+    const main = document.createElement("div");
+    main.textContent = formatCell(kind, cell);
+    const sub = document.createElement("div");
+    sub.className = "gng-subtext";
+    sub.textContent = cell.subtext;
+    td.append(main, sub);
+  } else {
+    td.textContent = formatCell(kind, cell);
+  }
   return td;
 }
 
@@ -101,7 +113,6 @@ function formatCell(kind, cell) {
     case "temp": return fmtTemp(v);
     case "vis": return `${(v / 1000).toFixed(1)} km`;
     case "precip": return `${v.toFixed(1)} mm/h`;
-    case "index": return `${Math.round(v * 100)} %`;
     default: return String(v);
   }
 }

@@ -9,7 +9,7 @@ import { renderCrossSection } from "./crosssection.js";
 import { gridFromColumn, sampleAt } from "./gramet/grid.js";
 import { deriveView } from "./gramet/derive.js";
 import { renderGramet, exportPng as exportGrametPng } from "./gramet/render.js";
-import { ipiAt } from "./gramet/hazards/icing.js";
+import { ipiAt, ipiCategoryFloor } from "./gramet/hazards/icing.js";
 import { buildBriefingHtml, buildBriefingContent } from "./briefing.js";
 import { evaluate as evaluateGoNoGo } from "./gonogo.js";
 import { renderGoNoGoTable } from "./gonogotable.js";
@@ -821,19 +821,50 @@ function bandHeights(hMinM, hMaxM) {
 
 const KELVIN = 273.15;
 
-// Maximaler Icing-Potential-Index zwischen hMinM und hMaxM zur Stunde `i` --
-// dieselben Stützhöhen wie beim Windbandmaximum (`bandHeights`), aber
-// SYNCHRON: anders als `windBandMaxAt` (WindField, eigene Requests) sitzt
-// `grid` bereits vollständig geladen im Speicher (`gridFromColumn` auf der
-// ohnehin gecachten Säule, s. `renderGm`) -- reine Interpolation, s.
-// METHODIK.md 7.6.
+// Maximaler Icing-Potential-Index zwischen hMinM und hMaxM zur Stunde `i`,
+// plus das Höhenband der stärksten Vereisung (für die Go/No-Go-Zeile, s.
+// gonogo.js `icingRow`) -- dieselben Stützhöhen wie beim Windbandmaximum
+// (`bandHeights`), aber SYNCHRON: anders als `windBandMaxAt` (WindField,
+// eigene Requests) sitzt `grid` bereits vollständig geladen im Speicher
+// (`gridFromColumn` auf der ohnehin gecachten Säule, s. `renderGm`) -- reine
+// Interpolation, s. METHODIK.md 7.6/6.7.
+//
+// Band = zusammenhängender Bereich um das Maximum, in dem der IPI die
+// UNTERE Schwelle von dessen eigener Kategorie nicht unterschreitet (z. B.
+// bei Maximum "severe": wo der IPI >= IPI_SEVERE bleibt) -- die exakten
+// Bandgrenzen werden wie bei Wolkenbasis/-obergrenze (`crossHeight` in
+// clouds.js) linear zwischen den Stützhöhen interpoliert, an denen der IPI
+// die Schwelle kreuzt. Kein Band ("none"-Kategorie) -> bandBottomM/TopM null.
 function icingBandMaxAt(grid, i, hMinM, hMaxM) {
-  let max = 0;
-  for (const h of bandHeights(hMinM, hMaxM)) {
+  const samples = bandHeights(hMinM, hMaxM).map((h) => {
     const s = sampleAt(grid, i, h);
-    max = Math.max(max, ipiAt(s.T - KELVIN, s.cloudFrac));
+    return { h, ipi: ipiAt(s.T - KELVIN, s.cloudFrac) };
+  });
+  let maxIdx = 0;
+  for (let k = 1; k < samples.length; k++) {
+    if (samples[k].ipi > samples[maxIdx].ipi) maxIdx = k;
   }
-  return max;
+  const ipi = samples[maxIdx].ipi;
+  const floor = ipiCategoryFloor(ipi);
+  if (floor <= 0) return { ipi, bandBottomM: null, bandTopM: null };
+
+  let lo = maxIdx, hi = maxIdx;
+  while (lo > 0 && samples[lo - 1].ipi >= floor) lo--;
+  while (hi < samples.length - 1 && samples[hi + 1].ipi >= floor) hi++;
+  const bandBottomM = lo > 0
+    ? crossHeight(samples[lo - 1].h, samples[lo - 1].ipi, samples[lo].h, samples[lo].ipi, floor)
+    : samples[lo].h;
+  const bandTopM = hi < samples.length - 1
+    ? crossHeight(samples[hi].h, samples[hi].ipi, samples[hi + 1].h, samples[hi + 1].ipi, floor)
+    : samples[hi].h;
+  return { ipi, bandBottomM, bandTopM };
+}
+
+// Höhe, an der eine linear zwischen (h0,v0) und (h1,v1) interpolierte Größe
+// den Schwellwert `thr` kreuzt -- wie `crossHeight` in clouds.js.
+function crossHeight(h0, v0, h1, v1, thr) {
+  if (v1 === v0) return h0;
+  return h0 + (thr - v0) / (v1 - v0) * (h1 - h0);
 }
 
 // Briefing: Overlay (Oberfläche + Höhendaten heute), analog zu den anderen

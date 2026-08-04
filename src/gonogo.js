@@ -11,7 +11,7 @@
 
 import { cloudBaseAgl } from "./clouds.js";
 import { fmtHeight } from "./units.js";
-import { ipiStatus } from "./gramet/hazards/icing.js";
+import { ipiStatus, ipiCategory } from "./gramet/hazards/icing.js";
 
 const KMH_TO_MS = 1 / 3.6;
 
@@ -33,13 +33,14 @@ const KMH_TO_MS = 1 / 3.6;
  *                     `{fog, freezing} | null` aus der Säule (clouds.js
  *                     `groundFog`) — physikalischer Nebelnachweis aus QW/QI,
  *                     ergänzt (nicht ersetzt) die `weather_code`-Erkennung.
- * @param icingBandMaxArr Optionales Array parallel zu surface.time: Maximum
- *                     des Icing-Potential-Index (0..1, `hazards/icing.js`
- *                     `ipiAt`) zwischen 10 m und opHeightM, analog
- *                     `windBandMax` aber synchron aus der bereits geladenen
- *                     Säule bestimmt (`icingBandMaxAt` in app.js) — keine
- *                     eigene Fetch-Pipeline nötig.
- * @returns { time, rows: [{id,label,kind,cells:[{status,value|text}]}],
+ * @param icingBandMaxArr Optionales Array parallel zu surface.time:
+ *                     `{ipi, bandBottomM, bandTopM}` (Maximum des
+ *                     Icing-Potential-Index, 0..1, `hazards/icing.js` `ipiAt`,
+ *                     plus Höhenband der stärksten Vereisung) zwischen 10 m
+ *                     und opHeightM, analog `windBandMax` aber synchron aus
+ *                     der bereits geladenen Säule bestimmt (`icingBandMaxAt`
+ *                     in app.js) — keine eigene Fetch-Pipeline nötig.
+ * @returns { time, rows: [{id,label,kind,cells:[{status,value|text,subtext?}]}],
  *            conclusion: [{status, limitingId}] }
  */
 export function evaluate(
@@ -68,8 +69,7 @@ export function evaluate(
       time.map((_, i) => (precipArr ? precipArr[i] ?? null : null))),
     rangeRow("temperature", "Temperatur", "temp", L.tempMin, L.tempMax, profile.marginPct,
       time.map((_, i) => (T ? T[i] ?? null : null))),
-    indexRow("icing", `Vereisung (10 m–${fmtHeight(opHeightM)})`, "index",
-      time.map((_, i) => (icingBandMaxArr ? icingBandMaxArr[i] ?? null : null)), ipiStatus),
+    icingRow(time, icingBandMaxArr, opHeightM),
     hazardRow(time, wc, visArr, groundFogArr),
   ];
 
@@ -89,15 +89,32 @@ function numericRow(id, label, kind, limit, defaultMarginPct, valuesRaw, opts = 
   return { id, label, kind, limit, cells };
 }
 
-// Wie `numericRow`, aber ohne Profil-Grenzwert: der Status kommt direkt aus
-// `statusFn(val)` -- für Größen mit fest verdrahteten (nicht drohnenspezifischen)
-// Schwellen wie den Icing-Potential-Index (`ipiStatus`, hazards/icing.js).
-function indexRow(id, label, kind, valuesRaw, statusFn) {
-  const cells = valuesRaw.map((val) => {
-    if (val == null || !Number.isFinite(val)) return { status: "na", value: null };
-    return { status: statusFn(val), value: val };
+// Vereisungs-Intensität statt Prozentzahl: Piloten kennen die Vereisung
+// üblicherweise als Stufen (Trace/Light/Moderate/Severe), keinen Indexwert --
+// `ipiCategory()` liefert exakt diese vier Stufen (none/light/moderate/
+// severe), hier auf die deutschen Tabellenbegriffe gemappt. Ampelfarbe kommt
+// separat aus `ipiStatus()` (gröber, drei Stufen, s. hazards/icing.js) --
+// beide Funktionen teilen dieselben Schwellen, nur die Bucketing-Auflösung
+// unterscheidet sich. Keine Profil-Grenze (noch keine drohnenspezifische
+// Vereisungstoleranz), daher kein `evalThreshold`.
+const ICING_LABEL = { none: "keine", light: "leicht", moderate: "mäßig", severe: "stark" };
+
+// `icingBandMaxArr[i]` ist `{ipi, bandBottomM, bandTopM}` (s. `icingBandMaxAt`
+// in app.js) -- die Höhengrenzen kommen als zweite, kleinere Zeile dazu
+// (`subtext`, s. gonogotable.js), damit man nicht nur die Intensität sieht,
+// sondern auch WO in der Säule sie zu erwarten ist. Kein Band bei "keine"
+// (bandBottomM/TopM null) -> nur die Intensitätszeile.
+function icingRow(time, icingBandMaxArr, opHeightM) {
+  const cells = time.map((_, i) => {
+    const b = icingBandMaxArr ? icingBandMaxArr[i] : null;
+    if (!b || !Number.isFinite(b.ipi)) return { status: "na", text: "–" };
+    const cell = { status: ipiStatus(b.ipi), text: ICING_LABEL[ipiCategory(b.ipi)] };
+    if (Number.isFinite(b.bandBottomM) && Number.isFinite(b.bandTopM)) {
+      cell.subtext = `${fmtHeight(b.bandBottomM)}–${fmtHeight(b.bandTopM)}`;
+    }
+    return cell;
   });
-  return { id, label, kind, cells };
+  return { id: "icing", label: `Vereisung (10 m–${fmtHeight(opHeightM)})`, kind: "text", cells };
 }
 
 // Ein Wert, zwei Grenzen (min UND max, z. B. Betriebstemperatur nach unten

@@ -486,20 +486,38 @@ Aus `weather_code` (`hazardRow()`), ohne numerischen Grenzwert:
   Sicht-Zeile die Lage bereits numerisch ab — keine doppelte Bewertung),
 - sonst **grün** (kein Hazard-Code).
 
-### 6.7 Vereisungs-Zeile (`indexRow()`, feste statt profilabhängige Schwelle)
+### 6.7 Vereisungs-Zeile (`icingRow()`, Intensitätsstufe statt Indexwert)
 „Vereisung (10 m–Flughöhe)" wertet dieselbe Physik wie das GRAMET (`hazards/
 icing.js` `ipiAt`, s. 7.6) auf ein **Bandmaximum** zwischen 10 m und
 `opHeightM` aus — Stützstellen-Sampling wie beim Windmaximum (6, `bandHeights`
 in `app.js`), aber **synchron**: `icingBandMaxAt()` interpoliert direkt auf
 dem bereits geladenen GRAMET-Gitter (`state.data.gmGrid`, mit GRAMET geteilt —
-kein eigener Request, keine WindField-Anbindung nötig). Status kommt aus
-`ipiStatus()` (grün < 0,30, gelb < 0,45, sonst rot — dieselben Schwellen wie
-`ipiCategory()` im GRAMET, nur ohne die dortige „none"/"light"-Unterscheidung,
-da Go/No-Go keine eigene Ampelfarbe für „Spur von Vereisung" hat). Anders als
+kein eigener Request, keine WindField-Anbindung nötig).
+
+Angezeigt wird **nicht** der rohe IPI-Wert, sondern die vertraute
+Aviatik-Intensitätsstufe: `ipiCategory()` liefert dieselben vier Stufen
+(none/light/moderate/severe) wie die GRAMET-Kontur, hier auf die deutschen
+Tabellenbegriffe „keine/leicht/mäßig/stark" gemappt (`ICING_LABEL`). Die
+Ampelfarbe kommt separat aus `ipiStatus()` (gröber, drei Stufen: grün < 0,30,
+gelb < 0,45, sonst rot — dieselben Schwellen wie `ipiCategory`, nur ohne die
+„none"/"light"-Unterscheidung, da Go/No-Go keine eigene Ampelfarbe für „Spur
+von Vereisung" hat) — „leicht" kann also auf grünem Grund stehen. Anders als
 bei `numericRow` ist die Schwelle **nicht profilabhängig** — es gibt (noch)
-keine drohnenspezifische Vereisungstoleranz, daher `indexRow()` statt
+keine drohnenspezifische Vereisungstoleranz, daher `icingRow()` statt
 `numericRow()`/`evalThreshold()`. Fehlt das Bandmaximum (Säule nicht geladen),
 bleibt die Zeile `"na"` — nie stillschweigend grün (6.2).
+
+**Höhenband der stärksten Vereisung** (zweite, kleinere Zeile in der Zelle,
+`cell.subtext`): `icingBandMaxAt()` liefert nicht nur den Maximalwert, sondern
+auch die Höhengrenzen des zusammenhängenden Bereichs um dieses Maximum, in
+dem der IPI dessen eigene Kategorie-Untergrenze (`ipiCategoryFloor()`, z. B.
+`IPI_SEVERE` bei einem Maximum in „severe") nicht unterschreitet — exakte
+Kreuzungshöhen linear zwischen den Stützstellen interpoliert, genau wie
+`crossHeight()` für Wolkenbasis/-obergrenze in `clouds.js`. Bei „keine"
+(kein Wert erreicht `IPI_LIGHT`) gibt es kein Band, die Zelle zeigt nur die
+Intensität. `gonogotable.js` rendert `subtext` generisch als kleinere zweite
+Zeile unter dem Hauptwert (`.gng-subtext`, `css/style.css`) — bislang nur von
+der Vereisungszeile genutzt.
 
 ---
 

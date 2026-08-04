@@ -269,6 +269,7 @@ select, input[type="number"], input[type="text"] {
 .gng-daterow th, .gng-hourrow th { background: #f4f3ef; }
 .gng-daterow .gng-corner, .gng-hourrow .gng-corner { z-index: 3; }
 .gng-conclusion th, .gng-conclusion td { font-weight: 700; }
+.gng-subtext { font-size: 10px; color: #6b6a65; font-weight: 400; }
 
 /* Profildetails (Datenbank-Ansicht, read-only) */
 #gng-info {

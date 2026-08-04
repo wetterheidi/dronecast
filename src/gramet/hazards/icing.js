@@ -61,6 +61,21 @@ export function ipiCategory(ipi) {
 }
 
 /**
+ * Untere IPI-Schwelle der Kategorie von `ipi` -- 0 bei "none" (kein
+ * Vereisungsband). Für Go/No-Go: die Höhengrenzen des Bands der stärksten
+ * Vereisung sind dort definiert, wo der IPI diese Schwelle kreuzt (analog
+ * `crossHeight` in clouds.js für Wolkenbasis/-obergrenze), s.
+ * `icingBandMaxAt` in app.js.
+ */
+export function ipiCategoryFloor(ipi) {
+  const cat = ipiCategory(ipi);
+  if (cat === "severe") return IPI_SEVERE;
+  if (cat === "moderate") return IPI_MODERATE;
+  if (cat === "light") return IPI_LIGHT;
+  return 0;
+}
+
+/**
  * IPI (0..1) -> Go/No-Go-Ampel (green/yellow/red), s. gonogo.js. Dieselben
  * Schwellen wie `ipiCategory` (IPI_MODERATE/IPI_SEVERE) -- nur auf drei statt
  * vier Stufen zusammengefasst (none/light -> green), da Go/No-Go keine
