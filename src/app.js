@@ -6,10 +6,11 @@ import { renderMeteogram } from "./meteogram.js";
 import { fetchColumn, buildField } from "./column.js";
 import { cloudCeiling, cloudLayers, groundFog } from "./clouds.js";
 import { renderCrossSection } from "./crosssection.js";
-import { gridFromColumn, sampleAt } from "./gramet/grid.js";
+import { gridFromColumn, sampleAt, derive } from "./gramet/grid.js";
 import { deriveView } from "./gramet/derive.js";
 import { renderGramet, exportPng as exportGrametPng } from "./gramet/render.js";
 import { ipiAt, ipiCategoryFloor } from "./gramet/hazards/icing.js";
+import { tfiAt, tfiCategoryFloor } from "./gramet/hazards/turbulence.js";
 import { buildBriefingHtml, buildBriefingContent } from "./briefing.js";
 import { evaluate as evaluateGoNoGo } from "./gonogo.js";
 import { renderGoNoGoTable } from "./gonogotable.js";
@@ -633,9 +634,26 @@ async function openGoNoGo() {
         : null;
     } catch { state.data.icingBandMax = null; }
   }
+  // Turbulenz: TFI-Bandmaximum aus derselben Säule/demselben Gitter wie
+  // Vereisung oben (`state.data.gmGrid` ist zu diesem Zeitpunkt bereits
+  // gesetzt) -- Ri/Scherung stehen an `derive(grid)` bereits pro Modell-
+  // schicht bereit, s. `turbulenceBandMaxAt`.
+  if (state.data.turbulenceBandMax === undefined) {
+    try {
+      const col = await ensureColumn();
+      const { lat, lon } = state.point;
+      if (!state.data.gmGrid) state.data.gmGrid = gridFromColumn(col, state.data.surface, lat, lon);
+      const grid = state.data.gmGrid;
+      const sameLength = grid.times.length === state.data.surface.time.length;
+      state.data.turbulenceBandMax = sameLength
+        ? state.data.surface.time.map((_, i) => turbulenceBandMaxAt(grid, i, 10, settings.maxHeight))
+        : null;
+    } catch { state.data.turbulenceBandMax = null; }
+  }
   renderGoNoGoTable(el("gng-body"), evaluateGoNoGo(
     state.data.surface, state.data.windBandMax, getProfile(settings.droneProfile), settings.maxHeight,
     state.data.cloudCeiling ?? null, state.data.groundFog ?? null, state.data.icingBandMax ?? null,
+    state.data.turbulenceBandMax ?? null,
   ));
 }
 el("gng-close").addEventListener("click", () => { el("gonogo").hidden = true; });
@@ -865,6 +883,59 @@ function icingBandMaxAt(grid, i, hMinM, hMaxM) {
 function crossHeight(h0, v0, h1, v1, thr) {
   if (v1 === v0) return h0;
   return h0 + (thr - v0) / (v1 - v0) * (h1 - h0);
+}
+
+// Maximaler Turbulence-Flag-Index zwischen hMinM und hMaxM zur Stunde `i`,
+// plus das Höhenband der stärksten Turbulenz (für die Go/No-Go-Zeile, s.
+// gonogo.js `turbulenceRow`). Anders als `icingBandMaxAt`/`windBandMaxAt`
+// wird HIER NICHT auf `bandHeights()`-Stützhöhen resampelt: Ri/Scherung
+// (`grid.js` `derive()`) sind bereits Differenzenquotienten über die
+// jeweilige Schichtdicke zwischen zwei Modell-Leveln, ein Resampling würde
+// nur künstliche, nicht durch Daten gestützte Zwischenwerte erzeugen. Statt-
+// dessen direkt über die echten Modellschichten iterieren, deren Mittelpunkt
+// im Band liegt (Bandgrenzen linear zwischen Schicht-Mittelpunkten
+// interpoliert, `crossHeight`, analog Vereisung/Wolkenbasis).
+//
+// Fällt keine Schicht-Mittelhöhe ins Band (sehr niedrige Flughöhe, gröbere
+// Levelauflösung am unteren Rand als das Band breit ist), Fallback auf die
+// dem Bandzentrum nächstgelegene Schicht -- sonst bliebe die Zeile bei
+// niedrigen `maxHeight`-Einstellungen (gerade der Hauptfall für Drohnen)
+// leer, statt zumindest eine Näherung zu zeigen.
+function turbulenceBandMaxAt(grid, i, hMinM, hMaxM) {
+  const { ri, shear2, nm } = derive(grid);
+  const { nk } = grid;
+  const layers = [];
+  for (let k = 0; k < nm; k++) {
+    const z0 = grid.z[i * nk + k], z1 = grid.z[i * nk + k + 1];
+    if (!Number.isFinite(z0) || !Number.isFinite(z1)) continue;
+    layers.push({ h: (z0 + z1) / 2, tfi: tfiAt(ri[i * nm + k], shear2[i * nm + k]) });
+  }
+  if (!layers.length) return { tfi: NaN, bandBottomM: null, bandTopM: null };
+
+  const center = (hMinM + hMaxM) / 2;
+  let inBand = layers.filter((l) => l.h >= hMinM && l.h <= hMaxM);
+  if (!inBand.length) {
+    inBand = [layers.reduce((a, b) => (Math.abs(b.h - center) < Math.abs(a.h - center) ? b : a))];
+  }
+
+  let maxIdx = 0;
+  for (let k = 1; k < inBand.length; k++) {
+    if (inBand[k].tfi > inBand[maxIdx].tfi) maxIdx = k;
+  }
+  const tfi = inBand[maxIdx].tfi;
+  const floor = tfiCategoryFloor(tfi);
+  if (floor <= 0) return { tfi, bandBottomM: null, bandTopM: null };
+
+  let lo = maxIdx, hi = maxIdx;
+  while (lo > 0 && inBand[lo - 1].tfi >= floor) lo--;
+  while (hi < inBand.length - 1 && inBand[hi + 1].tfi >= floor) hi++;
+  const bandBottomM = lo > 0
+    ? crossHeight(inBand[lo - 1].h, inBand[lo - 1].tfi, inBand[lo].h, inBand[lo].tfi, floor)
+    : inBand[lo].h;
+  const bandTopM = hi < inBand.length - 1
+    ? crossHeight(inBand[hi].h, inBand[hi].tfi, inBand[hi + 1].h, inBand[hi + 1].tfi, floor)
+    : inBand[hi].h;
+  return { tfi, bandBottomM, bandTopM };
 }
 
 // Briefing: Overlay (Oberfläche + Höhendaten heute), analog zu den anderen

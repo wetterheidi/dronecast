@@ -12,6 +12,7 @@
 import { cloudBaseAgl } from "./clouds.js";
 import { fmtHeight } from "./units.js";
 import { ipiStatus, ipiCategory } from "./gramet/hazards/icing.js";
+import { tfiStatus, tfiCategory } from "./gramet/hazards/turbulence.js";
 
 const KMH_TO_MS = 1 / 3.6;
 
@@ -40,11 +41,21 @@ const KMH_TO_MS = 1 / 3.6;
  *                     und opHeightM, analog `windBandMax` aber synchron aus
  *                     der bereits geladenen Säule bestimmt (`icingBandMaxAt`
  *                     in app.js) — keine eigene Fetch-Pipeline nötig.
+ * @param turbulenceBandMaxArr Optionales Array parallel zu surface.time:
+ *                     `{tfi, bandBottomM, bandTopM}` (Maximum des
+ *                     Turbulence-Flag-Index, 0..1, `hazards/turbulence.js`
+ *                     `tfiAt`, plus Höhenband der stärksten Turbulenz)
+ *                     zwischen 10 m und opHeightM — analog `icingBandMaxArr`,
+ *                     synchron aus derselben Säule bestimmt
+ *                     (`turbulenceBandMaxAt` in app.js). Deckt NUR das
+ *                     Flugband oberhalb 10 m ab; Bodenböigkeit bleibt die
+ *                     separate `gustSurface`-Zeile (keine Doppelung).
  * @returns { time, rows: [{id,label,kind,cells:[{status,value|text,subtext?}]}],
  *            conclusion: [{status, limitingId}] }
  */
 export function evaluate(
   surface, windBandMax, profile, opHeightM, cloudCeilingArr = null, groundFogArr = null, icingBandMaxArr = null,
+  turbulenceBandMaxArr = null,
 ) {
   const time = surface.time;
   const v = surface.vars;
@@ -70,6 +81,7 @@ export function evaluate(
     rangeRow("temperature", "Temperatur", "temp", L.tempMin, L.tempMax, profile.marginPct,
       time.map((_, i) => (T ? T[i] ?? null : null))),
     icingRow(time, icingBandMaxArr, opHeightM),
+    turbulenceRow(time, turbulenceBandMaxArr, opHeightM),
     hazardRow(time, wc, visArr, groundFogArr),
   ];
 
@@ -115,6 +127,29 @@ function icingRow(time, icingBandMaxArr, opHeightM) {
     return cell;
   });
   return { id: "icing", label: `Vereisung (10 m–${fmtHeight(opHeightM)})`, kind: "text", cells };
+}
+
+// Wie ICING_LABEL: vier Stufen aus `tfiCategory()`, deutsche Turbulenz-
+// Begriffe (auch im deutschsprachigen Luftfahrtjargon "leicht/mäßig/stark").
+const TURB_LABEL = { none: "keine", light: "leicht", moderate: "mäßig", severe: "stark" };
+
+// `turbulenceBandMaxArr[i]` ist `{tfi, bandBottomM, bandTopM}` (s.
+// `turbulenceBandMaxAt` in app.js) -- Aufbau exakt wie `icingRow`: Kategorie-
+// Label + Ampel aus denselben Schwellen, Höhenband als subtext. Deckt NUR
+// das Flugband oberhalb 10 m ab (dynamische/thermische Instabilität aus Ri/
+// Scherung) -- Bodenböigkeit bleibt die vorhandene Böen-Zeile (`gustSurface`
+// oben) bzw. das Böen-Overlay, keine Doppelung in beiden Medien.
+function turbulenceRow(time, turbulenceBandMaxArr, opHeightM) {
+  const cells = time.map((_, i) => {
+    const b = turbulenceBandMaxArr ? turbulenceBandMaxArr[i] : null;
+    if (!b || !Number.isFinite(b.tfi)) return { status: "na", text: "–" };
+    const cell = { status: tfiStatus(b.tfi), text: TURB_LABEL[tfiCategory(b.tfi)] };
+    if (Number.isFinite(b.bandBottomM) && Number.isFinite(b.bandTopM)) {
+      cell.subtext = `${fmtHeight(b.bandBottomM)}–${fmtHeight(b.bandTopM)}`;
+    }
+    return cell;
+  });
+  return { id: "turbulence", label: `Turbulenz (10 m–${fmtHeight(opHeightM)})`, kind: "text", cells };
 }
 
 // Ein Wert, zwei Grenzen (min UND max, z. B. Betriebstemperatur nach unten

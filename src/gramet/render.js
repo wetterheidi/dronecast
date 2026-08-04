@@ -60,6 +60,9 @@ const CB_SYMBOL_HALO = "rgba(255,255,255,0.9)";
 // grünen Kontur-Füllung (ICING_STYLES) ab und markiert die Fläche als
 // Warnung, dieselbe Rotstufe wie TURB_STYLES.severe (konsistente Alarmfarbe).
 const ICING_SYMBOL_INK = "#c62828";
+// Turbulenzsymbol nur in "severe"-Flächen (stärkste Stufe, analog Vereisung)
+// -- dieselbe Rotstufe wie TURB_STYLES.severe, kein eigener Warnton nötig.
+const TURB_SYMBOL_INK = "#c62828";
 
 // Isothermen (rot/blau, gestrichelt) und Isotachen (violett, Strich-Punkt)
 // bewusst in unterschiedlichen Farbfamilien UND unterschiedlichem Strich-
@@ -159,6 +162,7 @@ export function renderGramet(host, grid, view, state = {}) {
     drawHazardArea(ctx, grid, view.hazards.icing, ICING_STYLES, x, y);
     drawIcingSevereGlyphs(ctx, grid, view.hazards.icing, x, y);
     drawHazardArea(ctx, grid, view.hazards.turbulence, TURB_STYLES, x, y);
+    drawTurbulenceSevereGlyphs(ctx, grid, view.hazards.turbulence, x, y);
   }
   if (toggles.isotherms !== false) drawIsotherms(ctx, view.isotherms, x, y);
   if (toggles.isotachs !== false) drawIsotachs(ctx, view.isotachs, x, y);
@@ -362,6 +366,58 @@ function icingSeverePath(cx, cy, size) {
   // Rechte vertikale Linie
   p.moveTo(cx + lineOffset, lineTopY);
   p.lineTo(cx + lineOffset, lineBottomY);
+
+  return p;
+}
+
+// --- Turbulenz: Symbol in "severe"-Flächen -----------------------------------
+
+// Wie `drawIcingSevereGlyphs` -- ein Symbol je zusammenhängender "severe"-
+// Fläche (stärkste TFI-Kategorie) an deren Schwerpunkt, gleicher
+// Mindestabstand. Leichtere Kategorien (light/moderate) bleiben reine
+// Kontur-Farbfläche ohne Symbol, wie bei Vereisung.
+function drawTurbulenceSevereGlyphs(ctx, grid, hazardArr, x, y) {
+  const n = grid.times.length * grid.nk;
+  const field = new Float32Array(n);
+  for (let ix = 0; ix < n; ix++) field[ix] = hazardArr[ix] === "severe" ? 1 : 0;
+  const polylines = contour(grid, field, 0.5);
+  const size = 20;
+  const centers = polylines
+    .filter((pl) => pl.length >= 2)
+    .map((pl) => ({
+      cx: pl.reduce((s, p) => s + x(p.t), 0) / pl.length,
+      cy: pl.reduce((s, p) => s + y(p.z), 0) / pl.length,
+    }))
+    .sort((a, b) => a.cx - b.cx);
+
+  let lastX = -Infinity;
+  for (const c of centers) {
+    if (c.cx - lastX < size * GLYPH_MIN_GAP) continue;
+    strokeSymbol(ctx, turbulenceModeratePath(c.cx, c.cy, size), size, TURB_SYMBOL_INK);
+    lastX = c.cx;
+  }
+}
+
+/**
+ * Mäßige Turbulenz (Moderate Turbulence), Standard-ICAO-SIGWX-Symbol.
+ * Kartensymbol: Waagerechte Linie, die in der Mitte spitz nach oben verläuft
+ * (Dach- bzw. Zacken-Form). Hier auf die stärkste TFI-Kategorie ("severe")
+ * angewendet -- dasselbe Verfahren wie bei Vereisung, wo ebenfalls nur die
+ * höchste Stufe ein Symbol bekommt, kein eigenes Glyph je Zwischenstufe.
+ */
+function turbulenceModeratePath(cx, cy, size) {
+  const p = new Path2D();
+  const w = size * 0.4;
+  const baseY = cy + size * 0.2;
+  const peakY = cy - size * 0.3;
+  const peakHalfWidth = size * 0.15;
+
+  // Durchgehender Linienzug von links nach rechts
+  p.moveTo(cx - w, baseY);              // Startpunkt ganz links
+  p.lineTo(cx - peakHalfWidth, baseY);  // Bis zum linken Fuß der Spitze
+  p.lineTo(cx, peakY);                  // Hinauf zur Spitze (Apex)
+  p.lineTo(cx + peakHalfWidth, baseY);  // Hinab zum rechten Fuß
+  p.lineTo(cx + w, baseY);              // Endpunkt ganz rechts
 
   return p;
 }
