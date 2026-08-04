@@ -17,6 +17,10 @@ const DEFAULTS = {
   forecastDays: DEFAULT_FORECAST_DAYS,
   droneProfile: DRONE_PROFILES[0].id,
   xsZoom: false, // Cross-Section: false = Gesamthöhe (log), true = bis Flughöhe (fein, linear)
+  // GRAMET-Ebenen: einzeln ausblendbar, das Meteogramm wird sonst schnell überladen.
+  gmIsothermsOn: true,
+  gmIsotachsOn: true,
+  gmHazardsOn: true, // Vereisung + Turbulenz (Kontur-Flächen + Symbole)
   lastPoint: null, // { lat, lon } – zuletzt gewählter Operationspunkt
   baseLayer: "OpenStreetMap", // Name der aktiven Leaflet-Basiskarte
   satLayerOn: false,

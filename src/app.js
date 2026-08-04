@@ -539,12 +539,21 @@ function renderGm() {
   }
   state.data.gmCanvas = renderGramet(el("gm-body"), state.data.gmGrid, state.data.gmView, {
     axis: settings.xsZoom ? "lin" : "log", zMin, zMax,
+    layerToggles: {
+      isotherms: settings.gmIsothermsOn,
+      isotachs: settings.gmIsotachsOn,
+      hazards: settings.gmHazardsOn,
+    },
   });
 }
 
 function syncGmToggle() {
   document.querySelectorAll("#gm-range button").forEach((b) => {
     b.classList.toggle("active", (b.dataset.range === "zoom") === settings.xsZoom);
+  });
+  document.querySelectorAll("#gm-layers input[data-layer]").forEach((cb) => {
+    const key = `gm${cb.dataset.layer[0].toUpperCase()}${cb.dataset.layer.slice(1)}On`;
+    cb.checked = settings[key] !== false;
   });
 }
 
@@ -554,6 +563,13 @@ el("gm-range").addEventListener("click", (e) => {
   updateSetting("xsZoom", btn.dataset.range === "zoom");
   renderGm();
   if (!el("crosssection").hidden) renderXs();
+});
+el("gm-layers").addEventListener("change", (e) => {
+  const cb = e.target.closest("input[data-layer]");
+  if (!cb) return;
+  const key = `gm${cb.dataset.layer[0].toUpperCase()}${cb.dataset.layer.slice(1)}On`;
+  updateSetting(key, cb.checked);
+  renderGm();
 });
 el("gm-export").addEventListener("click", () => {
   if (state.data?.gmCanvas) {

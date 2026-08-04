@@ -61,6 +61,13 @@ const CB_SYMBOL_HALO = "rgba(255,255,255,0.9)";
 // Warnung, dieselbe Rotstufe wie TURB_STYLES.severe (konsistente Alarmfarbe).
 const ICING_SYMBOL_INK = "#c62828";
 
+// Isothermen (rot/blau, gestrichelt) und Isotachen (violett, Strich-Punkt)
+// bewusst in unterschiedlichen Farbfamilien UND unterschiedlichem Strich-
+// muster -- vorher beide gestrichelt und in ähnlich stumpfen Tönen (Rot vs.
+// Oliv), auf dem Tag/Nacht-Verlauf kaum zu trennen (s. Feedback).
+const ISOTACH_COLOR = "#7b2fbf";
+const ISOTACH_DASH = [7, 3, 1, 3];
+
 const ROW_DEFS = {
   wind: {
     height: WIND_ROW_HEIGHT, label: ["Wind", "10 m"],
@@ -148,9 +155,11 @@ export function renderGramet(host, grid, view, state = {}) {
   // hinweise, die auf der Wolke "aufsitzen" sollen, statt darunter zu verschwinden
   // -- die Kontur-Füllung ist transparent genug (s. `drawHazardArea`), dass die
   // Wolkentextur durchscheint.
-  drawHazardArea(ctx, grid, view.hazards.icing, ICING_STYLES, x, y);
-  drawIcingSevereGlyphs(ctx, grid, view.hazards.icing, x, y);
-  drawHazardArea(ctx, grid, view.hazards.turbulence, TURB_STYLES, x, y);
+  if (toggles.hazards !== false) {
+    drawHazardArea(ctx, grid, view.hazards.icing, ICING_STYLES, x, y);
+    drawIcingSevereGlyphs(ctx, grid, view.hazards.icing, x, y);
+    drawHazardArea(ctx, grid, view.hazards.turbulence, TURB_STYLES, x, y);
+  }
   if (toggles.isotherms !== false) drawIsotherms(ctx, view.isotherms, x, y);
   if (toggles.isotachs !== false) drawIsotachs(ctx, view.isotachs, x, y);
   if (toggles.tropopause !== false) drawTropopause(ctx, view.tropopause, x, y);
@@ -598,14 +607,14 @@ function drawDash(ctx, cx, cy, len, tilt = 0.5) {
 
 // --- Linien: Isothermen/Isotachen/Tropopause ---------------------------------
 
-function drawPolyline(ctx, pl, x, y, color, dash) {
+function drawPolyline(ctx, pl, x, y, color, dash, width = 1.4) {
   if (pl.length < 2) return;
   ctx.save();
   ctx.setLineDash(dash);
   ctx.lineJoin = "round";
-  ctx.strokeStyle = "#fff"; ctx.lineWidth = 3;
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = width + 1.6;
   pathFor(ctx, pl, x, y); ctx.stroke();
-  ctx.strokeStyle = color; ctx.lineWidth = 1.4;
+  ctx.strokeStyle = color; ctx.lineWidth = width;
   pathFor(ctx, pl, x, y); ctx.stroke();
   ctx.restore();
 }
@@ -644,10 +653,10 @@ function drawIsotherms(ctx, isotherms, x, y) {
 function drawIsotachs(ctx, isotachs, x, y) {
   for (const { kt, polylines } of isotachs) {
     if (!polylines.length) continue;
-    for (const pl of polylines) drawPolyline(ctx, pl, x, y, "#6b6b1f", [3, 3]);
+    for (const pl of polylines) drawPolyline(ctx, pl, x, y, ISOTACH_COLOR, ISOTACH_DASH, 1.7);
     const last = rightmost(polylines);
     const p = last[last.length - 1];
-    labelBox(ctx, x(p.t), y(p.z), `${kt} kt`, "#6b6b1f", x.right + M.r);
+    labelBox(ctx, x(p.t), y(p.z), `${kt} kt`, ISOTACH_COLOR, x.right + M.r);
   }
 }
 function drawTropopause(ctx, line, x, y) {

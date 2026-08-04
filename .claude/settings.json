@@ -49,7 +49,14 @@
       "Bash(curl -s \"https://api.open-meteo.com/v1/forecast?latitude=54.5035&longitude=13.1396&hourly=precipitation,weather_code,snowfall,cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high&models=icon_d2&timeformat=iso8601&timezone=Europe%2FBerlin&forecast_days=3\")",
       "Bash(node --check src/gramet/hazards/icing.js)",
       "Bash(echo \"exit:$?\")",
-      "Bash(node --check /Users/wetterheidi/Documents/Git/droneforecast/src/gramet/render.js)"
+      "Bash(node --check /Users/wetterheidi/Documents/Git/droneforecast/src/gramet/render.js)",
+      "Bash(xargs -I{} sh -c 'echo {}; grep -n \"mg-head\\\\|seg-toggle\" {}')",
+      "Bash(node --check src/settings.js)",
+      "Bash(npm root *)",
+      "Bash(node drive.js)",
+      "Bash(convert gramet_partial.png -crop 700x300+0+90 -resize 200% crop_partial.png)",
+      "Bash(convert gramet_all_on.png -crop 700x300+0+90 -resize 200% crop_all.png)",
+      "Bash(magick gramet_all_on.png -crop 700x300+0+90 -resize 200% crop_all2.png)"
     ]
   }
 }
