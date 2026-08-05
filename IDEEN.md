@@ -78,6 +78,66 @@ diagnostiziert:
   (TFI), METHODIK.md 7.7 — inkl. bekannter Grenzen (kein Befund bei
   Feuchtlabilität/Konvektion, Onset- statt Intensitätskriterium, s. dort).
 
+## Jet-/Höhen-Turbulenz (CAT) über Ellrod TI1
+
+**Status:** vorgemerkt (nur diskutiert) · **Auslöser:** Vergleich mit der
+Turbulenzmethode aus Ogimets GRAMET (`E = (5·HWS + VWS² + 42)/4`) im
+Gespräch — Ergebnis: Ogimets Formel selbst nicht übernehmenswert (unerklärte
+Fit-Konstante „+42", an Cruise-Level-PIREPs kalibriert, kein Stabilitätsterm),
+aber der **Ansatzpunkt ist real**: der bestehende TFI ([turbulence.js](src/gramet/hazards/turbulence.js),
+METHODIK.md 7.7) ist Ri-/KH-Instabilität-basiert und dafür für das Flugband
+(10 m – Betriebshöhe) richtig aufgestellt, aber **strukturell blind für
+Jet-Turbulenz**: nahe der Tropopause ist die Schichtung meist so stabil
+(großes N²), dass Ri trotz kräftiger Scherung nicht unter 0,25 fällt, obwohl
+Deformation/Frontogenese an Jet-Streaks real Turbulenz erzeugt. Genau deshalb
+wurde historisch der Ellrod-TI (Ellrod & Knapp 1992) als Ergänzung zu reinen
+Ri-Diagnosen entwickelt — nicht nur eine andere Formel, sondern ein anderer
+Mechanismus (Deformation/Frontogenese statt Kelvin-Helmholtz-Scherinstabilität).
+
+### Architektur-Hürde: keine horizontalen Nachbarpunkte in der GRAMET-Säule
+`fetchGrid(lat, lon, …)` ([grid.js](src/gramet/grid.js)) ist eine Säule an
+**einem festen Punkt** über die Zeit (kein Routenschnitt) — Ellrod-TI braucht
+aber horizontale Ableitungen (`∂u/∂x, ∂u/∂y, ∂v/∂x, ∂v/∂y`), die aus einer
+Einzelsäule grundsätzlich nicht herleitbar sind, unabhängig von der Formel.
+Vermutlich bildet Ogimets HWS genau das entlang der (dort vorhandenen)
+Flugroute — ein Weg, der uns mangels Routenschnitt nicht offensteht.
+
+**Lösung liegt aber schon im Code:** [windfield.js](src/windfield.js)
+(`WindField`) fetcht/interpoliert bereits horizontale Gitterpunkte bilinear
+für das Wind-Overlay — dieselbe Mechanik kann ein kleines Stützpunkt-Kreuz
+(4 Nachbarn im Modellgitterabstand) um den Operationspunkt liefern, aus dem
+sich Streckungs-/Scherungsdeformation (`Def = √(D_st² + D_sh²)`) bilden lässt.
+Kein Neubau, aber ein echter Zusatz-Request (Kosten/Latenz) pro Level/Zeit.
+
+### Vorschlag (Umriss, Details bei Umsetzung ausarbeiten)
+- **Ellrod TI1 = Def · |dV/dz|** (Deformation × vertikale Scherung, `|dV/dz|`
+  aus `shear2` in [grid.js](src/gramet/grid.js) schon vorhanden) als
+  **eigenständiges** Onset-Kriterium, NICHT in die TFI-Formel gemischt
+  (`max(TFI, TI1-Flag)` pro Schicht) — hält beide Mechanismen einzeln
+  nachvollziehbar/debugbar, analog zum bestehenden Muster getrennter Gates.
+- **Nur oberhalb der Grenzschicht rechnen** (grob ab ~500 hPa) — begrenzt den
+  Zusatz-Request auf die paar Level, wo Jet-CAT überhaupt relevant ist, lässt
+  den drohnenrelevanten Teil der Säule unangetastet.
+- **Eigene Zeile/Legende** („Jet-/Höhen-CAT"), nicht stillschweigend in den
+  TFI eingerechnet — sonst verwischt die saubere Trennung
+  „Flugband-Turbulenz (Drohne)" vs. „Jet-CAT (Kontext, nicht drohnenrelevant,
+  aber für Gesamtbild/bemannte Luftfahrt in der Nähe sinnvoll)".
+- **Schwellen aus Ellrod & Knapp (1992) übernehmen** — beim Umsetzen im
+  Originalpaper nachschlagen und mit Quelle in METHODIK.md dokumentieren,
+  NICHT aus der Erinnerung schätzen (gleiches Prinzip wie bei den anderen
+  unkalibrierten Schwellen im Projekt).
+
+### Synergie mit „Karte: NWP-Modellgitter als Layer" (oben)
+Im Gespräch aufgeworfen: eine spätere flächige Turbulenz-/CAT-Karte (Ausbau
+des dort skizzierten NWP-Layers) bräuchte dieselbe
+Deformationsberechnung — nur flächig über ein Gitter statt an einem
+Operationspunkt extrahiert. Beide Verbraucher (GRAMET-Jet-CAT-Zeile und
+künftiger Karten-Layer) sollten sich **ein** Deformationsmodul auf Basis von
+`WindField` teilen, statt die Stützpunkt-Logik zweimal zu bauen — beim
+tatsächlichen Bau eines der beiden zuerst entscheiden, ob sich die
+Extraktion (Punkt) von der Rasterung (Fläche) sauber genug trennen lässt, um
+das Modul wirklich gemeinsam zu nutzen.
+
 ## Weather Briefing: Ausbau
 
 **Status:** Grundgerüst gebaut ([src/briefing.js](src/briefing.js), Button
