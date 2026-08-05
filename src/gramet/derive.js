@@ -269,18 +269,23 @@ function tropopause(grid) {
     let foundZ = NaN;
     for (let k = 0; k < nk; k++) {
       const ix = i * nk + k, z = grid.z[ix];
-      if (!Number.isFinite(z) || z < 5000) continue;
+      if (!Number.isFinite(z) || z < 5000 || !Number.isFinite(grid.T[ix])) continue;
       const zLimit = z + 2000;
       let ok = true, reachedLimit = false;
       for (let k2 = k + 1; k2 < nk; k2++) {
         const ix2 = i * nk + k2, zz = grid.z[ix2];
-        if (!Number.isFinite(zz)) break;
+        // Fehlende Höhe ODER Temperatur brechen ab, statt eine NaN-Lapse-Rate
+        // zu bilden -- `NaN > 2` ist immer false, würde `ok` also fälschlich
+        // `true` lassen und am Ende der Forecast-Reichweite eine Tropopause
+        // auf dem ersten (meist niedrigen) Level vortäuschen.
+        if (!Number.isFinite(zz) || !Number.isFinite(grid.T[ix2])) break;
         if (zz > zLimit) { reachedLimit = true; break; }
         const lapseKPerKm = -(grid.T[ix2] - grid.T[ix]) / (zz - z) * 1000;
         if (lapseKPerKm > 2) { ok = false; break; }
       }
-      // Kein Level bis zur 2-km-Grenze erreicht (Gitter endet zu früh) -> kein
-      // Treffer, sonst Fehlalarm am Domänendeckel.
+      // Kein Level bis zur 2-km-Grenze erreicht (Gitter endet zu früh oder
+      // Temperaturdaten fehlen ab hier) -> kein Treffer, sonst Fehlalarm am
+      // Domänendeckel.
       if (ok && reachedLimit) { foundZ = z; break; }
     }
     if (Number.isFinite(foundZ)) line.push({ t: times[i], z: foundZ });
