@@ -151,19 +151,46 @@ function columnCrossings(grid, i, thrK) {
 
 // --- Isotachen (marching squares) --------------------------------------------
 
-/** Generische Konturlinien-Extraktion auf einem (Zeit x Level)-Feld — auch für
- *  spätere Hazard-Flächenumrisse wiederverwendbar (s. Plan). */
+// Weit unter jeder realistischen Schwelle (Hazard-Level max 2,5; Isotachen
+// max ~51 m/s), aber FINIT -- eine Randposition, an der zwei Ecken (eine
+// reale, eine Phantom-Ecke, s. `contour()`) auf denselben Punkt fallen,
+// ergäbe mit `-Infinity` in `edgePoint()` sonst `Infinity/Infinity = NaN`.
+const OUTSIDE_FIELD = -1e6;
+
+/**
+ * Generische Konturlinien-Extraktion auf einem (Zeit x Level)-Feld — auch für
+ * spätere Hazard-Flächenumrisse wiederverwendbar (s. Plan).
+ *
+ * Rand-Padding: eine Phantomreihe/-spalte rund ums Gitter (`i`/`k` außerhalb
+ * `[0,nt)`/`[0,nk)`) mit Wert `OUTSIDE_FIELD`, aber auf DERSELBEN Position
+ * wie der jeweils angrenzende Randpunkt (`pos()` klemmt den Index, kein
+ * extrapolierter Ort). Ohne das würde eine Fläche, die eine Gitterkante
+ * "durchgehend" erfüllt (kein echter Kreuzungspunkt im Inneren -- z. B. ein
+ * Hazard, der schon zur ersten Stunde oder am untersten Level vorliegt),
+ * eine offene Polylinie erzeugen; `drawHazardArea()` schließt offene
+ * Polylinien beim Füllen mit einer geraden Linie quer durchs Bild
+ * (sichtbares Artefakt, s. Feedback). Mit Padding entsteht an jeder solchen
+ * Kante stattdessen ein echter Kreuzungspunkt GENAU auf dem Gitterrand
+ * (reale und Phantom-Position fallen zusammen, die Interpolation kollabiert
+ * unabhängig vom Mischungsfaktor auf diesen Punkt) -- die Fläche schließt
+ * sich sauber am Rand statt quer durchs Bild.
+ */
 export function contour(grid, field, threshold) {
   const { nk, times } = grid, nt = times.length;
   const segments = [];
 
-  for (let i = 0; i < nt - 1; i++) {
-    for (let k = 0; k < nk - 1; k++) {
-      const i00 = i * nk + k, i10 = (i + 1) * nk + k, i11 = (i + 1) * nk + k + 1, i01 = i * nk + k + 1;
-      const v00 = field[i00], v10 = field[i10], v11 = field[i11], v01 = field[i01];
+  const val = (i, k) => (i < 0 || i >= nt || k < 0 || k >= nk) ? OUTSIDE_FIELD : field[i * nk + k];
+  const pos = (i, k) => {
+    const ci = clampIdx(i, nt), ck = clampIdx(k, nk);
+    return { t: times[ci], z: grid.z[ci * nk + ck] };
+  };
+
+  for (let i = -1; i < nt; i++) {
+    for (let k = -1; k < nk; k++) {
+      const v00 = val(i, k), v10 = val(i + 1, k), v11 = val(i + 1, k + 1), v01 = val(i, k + 1);
       if (![v00, v10, v11, v01].every(Number.isFinite)) continue;
-      const p00 = { t: times[i], z: grid.z[i00] }, p10 = { t: times[i + 1], z: grid.z[i10] };
-      const p11 = { t: times[i + 1], z: grid.z[i11] }, p01 = { t: times[i], z: grid.z[i01] };
+      const p00 = pos(i, k), p10 = pos(i + 1, k);
+      const p11 = pos(i + 1, k + 1), p01 = pos(i, k + 1);
 
       const bottom = crossesEdge(v00, v10, threshold) ? edgePoint(threshold, v00, v10, p00, p10) : null;
       const right = crossesEdge(v10, v11, threshold) ? edgePoint(threshold, v10, v11, p10, p11) : null;
@@ -187,6 +214,8 @@ export function contour(grid, field, threshold) {
   }
   return chainSegments(segments);
 }
+
+function clampIdx(i, n) { return i < 0 ? 0 : i >= n ? n - 1 : i; }
 
 function crossesEdge(va, vb, threshold) { return (va >= threshold) !== (vb >= threshold); }
 function edgePoint(threshold, va, vb, pa, pb) {

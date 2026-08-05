@@ -192,12 +192,22 @@ function findCcl(grid, i, w, pSfc) {
 
 /**
  * Ab dem CCL feuchtadiabatisch aufsteigen: CAPE aufintegrieren und das EL als
- * erstes Niveau bestimmen, auf dem der Auftrieb nach einer positiven Phase
- * wieder negativ wird. Auftrieb virtuell korrigiert (Doswell & Rasmussen 1994).
+ * HÖCHSTES Niveau mit positivem Auftrieb bestimmen. Auftrieb virtuell
+ * korrigiert (Doswell & Rasmussen 1994).
+ *
+ * Bricht bewusst NICHT beim ersten Wechsel auf negativen Auftrieb ab -- eine
+ * kurze Stabilitätsschicht/CIN-Delle direkt über dem CCL (Interpolationsrauschen
+ * oder eine echte, aber dünne Kappe) darf den Aufstieg nicht vorzeitig
+ * beenden, wenn der Parcel weiter oben wieder (stärker) aufsteigt. Das war
+ * der Grund für ein degeneriertes EL knapp über dem CCL bei sonst
+ * hochreichend labilen Profilen (s. Feedback: Cb-Amboss bei 500 m trotz
+ * Nullgradgrenze auf 4000 m) -- portiert wie `sounding_viewer.html`, das
+ * ebenfalls das gesamte Profil durchsucht und sich nur das jeweils letzte
+ * Niveau mit positivem Auftrieb merkt, statt frühzeitig abzubrechen.
  */
 function ascendFromCcl(env, ccl) {
   let tPclK = ccl.tC + KELVIN, pCur = ccl.pHpa, zPrev = ccl.z;
-  let cape = 0, elZ = NaN, elTC = NaN, buoyantSeen = false;
+  let cape = 0, elZ = NaN, elTC = NaN;
 
   for (let p = pCur - DP_STEP_HPA; p >= P_TOP_HPA; p -= DP_STEP_HPA) {
     const e = env(p);
@@ -207,9 +217,7 @@ function ascendFromCcl(env, ccl) {
     const tvEnv = e.tK * (1 + 0.608 * e.w);
     const buoy = (G * (tvPcl - tvEnv) / tvEnv) * (e.z - zPrev);
     if (buoy > 0) {
-      cape += buoy; buoyantSeen = true; elZ = e.z; elTC = e.tK - KELVIN;
-    } else if (buoyantSeen) {
-      break;
+      cape += buoy; elZ = e.z; elTC = e.tK - KELVIN;
     }
     tPclK = tNextK; pCur = p; zPrev = e.z;
   }

@@ -558,16 +558,25 @@ dokumentiert.
 10 m AGL), Einheiten intern SI. Levelddruck kommt 1:1 aus der Säule
 (`pressure_level{l}`) — die ursprünglich geplante hydrostatische Integration
 aus `pressure_msl` war unnötig, Michaels Server liefert den Leveldruck
-bereits direkt. `derive()` rechnet zusätzlich potentielle Temperatur `θ`,
-Windbetrag `wspd` und `cloudFrac` (über dieselbe dreistufige
-`clouds.js`-Heuristik wie Abschnitt 4.1) sowie — auf gestaffelten
-Zwischenniveaus — Scherung `shear2 = (du/dz)² + (dv/dz)²`,
-Brunt-Väisälä-Frequenz `N² = (g/θ)·dθ/dz` und Richardson-Zahl `Ri = N²/shear2`.
-Diese drei sind Eingangsgrößen des Turbulenzmoduls (7.7): `ri`/`shear2`
-liegen NUR auf diesen Zwischenniveaus vor (`nm = nk-1` Werte je Zeitspalte,
-nicht auf den `nk` Original-Leveln) — jeder Verbraucher, der eine
-Level-indizierte Größe braucht (z. B. die GRAMET-Kontur), muss die beiden
-angrenzenden Schichtwerte selbst auf ein Level zurückführen, s. 7.6.
+bereits direkt. **Einzige DMO-Eingangsgrößen** dieses Abschnitts sind `u`,
+`v`, `T`, `p` und `height_agl_level{l}` (`column.js`, direkt aus der
+Open-Meteo-Antwort) — alles Weitere in diesem Absatz ist Client-Berechnung.
+`derive()` rechnet daraus zusätzlich potentielle Temperatur `θ`, Windbetrag
+`wspd` und `cloudFrac` (über dieselbe dreistufige `clouds.js`-Heuristik wie
+Abschnitt 4.1) sowie — als zentrale Differenz zwischen je zwei benachbarten,
+nicht notwendig äquidistanten Modell-Leveln `k`/`k+1` über deren tatsächliche
+Höhendifferenz `dz = z[k+1] − z[k]` — Scherung `shear2 = (du/dz)² +
+(dv/dz)²`, Brunt-Väisälä-Frequenz `N² = (g/θ_mittel)·(dθ/dz)` und
+Richardson-Zahl `Ri = N²/shear2`. **Weder das Modell noch die Open-Meteo-API
+liefern Ri, N² oder Scherung als eigene Variable** — alle drei sind reine
+Differenzenbildung im Client (`grid.js` `derive()`, Zeile mit `shear2 = new
+Float32Array(...)`), nicht ablesbar, sondern gerechnet.
+Diese drei sind Eingangsgrößen des Turbulenzmoduls (7.7): weil sie selbst das
+Ergebnis einer Differenz zwischen zwei Leveln sind, sind sie auch nur
+ZWISCHEN diesen Leveln definiert, nicht AN einem einzelnen (`nm = nk-1` Werte
+je Zeitspalte, nicht auf den `nk` Original-Leveln) — jeder Verbraucher, der
+eine Level-indizierte Größe braucht (z. B. die GRAMET-Kontur), muss die
+beiden angrenzenden Schichtwerte selbst auf ein Level zurückführen, s. 7.7.
 
 ### 7.2 Isolinien & Tropopause
 [src/gramet/derive.js](src/gramet/derive.js).
@@ -780,8 +789,9 @@ Flugband zwischen 10 m und Betriebshöhe. Keine der beiden Größen dupliziert
 die andere.
 
 **Turbulence-Flag-Index, Rohwert `raw = g(Ri) · s(|dV/dz|)`**, pro
-Modellschicht (Ri/Scherung liegen nur auf den gestaffelten Zwischenniveaus
-vor, s. 7.1):
+Modellschicht (Ri/Scherung sind KEIN Modell-Output, sondern selbst das
+Ergebnis einer Differenzenbildung zwischen zwei benachbarten Modell-Leveln —
+deshalb nur zwischen den Leveln, nicht an ihnen definiert, s. 7.1):
 - **g(Ri)** — Miles-Howard-Kriterium für Kelvin-Helmholtz-Instabilität: `1`
   für `Ri ≤ 0,25` (inklusive `Ri < 0`, also labiler/überadiabatischer
   Schichtung, z. B. bodennaher Tagesthermik — ein Index deckt damit
@@ -817,9 +827,11 @@ zusätzlich spürbaren Wind.
 kalibriert**, exakt nach demselben Muster wie die IPI-Schwellen (7.6)
 gemeinsam für GRAMET-Kontur und Go/No-Go-Ampel definiert.
 
-**Rendering (GRAMET):** anders als bei Vereisung (Punktgrößen T/cloudFrac an
-jedem Level direkt bekannt) liegen Ri/Scherung nur AUF DEN SCHICHTEN
-zwischen zwei Modell-Leveln vor. `computeGrid()` gibt daher jedem Level das
+**Rendering (GRAMET):** anders als bei Vereisung (Punktgrößen T/cloudFrac
+direkt an jedem Level aus der DMO bzw. daraus abgeleitet) sind Ri/Scherung
+selbst über eine Differenz zwischen zwei benachbarten Leveln definiert und
+daher nur AUF DEN SCHICHTEN zwischen ihnen berechenbar (reine
+Client-Berechnung, kein Modell-/API-Wert, s. 7.1). `computeGrid()` gibt daher jedem Level das
 Maximum der beiden angrenzenden Schichten (unten/oben; Rand-Level haben nur
 eine) — reine Zuordnungsregel, keine Interpolation zwischen Schichten.
 Kontur-Fläche wie bei Vereisung (`drawHazardArea()`, 7.6-Muster), Symbol

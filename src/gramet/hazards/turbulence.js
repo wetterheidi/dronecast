@@ -151,15 +151,18 @@ function layerWindSpeed(grid, i, k) {
 
 /**
  * Pro Gitterzelle (nt*nk) die Hazard-Kategorie für die GRAMET-Kontur. Anders
- * als bei Vereisung (`icing.js` `computeGrid`, Punktgrößen T/cloudFrac an
- * jedem Level direkt bekannt) liegen Ri/Scherung nur AUF DEN SCHICHTEN
- * zwischen zwei Modell-Leveln vor (`nm = nk-1` Zwischenwerte, s. `grid.js`
- * `derive()`). Ein Level erbt daher das Maximum der beiden angrenzenden
- * Schichten (unten/oben) -- Rand-Level (k=0 bzw. k=nk-1) haben nur eine
- * angrenzende Schicht. `ri`/`shear2` kommen als bereits abgeleitete Arrays
- * herein (wie `cloudFrac` bei icing.js) statt hier erneut berechnet zu werden;
- * die Windgeschwindigkeit fürs Windstärke-Gate (s. Modulkopf) wird dagegen
- * direkt aus `grid.u`/`grid.v` gebildet, da sie nur hier gebraucht wird.
+ * als bei Vereisung (`icing.js` `computeGrid`, Punktgrößen T/cloudFrac
+ * direkt an jedem Level aus der DMO bzw. daraus abgeleitet) sind Ri/Scherung
+ * KEIN Modell-/API-Wert, sondern eine zentrale Differenz zwischen den u/v/T/p-
+ * Werten zweier benachbarter Modell-Level (`grid.js` `derive()`) -- deshalb
+ * nur AUF DEN SCHICHTEN zwischen zwei Leveln definiert (`nm = nk-1`
+ * Zwischenwerte), nicht AN einem einzelnen Level. Ein Level erbt daher das
+ * Maximum der beiden angrenzenden Schichten (unten/oben) -- Rand-Level (k=0
+ * bzw. k=nk-1) haben nur eine angrenzende Schicht. `ri`/`shear2` kommen als
+ * bereits abgeleitete Arrays herein (wie `cloudFrac` bei icing.js) statt hier
+ * erneut berechnet zu werden; die Windgeschwindigkeit fürs Windstärke-Gate
+ * (s. Modulkopf) wird dagegen direkt aus `grid.u`/`grid.v` gebildet, da sie
+ * nur hier gebraucht wird.
  */
 export function computeGrid(grid, ri, shear2, nm) {
   const { nk, times } = grid, nt = times.length;

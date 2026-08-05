@@ -281,9 +281,10 @@ function drawBackground(ctx, grid, view, x, top, bot) {
 // dieselbe Funktion wie für die Isotachen) durch und zeichnet je Schwelle
 // eine gestrichelt umrandete, leicht gefüllte Fläche -- wie im Referenz-
 // Screenshot (gelb umrandete Fläche um den Amboss), nicht als Pixelraster.
-// Offene Polylinien (Kontur trifft den Gitterrand) werden trotzdem gefüllt
-// (canvas schließt sie automatisch mit einer Geraden); bei echten Hazard-
-// Daten ggf. visuell nachjustieren.
+// `contour()` polstert das Gitter am Rand (s. dort), damit Flächen, die eine
+// Gitterkante durchgehend erfüllen (z. B. Turbulenz schon zur ersten Stunde
+// oder am untersten Level), als geschlossene Polylinie zurückkommen, statt
+// dass `closePath()` sie mit einer geraden Linie quer durchs Bild schließt.
 function drawHazardArea(ctx, grid, hazardArr, styles, x, y) {
   const n = grid.times.length * grid.nk;
   const field = new Float32Array(n);
