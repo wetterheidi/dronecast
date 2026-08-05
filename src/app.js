@@ -37,7 +37,7 @@ import {
 /* global L */
 
 const el = (id) => document.getElementById(id);
-const state = { point: null, marker: null, data: null };
+const state = { point: null, marker: null, data: null, coordInputDirty: false };
 
 // Einstellungen vor Karteninit laden, damit Startposition/Basiskarte bereitstehen.
 loadSettings();
@@ -127,6 +127,12 @@ function requestPoint(lat, lon) {
   const now = Date.now();
   if (now - lastPointRequestAt < 700) return;
   lastPointRequestAt = now;
+  // Punkt kommt von der Karte, nicht aus dem Eingabefeld — ein dort noch
+  // stehender, nicht übernommener Text wäre jetzt veraltet und dürfte beim
+  // nächsten Klick auf "Vorhersage laden" nicht versehentlich diesen Punkt
+  // überschreiben (siehe goToCoordInput-Aufruf im load-Handler unten).
+  el("coordinput").value = "";
+  state.coordInputDirty = false;
   setPoint(lat, lon, { autoLoad: true });
 }
 
@@ -187,6 +193,10 @@ function setPoint(lat, lon, { autoLoad = false } = {}) {
     // Nach dem Ziehen: neuen Punkt übernehmen und Vorhersage sofort neu laden.
     state.marker.on("dragend", () => {
       const p = state.marker.getLatLng();
+      // Wie bei requestPoint: Karteninteraktion macht einen noch nicht
+      // übernommenen Eingabefeld-Text ungültig.
+      el("coordinput").value = "";
+      state.coordInputDirty = false;
       setPoint(p.lat, p.lng, { autoLoad: true });
     });
   }
@@ -203,21 +213,41 @@ if (settings.lastPoint) setPoint(settings.lastPoint.lat, settings.lastPoint.lon)
 // ---------------------------------------------------------------------------
 // Positions-Eingabe: Dezimalgrad oder MGRS, alternativ zum Kartenklick.
 // ---------------------------------------------------------------------------
+// Liefert true bei Erfolg. Gibt bei ungültiger Eingabe false zurück, statt
+// (gefährlich) einfach den alten Punkt stehen zu lassen — Aufrufer müssen das
+// prüfen, bevor sie z.B. eine Vorhersage laden.
 function goToCoordInput() {
   const parsed = parseCoordInput(el("coordinput").value);
-  if (!parsed) { setStatus("Ungültige Koordinate.", "error"); return; }
+  if (!parsed) { setStatus("Ungültige Koordinate.", "error"); return false; }
+  state.coordInputDirty = false;
   setPoint(parsed.lat, parsed.lon, { autoLoad: true });
   map.setView([parsed.lat, parsed.lon], Math.max(map.getZoom(), 11));
+  return true;
 }
 el("coordgo").addEventListener("click", goToCoordInput);
 el("coordinput").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); goToCoordInput(); }
 });
+// Markiert das Feld als "noch nicht übernommen", sobald der Nutzer tippt.
+// Verhindert, dass "Vorhersage laden" den alten Punkt neu lädt, während eine
+// eingegebene, aber nicht per "Gehe zu"/Enter bestätigte Koordinate im Feld
+// steht (siehe load-Handler unten).
+el("coordinput").addEventListener("input", () => { state.coordInputDirty = true; });
 
 // ---------------------------------------------------------------------------
 // Vorhersage laden
 // ---------------------------------------------------------------------------
-el("load").addEventListener("click", loadForecast);
+// Steht im Koordinatenfeld noch unbestätigter Text (getippt, aber nicht per
+// "Gehe zu"/Enter übernommen), übernimmt der Klick auf den prominenten
+// "Vorhersage laden"-Button ihn zuerst — sonst würde sonst unbemerkt die
+// Vorhersage des alten Standorts erneut geladen (siehe Nutzerfeedback).
+el("load").addEventListener("click", () => {
+  if (state.coordInputDirty && el("coordinput").value.trim()) {
+    if (!goToCoordInput()) return; // ungültige Koordinate: nicht mit altem Punkt weiterladen
+    return; // goToCoordInput löst über setPoint(..., { autoLoad: true }) das Laden bereits aus
+  }
+  loadForecast();
+});
 
 // Verwirft die Punktvorhersage des zuvor geladenen Punkts, inkl. aller davon
 // abhängigen Overlays. Nötig, sobald ein neuer Punkt gewählt wird, für den
@@ -384,8 +414,18 @@ function line(k, v, warn) {
 // ---------------------------------------------------------------------------
 // Vorhersageprodukte (öffnen als Overlay)
 // ---------------------------------------------------------------------------
+// Alle Produkt-Overlays belegen exakt dieselbe Bildschirmfläche (siehe CSS:
+// gleiches inset, gleicher z-index) und sind daher als Einzelplatz gedacht --
+// ohne Exklusivität bliebe ein neu geöffnetes Overlay unsichtbar hinter einem
+// bereits offenen liegen (Nutzerfeedback: GoNoGo-Tabelle verdeckte Meteogramm).
+const PRODUCT_OVERLAY_IDS = ["meteogram", "crosssection", "gramet", "gonogo", "briefing"];
+function closeProductOverlays() {
+  for (const id of PRODUCT_OVERLAY_IDS) el(id).hidden = true;
+}
+
 document.querySelectorAll(".product").forEach((btn) => {
   btn.addEventListener("click", () => {
+    closeProductOverlays();
     if (btn.dataset.prod === "meteogram") openMeteogram();
     else if (btn.dataset.prod === "xsection") openCrossSection();
     else if (btn.dataset.prod === "gramet") openGramet();

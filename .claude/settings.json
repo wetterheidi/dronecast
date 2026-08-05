@@ -61,7 +61,12 @@
       "Bash(node --check /Users/wetterheidi/Documents/Git/droneforecast/src/gramet/hazards/turbulence.js)",
       "Bash(find / -iname \"sounding_viewer.html\")",
       "Bash(find / -iname \"*sounding_data*\" -maxdepth 6)",
-      "Bash(node --check src/gramet/hazards/convection.js)"
+      "Bash(node --check src/gramet/hazards/convection.js)",
+      "Bash(npx --yes playwright install chromium --with-deps)",
+      "Bash(node verify.mjs)",
+      "Bash(node verify2.mjs)",
+      "Bash(pkill -f \"vite --port 5183\")",
+      "Bash(node verify3.mjs)"
     ]
   }
 }
