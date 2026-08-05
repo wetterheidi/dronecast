@@ -4,8 +4,14 @@
  *
  * Schwerpunkt CCL (statt LCL): das GRAMET zeigt tagsüber ausgelöste Konvektion,
  * und dafür sind CCL/Auslösetemperatur die passenden Größen —
- *   - CCL  = Schnittpunkt der Isohume durch den Bodentaupunkt mit dem
- *            Umgebungsprofil → physikalische Basis der Quellwolke,
+ *   - CCL  = Schnittpunkt der Mixed-Layer-Isohume (druckgewichtetes Mittel der
+ *            untersten 100 hPa, s. `mixedLayerMixingRatio`) mit dem
+ *            Umgebungsprofil → physikalische Basis der Quellwolke. Der reine
+ *            2-m-Taupunkt allein wäre zu stoßempfindlich: reichert sich die
+ *            bodennahste Luft (z. B. nächtlich durch Taubildung) stärker an
+ *            als die Schicht knapp darüber, zieht er die CCL künstlich weit
+ *            nach unten (s. Feedback: Cb-Basis bei 50 m trotz tlogp-CCL,
+ *            das mit derselben Mixed-Layer-Mittelung rechnet, > 600 m).
  *   - TA   = CCL-Temperatur trockenadiabatisch auf Bodenniveau zurückgeführt
  *            → Auslösetemperatur; erst wenn T_2m >= TA reißt die Kappe auf.
  *            Das ersetzt den bisherigen festen CAPE-Schwellwert, weil es die
@@ -107,11 +113,11 @@ function qToMixingRatio(q) {
 // --- Profil-Zugriff ----------------------------------------------------------
 
 /**
- * Bodenzustand für die Parcel-Rechnung. Bevorzugt die 2-m-Werte (der Taupunkt
- * dort definiert die Isohume und damit den CCL), Druck kommt vom untersten
- * Modelllevel (~10 m AGL) — die Höhendifferenz ist gegenüber der Schrittweite
- * der CCL-Suche vernachlässigbar. Fehlen die 2-m-Werte, tritt das unterste
- * Level als Ganzes an ihre Stelle.
+ * Bodenzustand für die Parcel-Rechnung. Bevorzugt die 2-m-Werte als Anker der
+ * Mixed-Layer-Mittelung (s. `mixedLayerMixingRatio`), Druck kommt vom
+ * untersten Modelllevel (~10 m AGL) — die Höhendifferenz ist gegenüber der
+ * Schrittweite der CCL-Suche vernachlässigbar. Fehlen die 2-m-Werte, tritt
+ * das unterste Level als Ganzes an ihre Stelle.
  */
 function surfaceState(grid, i) {
   const { nk, surface } = grid;
@@ -122,12 +128,42 @@ function surfaceState(grid, i) {
   const tC = surface?.t2m?.[i], tdC = surface?.td2m?.[i];
   if (Number.isFinite(tC) && Number.isFinite(tdC)) {
     // Übersättigung (Td > T) käme nur aus Rundung — auf T kappen.
-    return { w: mixingRatio(Math.min(tdC, tC), pSfc), pSfc, tSfcC: tC };
+    const w0 = mixingRatio(Math.min(tdC, tC), pSfc);
+    return { w: mixedLayerMixingRatio(grid, i, pSfc, w0), pSfc, tSfcC: tC };
   }
   const tLevC = grid.T[ix] - KELVIN;
-  const w = qToMixingRatio(grid.qv[ix]);
-  if (!Number.isFinite(tLevC) || w <= 0) return null;
-  return { w, pSfc, tSfcC: tLevC };
+  const w0 = qToMixingRatio(grid.qv[ix]);
+  if (!Number.isFinite(tLevC) || w0 <= 0) return null;
+  return { w: mixedLayerMixingRatio(grid, i, pSfc, w0), pSfc, tSfcC: tLevC };
+}
+
+/**
+ * Druckgewichtetes Mischungsverhältnis der untersten 100 hPa ("Mixed Layer"),
+ * portiert aus `sounding_data/sounding_viewer.html` (dortige CCL-Berechnung).
+ * Trapezintegration ab dem 2-m-Punkt (`w0` bei `pSfc`) über die Modelllevel
+ * ab k=1 aufwärts — k=0 liegt konstruktionsbedingt praktisch auf `pSfc`
+ * (s. `surfaceState`) und würde ohne eigenen Druckabstand nur Rauschen
+ * beitragen. Das letzte Intervall wird am 100-hPa-Boden `pFloor` gekappt.
+ */
+function mixedLayerMixingRatio(grid, i, pSfc, w0) {
+  const { nk } = grid;
+  const pFloor = pSfc - 100;
+  let pPrev = pSfc, wPrev = w0, sumWdp = 0, sumDp = 0;
+  for (let k = 1; k < nk; k++) {
+    const ix = i * nk + k;
+    const pHpa = grid.p[ix] / 100;
+    if (!Number.isFinite(pHpa) || pHpa >= pPrev) continue; // kein Fortschritt/ungültig
+    const w = qToMixingRatio(grid.qv[ix]);
+    const pClip = Math.max(pHpa, pFloor);
+    const dp = pPrev - pClip;
+    if (dp > 0) {
+      sumWdp += ((wPrev + w) / 2) * dp;
+      sumDp += dp;
+    }
+    pPrev = pHpa; wPrev = w;
+    if (pHpa <= pFloor) break;
+  }
+  return sumDp > 0 ? sumWdp / sumDp : w0;
 }
 
 /** Umgebungsprofil (T, z, Mischungsverhältnis) an beliebigem Druck, linear
@@ -163,9 +199,10 @@ function envSampler(grid, i) {
 // --- CCL / TA / EL -----------------------------------------------------------
 
 /**
- * CCL: erstes Niveau, auf dem die Isohume durch den Bodentaupunkt die
- * Umgebungstemperatur erreicht. Unterhalb ist die Isohume kälter (d < 0),
- * am Schnittpunkt gleich — dort wird linear interpoliert.
+ * CCL: erstes Niveau, auf dem die Mixed-Layer-Isohume (`w`, s.
+ * `mixedLayerMixingRatio`) die Umgebungstemperatur erreicht. Unterhalb ist
+ * die Isohume kälter (d < 0), am Schnittpunkt gleich — dort wird linear
+ * interpoliert.
  */
 function findCcl(grid, i, w, pSfc) {
   const { nk } = grid;
