@@ -33,6 +33,7 @@ import { initCloudOverlay } from "./cloudoverlay.js";
 import {
   fmtHeight, fmtWind, fmtTemp, fmtDirPadded, heightUnit, heightToDisplay,
 } from "./units.js";
+import { throttle } from "./overlayshared.js";
 
 /* global L */
 
@@ -81,16 +82,52 @@ initMapLayers(map);
 
 // Kartenlayer: Wind 10 m flächig (unterstes Modelllevel, Michaels Instanz) —
 // nach initMapLayers, da der gemeinsame wxOverlays-Pane dort angelegt wird.
-initWindOverlay(map);
+// Jeder Layer liefert ein valueAt(lat, lon) zurück (Punktabfrage aus dessen
+// Cache, dieselbe bilineare Interpolation wie beim Flächen-Rendering) — Basis
+// für die Cursor-Statuszeile weiter unten.
+const windOverlay = initWindOverlay(map);
 
 // Kartenlayer: Windböen 10 m flächig (Oberfläche, öffentliche Instanz) —
 // Schwesterlayer zum Wind-Overlay, teilt sich den wxOverlays-Pane.
-initGustOverlay(map);
+const gustOverlay = initGustOverlay(map);
 
 // Kartenlayer: Bedeckungsgrad (tief/mittel/hoch) + Ceiling, flächig —
 // dieselbe clouds.js-Methodik wie Meteogramm/Briefing, hier räumlich statt
 // am Operationspunkt. Datenquelle wie Wind: Michaels Instanz.
-initCloudOverlay(map);
+const cloudOverlay = initCloudOverlay(map);
+
+// Cursor-Statuszeile: zeigt für JEDEN aktuell eingeschalteten Kartenlayer den
+// Wert unter dem Mauszeiger an (nicht nur den obersten) — Nutzerentscheidung,
+// weil die Layer sich farblich/räumlich unterscheiden und meist bewusst
+// zusammen betrachtet werden (z. B. Wind + Ceiling für die Flugplanung).
+// Throttled wie das Flächen-Rendering (siehe overlayshared.js throttle()):
+// mousemove feuert deutlich öfter als sinnvoll neu gezeichnet werden muss.
+const cursorReadout = el("map-cursor-readout");
+let pendingLatLng = null;
+function renderCursorReadout() {
+  if (!pendingLatLng) return;
+  const { lat, lng } = pendingLatLng;
+  const parts = [];
+  const wind = windOverlay.valueAt(lat, lng);
+  if (wind) parts.push(`Wind ${fmtDirPadded(wind.dirDeg)} ${fmtWind(wind.speedMs)}`);
+  const gust = gustOverlay.valueAt(lat, lng);
+  if (gust) parts.push(`Böen ${fmtWind(gust.speedMs)}`);
+  const cloud = cloudOverlay.valueAt(lat, lng);
+  if (cloud?.coverPct != null) parts.push(`Bedeckung ${Math.round(cloud.coverPct)} %`);
+  if (cloud?.ceilingM != null) parts.push(`Ceiling ${fmtHeight(cloud.ceilingM)} AGL`);
+  cursorReadout.hidden = !parts.length;
+  if (parts.length) cursorReadout.textContent = parts.join(" · ");
+}
+const throttledCursorReadout = throttle(renderCursorReadout, 100);
+map.on("mousemove", (e) => {
+  pendingLatLng = e.latlng;
+  throttledCursorReadout();
+});
+// pendingLatLng mit leeren, nicht nur die Pille verstecken: throttle() feuert
+// nachlaufend (führend + nachlaufend, s. overlayshared.js) — ein beim Verlassen
+// der Karte noch ausstehender Timer würde sonst kurz danach mit der letzten
+// (noch gültigen) Position erneut rendern und die Pille wieder einblenden.
+map.on("mouseout", () => { pendingLatLng = null; cursorReadout.hidden = true; });
 
 // Masterzeit: die eine Zeitachse für Bedingungen, numerische Felder und
 // Nowcasting. Nach initMapLayers/initWindOverlay verdrahten — die haben sich

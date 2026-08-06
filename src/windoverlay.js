@@ -874,6 +874,43 @@ export function initWindOverlay(map) {
   setInterval(() => {
     if (settings.windLayerOn && Date.now() - cacheTs > CACHE_TTL_MS) refresh();
   }, AUTO_CHECK_MS);
+
+  // Punktabfrage für die Cursor-Statuszeile (app.js): dieselbe bilineare
+  // Interpolation wie renderFill(), aber für eine einzelne Koordinate statt
+  // fürs ganze Canvas-Raster — direkte Cache-Lookups der 4 umschließenden
+  // Knoten statt des vollen nodeSamples-Map-Aufbaus aus collectSamples().
+  function valueAt(lat, lon) {
+    if (!settings.windLayerOn || !lastNodes || !times?.length) return null;
+    const model = MODELS[currentModel];
+    const lvl = activeLevel();
+    if (!model || lvl == null) return null;
+    const param = ACTIVE_PARAM;
+    const cellDegLat = model.grid * lastLatStride;
+    const cellDegLon = model.grid * lastLonStride;
+    const fLat = lat / cellDegLat;
+    const cLat0 = Math.floor(fLat);
+    const fy = fLat - cLat0;
+    const fLon = lon / cellDegLon;
+    const cLon0 = Math.floor(fLon);
+    const fx = fLon - cLon0;
+    const uv00row = cLat0 * lastLatStride, uv10row = (cLat0 + 1) * lastLatStride;
+    const lon0 = cLon0 * lastLonStride, lon1 = (cLon0 + 1) * lastLonStride;
+    const e00 = cacheGet(cacheKey(uv00row, lon0, lvl, param.id, currentModel));
+    const e10 = cacheGet(cacheKey(uv10row, lon0, lvl, param.id, currentModel));
+    const e01 = cacheGet(cacheKey(uv00row, lon1, lvl, param.id, currentModel));
+    const e11 = cacheGet(cacheKey(uv10row, lon1, lvl, param.id, currentModel));
+    if (!e00 || !e10 || !e01 || !e11) return null;
+    const c00 = sampleComps(e00, param), c10 = sampleComps(e10, param);
+    const c01 = sampleComps(e01, param), c11 = sampleComps(e11, param);
+    if (!c00 || !c10 || !c01 || !c11) return null;
+    const interp = {};
+    for (const comp of param.comps) {
+      interp[comp.name] = bilin(c00[comp.name], c10[comp.name], c01[comp.name], c11[comp.name], fy, fx);
+    }
+    return { speedMs: param.scalar(interp), dirDeg: param.barb ? param.barb(interp).dirFrom : null };
+  }
+
+  return { valueAt };
 }
 
 // -- WMO-Windfieder als Inline-SVG (Geometrie aus windbarb.js, gemeinsam mit

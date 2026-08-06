@@ -756,4 +756,58 @@ export function initCloudOverlay(map) {
   setInterval(() => {
     if (layerActive() && Date.now() - cacheTs > CACHE_TTL_MS) refresh();
   }, AUTO_CHECK_MS);
+
+  // Punktabfrage für die Cursor-Statuszeile (app.js): die 4 umschließenden
+  // Knoten-Säulen holen (wie colAt in collectCoverSamples/collectCeilingSamples),
+  // Bedeckungsgrad/Ceiling je Knoten ableiten und ERST DANN (wie renderScalarFill)
+  // bilinear interpolieren — nicht die rohen Säulen selbst interpolieren, das
+  // wäre fachlich falsch (CF/Ceiling sind keine linearen Größen der Rohdaten).
+  function valueAt(lat, lon) {
+    if (!settings.cloudLayerOn || !lastNodes || !times?.length || !currentBand) return null;
+    const model = MODELS[currentModel];
+    if (!model) return null;
+    const cellDegLat = model.grid * lastLatStride;
+    const cellDegLon = model.grid * lastLonStride;
+    const fLat = lat / cellDegLat;
+    const cLat0 = Math.floor(fLat);
+    const fy = fLat - cLat0;
+    const fLon = lon / cellDegLon;
+    const cLon0 = Math.floor(fLon);
+    const fx = fLon - cLon0;
+    const uv00row = cLat0 * lastLatStride, uv10row = (cLat0 + 1) * lastLatStride;
+    const lon0 = cLon0 * lastLonStride, lon1 = (cLon0 + 1) * lastLonStride;
+    const col00 = colAt(uv00row, lon0, currentBand, currentModel);
+    const col10 = colAt(uv10row, lon0, currentBand, currentModel);
+    const col01 = colAt(uv00row, lon1, currentBand, currentModel);
+    const col11 = colAt(uv10row, lon1, currentBand, currentModel);
+    if (!col00 || !col10 || !col01 || !col11) return null;
+
+    let coverPct = null;
+    if (settings.cloudCoverOn) {
+      const bandId = settings.cloudCoverBand;
+      const cf00 = bandCoverage(col00, timeIdx, { capM: CLOUD_OVERLAY_CAP_M })[bandId];
+      const cf10 = bandCoverage(col10, timeIdx, { capM: CLOUD_OVERLAY_CAP_M })[bandId];
+      const cf01 = bandCoverage(col01, timeIdx, { capM: CLOUD_OVERLAY_CAP_M })[bandId];
+      const cf11 = bandCoverage(col11, timeIdx, { capM: CLOUD_OVERLAY_CAP_M })[bandId];
+      if ([cf00, cf10, cf01, cf11].every(Number.isFinite)) {
+        coverPct = bilin(cf00, cf10, cf01, cf11, fy, fx) * 100;
+      }
+    }
+
+    let ceilingM = null;
+    if (settings.cloudCeilingOn) {
+      const ceil00 = cloudCeiling(col00, timeIdx, { ccLowPct: null });
+      const ceil10 = cloudCeiling(col10, timeIdx, { ccLowPct: null });
+      const ceil01 = cloudCeiling(col01, timeIdx, { ccLowPct: null });
+      const ceil11 = cloudCeiling(col11, timeIdx, { ccLowPct: null });
+      if (ceil00 && ceil10 && ceil01 && ceil11) {
+        ceilingM = bilin(ceil00.baseM, ceil10.baseM, ceil01.baseM, ceil11.baseM, fy, fx);
+      }
+    }
+
+    if (coverPct == null && ceilingM == null) return null;
+    return { coverPct, ceilingM, band: settings.cloudCoverBand };
+  }
+
+  return { valueAt };
 }

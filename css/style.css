@@ -545,6 +545,27 @@ input[type="range"]::-moz-range-thumb {
 }
 .geoman-hint-bar.fading { opacity: 0; }
 
+/* Statuszeile: Werte der aktiven Kartenlayer unter dem Mauszeiger, unten
+   zentriert (nicht oben, das ist der Geoman-Hinweis-Platz). Gleicher Look wie
+   .geoman-hint-bar für ein konsistentes "Pill"-Erscheinungsbild. */
+.map-cursor-readout {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30, 30, 30, 0.82);
+  color: #fff;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 900;
+}
+.map-cursor-readout[hidden] { display: none; }
+
 .leaflet-measure-label {
   position: absolute;
   font: 9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;

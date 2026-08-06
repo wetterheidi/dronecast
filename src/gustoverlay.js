@@ -612,6 +612,34 @@ export function initGustOverlay(map) {
       <label><input type="radio" name="ml-gust-mode" value="numbers" /> Zahlenwerte</label>
     `;
   }
+
+  // Punktabfrage für die Cursor-Statuszeile (app.js) — wie renderFill(), aber
+  // nur die 4 umschließenden Knoten statt des vollen Canvas-Rasters.
+  function valueAt(lat, lon) {
+    if (!settings.gustLayerOn || !lastNodes || !times?.length) return null;
+    const model = MODELS[currentModel];
+    if (!model) return null;
+    const cellDegLat = model.grid * lastLatStride;
+    const cellDegLon = model.grid * lastLonStride;
+    const fLat = lat / cellDegLat;
+    const cLat0 = Math.floor(fLat);
+    const fy = fLat - cLat0;
+    const fLon = lon / cellDegLon;
+    const cLon0 = Math.floor(fLon);
+    const fx = fLon - cLon0;
+    const uv00row = cLat0 * lastLatStride, uv10row = (cLat0 + 1) * lastLatStride;
+    const lon0 = cLon0 * lastLonStride, lon1 = (cLon0 + 1) * lastLonStride;
+    const e00 = cacheGet(cacheKey(uv00row, lon0, currentModel));
+    const e10 = cacheGet(cacheKey(uv10row, lon0, currentModel));
+    const e01 = cacheGet(cacheKey(uv00row, lon1, currentModel));
+    const e11 = cacheGet(cacheKey(uv10row, lon1, currentModel));
+    if (!e00 || !e10 || !e01 || !e11) return null;
+    const v00 = e00.g[timeIdx], v10 = e10.g[timeIdx], v01 = e01.g[timeIdx], v11 = e11.g[timeIdx];
+    if (![v00, v10, v01, v11].every(Number.isFinite)) return null;
+    return { speedMs: bilin(v00, v10, v01, v11, fy, fx) };
+  }
+
+  return { valueAt };
 }
 
 // Retry-After-Header → Millisekunden. Open-Meteo sendet i. d. R. Sekunden als

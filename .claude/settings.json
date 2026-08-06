@@ -87,7 +87,8 @@
       "Bash(curl -sf http://localhost:5177)",
       "Bash(lsof -ti:5177)",
       "Bash(lsof -ti:5177 -sTCP:LISTEN)",
-      "Bash(npm uninstall *)"
+      "Bash(npm uninstall *)",
+      "Bash(node test-readout.mjs)"
     ]
   }
 }
