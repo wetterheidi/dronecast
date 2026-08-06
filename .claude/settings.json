@@ -88,7 +88,13 @@
       "Bash(lsof -ti:5177)",
       "Bash(lsof -ti:5177 -sTCP:LISTEN)",
       "Bash(npm uninstall *)",
-      "Bash(node test-readout.mjs)"
+      "Bash(node test-readout.mjs)",
+      "Bash(npx --yes playwright run)",
+      "Bash(node /private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/932fc12c-8ae7-45a9-8ee7-83b542a9870b/scratchpad/gramet-check.mjs)",
+      "Bash(node gramet-check.mjs)",
+      "Bash(curl -s http://localhost:5173/src/gramet/texture.js)",
+      "Bash(sed 's/01-after-click.png/00-before-click.png/; s/02-gramet.png/04-before-gramet.png/; s/03-gramet-crop.png/05-before-crop.png/' gramet-check.mjs)",
+      "Bash(node gramet-check-before.mjs)"
     ]
   }
 }

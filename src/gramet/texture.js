@@ -77,6 +77,50 @@ const TUNING = {
 
 const SPOT_FILL = "#fff";
 
+// --- Licht/Schatten -----------------------------------------------------
+//
+// Lichtquelle von oben angenommen (wie am Tag): der Wolkenoberrand bleibt in
+// der unveränderten `fill`-Farbe -- voll besonnt lässt sich ohnehin nicht
+// heller darstellen als der Ausgangston (bei reinem Weiß erst recht nicht).
+// Zur Basis hin wird pro Ellipse zu einem dunkleren, leicht ins Kühle
+// gezogenen Schattenton gemischt (`shadeMix`), abgeleitet aus `fill` selbst
+// -- kein zweiter Tuning-Parameter nötig, eine eingesetzte Tuner-JSON muss
+// weiterhin nur `fill` ändern, der Schatten zieht automatisch mit.
+//
+// `SHADE_GAMMA` > 1 hält den oberen Teil einer Wolke überwiegend hell und
+// zieht den Übergang zur Basis zusammen -- bei glatt linearer Mischung (t^1)
+// wirkte die ganze Fläche gleichmäßig grau statt licht/schattig.
+const SHADE_GAMMA = 3.0;
+
+/** Höhenanteil `cy` zwischen `top` und `bot` als Schattierungsfaktor [0,1]. */
+function edgeShadeT(top, bot, cy) {
+  const span = bot - top;
+  const raw = span > 1 ? (cy - top) / span : 0;
+  return Math.pow(clamp(raw, 0, 1), SHADE_GAMMA);
+}
+
+/** Hex-Fill (3- oder 6-stellig) in {r,g,b}. */
+function baseRGB(hex) {
+  if (hex.length === 4) {
+    return {
+      r: parseInt(hex[1] + hex[1], 16),
+      g: parseInt(hex[2] + hex[2], 16),
+      b: parseInt(hex[3] + hex[3], 16),
+    };
+  }
+  const n = parseInt(hex.slice(1), 16);
+  return { r: (n >> 16) & 0xff, g: (n >> 8) & 0xff, b: n & 0xff };
+}
+
+/** Mischt von `base` (t=0, voll beschienen) zu dessen Schattenton (t=1). */
+function shadeMix(base, t) {
+  const sr = base.r * 0.55, sg = base.g * 0.60, sb = Math.min(255, base.b * 0.68 + 15);
+  const r = Math.round(base.r + (sr - base.r) * t);
+  const g = Math.round(base.g + (sg - base.g) * t);
+  const b = Math.round(base.b + (sb - base.b) * t);
+  return `rgb(${r},${g},${b})`;
+}
+
 // Zweite Oktave auf krummem Frequenzverhältnis (wie im Tuner): bei glatt 2.0
 // fielen beide Rauschgitter aufeinander und man sähe wieder ein Raster.
 const FBM_OCTAVE = 2.1, FBM_W1 = 0.65, FBM_W2 = 0.35;
@@ -148,14 +192,14 @@ function paintClouds(ctx, grid, cloudFrac, x, y) {
   const rw = (x.right - x.left) + 2 * padX, rh = (y.bot - y.top) + 2 * padY;
   const attempts = Math.round(spotsPer1000px2() * rw * rh / 1000);
 
+  const fillBase = baseRGB(SPOT_FILL);
+
   ctx.save();
   // Ellipsen sind bis `wMax` breit -- ohne Clip ragten sie über die Höhenachse
   // und in den rechten Rand mit den Linien-Labels.
   ctx.beginPath();
   ctx.rect(x.left, y.top, x.right - x.left, y.bot - y.top);
   ctx.clip();
-  ctx.fillStyle = SPOT_FILL;
-  ctx.strokeStyle = `rgba(${TUNING.gray},${TUNING.gray},${TUNING.gray},${TUNING.grayAlpha})`;
   ctx.lineWidth = TUNING.strokeWidth;
 
   // Positionen gleichverteilt ziehen (nicht auf einem Raster): damit ist die
@@ -180,6 +224,12 @@ function paintClouds(ctx, grid, cloudFrac, x, y) {
 
     const ew = TUNING.wMin + rng() * (TUNING.wMax - TUNING.wMin);
     const eh = TUNING.hMin + rng() * (TUNING.hMax - TUNING.hMin);
+    const t = mask.shadeAt(cx, cy);
+    ctx.fillStyle = shadeMix(fillBase, t);
+    // Kontur zieht mit: an der besonnten Oberkante hell/unauffällig, zur
+    // beschatteten Basis hin bis zu 40 Graustufen dunkler.
+    const strokeGray = TUNING.gray - Math.round(40 * t);
+    ctx.strokeStyle = `rgba(${strokeGray},${strokeGray},${strokeGray},${TUNING.grayAlpha})`;
     ctx.beginPath();
     ctx.ellipse(cx, cy, ew / 2, eh / 2, 0, 0, Math.PI * 2);
     ctx.fill();   // Reihenfolge fill -> stroke JE Ellipse, siehe Kopfkommentar.
@@ -581,6 +631,11 @@ function paintRegion(ctx, seed, T, reg) {
   ctx.closePath();
   ctx.clip();
 
+  // Einmal je Region (nicht je Ellipse) aus `T.fill` abgeleitet -- bleibt so
+  // exakt synchron mit einer eingesetzten Tuner-JSON, s. Kopfkommentar zu
+  // `shadeMix`.
+  const fillBase = baseRGB(T.fill);
+
   const attempts = Math.round(T.density * 800 / TUNER_CANVAS_PX2 * (xR - xL) * (ry1 - ry0));
   for (let i = 0; i < attempts; i++) {
     const cx = xL + rng() * (xR - xL), cy = ry0 + rng() * (ry1 - ry0);
@@ -604,6 +659,10 @@ function paintRegion(ctx, seed, T, reg) {
 
     const ew = T.wMin + rng() * (T.wMax - T.wMin);
     const eh = T.hMin + rng() * (T.hMax - T.hMin);
+    // Schattierung entlang derselben Kanten wie die Dichterampe: Schaft hell
+    // an der Kuppe, dunkler zur harten Basislinie; Amboss hell am flachen
+    // Deckel, dunkler zum Keil hin.
+    ctx.fillStyle = shadeMix(fillBase, edgeShadeT(top(cx), bot(cx), cy));
     ctx.beginPath();
     ctx.ellipse(cx, cy, ew / 2, eh / 2, 0, 0, Math.PI * 2);
     ctx.fill();   // fill -> stroke je Ellipse, wie bei den Schichtwolken.
@@ -675,6 +734,24 @@ function buildMask(grid, cloudFrac, x, y) {
     for (let i = 0; i < nt; i++) table[i * rows + r] = fracInColumn(grid, cloudFrac, i, z, nk);
   }
 
+  // Ober-/Unterkante der Bewölkung je Spalte (in Pixeln), einmalig aus
+  // derselben Tabelle abgeleitet -- Grundlage für `shadeAt`. Eine Spalte ohne
+  // Wolke bleibt auf Höhe `y.top` stehen (Spannweite 0); dort liefert
+  // `edgeShadeT` t=0, was ohnehin egal ist, weil dort keine Ellipse gezeichnet
+  // wird (dieselbe `threshold`-Schwelle gilt beim Zeichnen).
+  const edgeTop = new Float32Array(nt), edgeBot = new Float32Array(nt);
+  for (let i = 0; i < nt; i++) {
+    let rTop = -1, rBot = -1;
+    for (let r = 0; r < rows; r++) {
+      if (table[i * rows + r] > TUNING.threshold) {
+        if (rTop < 0) rTop = r;
+        rBot = r;
+      }
+    }
+    edgeTop[i] = y.top + (rTop < 0 ? 0 : rTop) * MASK_ROW_PX;
+    edgeBot[i] = y.top + (rBot < 0 ? 0 : rBot) * MASK_ROW_PX;
+  }
+
   const spanX = x.right - x.left;
   return {
     at(px, py) {
@@ -686,6 +763,10 @@ function buildMask(grid, cloudFrac, x, y) {
       const a = table[i0 * rows + r0], b = table[i1 * rows + r0];
       const c = table[i0 * rows + r1], d = table[i1 * rows + r1];
       return (a + (b - a) * ft) * (1 - fz) + (c + (d - c) * ft) * fz;
+    },
+    shadeAt(px, py) {
+      const i = Math.round(clamp((px - x.left) / spanX * (nt - 1), 0, nt - 1));
+      return edgeShadeT(edgeTop[i], edgeBot[i], py);
     },
   };
 }
