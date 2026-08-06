@@ -225,21 +225,20 @@ empirical function depending on relative humidity and height" — strukturell
 strukturelle Obergrenze durch grid-scale `qw`/`qi`, s. o.) stand einer
 Kalibrierung hier nichts im Weg.
 
-**`developmentTag(w)` — Entwicklungstendenz, orthogonal zur CF-Stufen-Kette.**
-Unabhängig davon, welche Stufe die Wolkenfraktion liefert, geht die
-Information aus `w` (Vertikalgeschwindigkeit) bislang nur in Stufe 3
-(`criticalRH`) ein — bei verfügbarem `clc`/`qw`/`qi` ginge sie sonst verloren,
-obwohl `w` nichts über „ist Wolke da" aussagt (das leisten CF bereits),
-sondern über „wächst sie gerade oder löst sie sich auf". Daher als separate
-Funktion, an jedem Level zusätzlich zu `cloudFraction()` aufrufbar, ohne deren
-Signatur zu ändern: `w > W_DEV_THRESHOLD` (0,3 m/s, **Platzhalter**, an
-`W_SCALE` orientiert) ⇒ `"developing"`, `w < −W_DEV_THRESHOLD` ⇒
-`"dissipating"`, sonst `"stable"`. Genutzt in der Briefing-Höhentabelle
-(Spalte „Tendenz", [src/briefing.js](src/briefing.js)) — bislang nicht in
-Cross-Section/Meteogramm verdrahtet (offene Erweiterung, keine feste
-Darstellung dafür entschieden). `w` auf nativen ICON-D2-Leveln (2,2 km) ist
-kleinskalig/verrauscht — einzelne Level/Stunden-Werte können zwischen den
-Kategorien flackern.
+**Entwicklungstendenz aus `w` — verworfen.** Es gab einen Versuch
+(`developmentTag(w)`), aus der Vertikalgeschwindigkeit eine orthogonale
+Aufbau-/Auflösungs-Tendenz abzuleiten und in einer eigenen Briefing-Spalte
+("Tendenz") anzuzeigen. Reale `|w|`-Verteilung auf nativen ICON-D2-Leveln
+(Stichprobe: 4 Orte, August 2026): p50 ≈ 0.03 m/s, p90 ≈ 0.14–0.15 m/s,
+p99 ≈ 0.39 m/s. Bei einer Schwelle, die dem Rauschboden standhält (≳0.15 m/s),
+löst das Kriterium in weniger als 10 % der Zellen überhaupt aus — in der
+kleinen Stichprobe einer einzelnen Höhentabelle praktisch nie sichtbar. Eine
+niedrigere Schwelle nahe dem Median hätte die Spalte zwar häufiger gefüllt,
+dann aber überwiegend kleinskaliges Leveltrauschen statt einer echten Tendenz
+gezeigt (`w` auf 2,2-km-Leveln flackert stark zwischen Stunden/Leveln). Spalte
+und `developmentTag()` daher ersatzlos entfernt statt neu kalibriert — `w`
+bleibt weiterhin über `W_SCALE`/`CRIT_W_MAX` in Stufe 3 (`criticalRH`)
+eingebunden, das ist unverändert.
 
 ### 4.2 Bedeckungskategorien (Okta)
 `oktaCategory(cf)` bildet CF auf METAR-nahe Stufen ab. **BKN beginnt bei

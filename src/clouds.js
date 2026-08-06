@@ -20,12 +20,9 @@
  *  4. Vertikales Clustering → Schichten, Ceiling und unterste Basis (stufen-
  *     unabhängig, arbeitet nur auf der fertigen CF-Kurve).
  *
- * Daneben, beide unabhängig von der CF-Kurve:
+ * Daneben, unabhängig von der CF-Kurve:
  *  - `groundFog()`: physikalische Nebelerkennung direkt aus QW/QI am Boden,
  *    Ersatz/Ergänzung für die bisherige Sicht-/`weather_code`-Erkennung.
- *  - `developmentTag()`: Entwicklungstendenz (wachsend/stabil/auflösend) aus
- *    der Vertikalgeschwindigkeit w — orthogonal zu CF, sagt nicht "ist Wolke
- *    da", sondern "wächst/löst sie sich gerade auf".
  */
 
 // --- Kalibrierung ------------------------------------------------------------
@@ -106,27 +103,6 @@ function condensateFraction(qw, qi) {
   const termW = qw > 0 ? qw / QCOND_SCALE_WATER : 0;
   const termI = qi > 0 ? qi / QCOND_SCALE_ICE : 0;
   return clamp(1 - Math.exp(-(termW + termI)), 0, 1);
-}
-
-// Entwicklungstendenz aus Vertikalwind (orthogonal zu cloudFraction — sagt
-// nichts über "ist Wolke da" aus, sondern "wächst/löst sie sich gerade auf").
-// PLATZHALTER, Größenordnung an W_SCALE (s. o.) angelehnt, w auf nativen
-// Leveln ist bei ICON-D2 (2,2 km) kleinskalig/verrauscht — einzelne
-// Level/Stunden-Werte können zwischen den Kategorien flackern.
-const W_DEV_THRESHOLD = 0.3; // m/s
-
-/**
- * Entwicklungstendenz eines Levels aus der Vertikalgeschwindigkeit `w` (m/s,
- * positiv aufwärts) — unabhängig von der CF-Quelle (Stufe 1/2/3), da `w`
- * unabhängig von CLC/QW/QI/RH eine eigene Information trägt. Kein Ersatz für
- * `cloudFraction()`, sondern eine zusätzliche, orthogonale Größe.
- * @returns {"developing"|"dissipating"|"stable"|null}
- */
-export function developmentTag(w) {
-  if (!Number.isFinite(w)) return null;
-  if (w > W_DEV_THRESHOLD) return "developing";
-  if (w < -W_DEV_THRESHOLD) return "dissipating";
-  return "stable";
 }
 
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
