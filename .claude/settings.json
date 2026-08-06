@@ -83,7 +83,11 @@
       "Bash(npx --no-install playwright install --dry-run chromium)",
       "Bash(curl -sf http://localhost:3000)",
       "Bash(node /private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/af525f19-eb14-4cab-a724-80a0a27ab1f3/scratchpad/test-gramet.mjs)",
-      "Bash(node .tmp-test-gramet.mjs)"
+      "Bash(node .tmp-test-gramet.mjs)",
+      "Bash(curl -sf http://localhost:5177)",
+      "Bash(lsof -ti:5177)",
+      "Bash(lsof -ti:5177 -sTCP:LISTEN)",
+      "Bash(npm uninstall *)"
     ]
   }
 }

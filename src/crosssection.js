@@ -100,7 +100,7 @@ export function renderCrossSection(host, field, opts = {}) {
   // Titel + Farbleisten (Labels in Anzeigeeinheit, Färbung physikalisch).
   title(svg, M.l + 4, wTop + 13, `Wind (${windUnit()}) · Richtung`);
   title(svg, M.l + 4, tTop + 13, `Temperatur (${tempUnit()}) · Nullgradgrenze`);
-  title(svg, M.l + 4, cTop + 13, `Bewölkung (%) · aus Level-Feuchte`);
+  title(svg, M.l + 4, cTop + 13, `Bewölkung (%) · aus Modell-CLC`);
   colorbar(svg, x.right + 12, wTop, wBot, WIND_STOPS, windToDisplay, windUnit());
   colorbar(svg, x.right + 12, tTop, tBot, TEMP_STOPS, tempToDisplay, tempUnit());
   colorbar(svg, x.right + 12, cTop, cBot, CLOUD_STOPS, (v) => v, "%");

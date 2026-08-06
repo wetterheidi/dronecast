@@ -172,10 +172,13 @@ export function renderGramet(host, grid, view, state = {}) {
   // volle Hauptfläche (Wolken/Hazards/Niederschlag) zusätzlich belasten --
   // deshalb das dämpfende Fade darunter, statt jedem Fähnchen einen eigenen
   // Halo zu geben (Test auf Wunsch, s. Feedback).
+  // nRows=14 statt der Cross-Section-Vorgabe (7): GRAMETs Hauptfläche ist
+  // ohne die feste Panelhöhe der Cross-Section i. d. R. deutlich höher,
+  // doppelte Zeilenzahl bleibt darin noch überlappungsfrei (s. Feedback).
   if (toggles.windbarbs) {
     ctx.fillStyle = "rgba(255,255,255,0.6)";
     ctx.fillRect(x.left, mainTop, x.right - x.left, mainBot - mainTop);
-    drawWindBarbOverlay(ctx, grid, x, y);
+    drawWindBarbOverlay(ctx, grid, x, y, { nRows: 14 });
   }
 
   ctx.strokeStyle = MUTED; ctx.lineWidth = 1;

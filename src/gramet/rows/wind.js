@@ -7,6 +7,8 @@
  * Cross-Section/GRAMET optisch zusammenpassen.
  */
 
+import { sampleAt } from "../grid.js";
+
 const KT_PER_MS = 1.94384;
 
 export const WIND_ROW_HEIGHT = 34;
@@ -31,31 +33,35 @@ export function drawWindRow(ctx, grid, x, top, height, opts = {}) {
 }
 
 /**
- * Windfiedern in der Höhenprofil-Hauptfläche, dieselbe Systematik wie
- * `windArrows()` in crosssection.js: Höhenlevel auf `nRows` Zeilen
- * ausgedünnt (Levelindex-Schrittweite `stepK`, zentriert per Halb-Offset),
- * Zeitachse bewusst UNGEDÜNNT — die Chartbreite ist über `CHART_PX_PER_HOUR`
+ * Windfiedern in der Höhenprofil-Hauptfläche. Erster Anlauf dünnte die
+ * Modell-LEVEL aus (Levelindex-Schrittweite) -- die liegen aber am Boden viel
+ * dichter als aloft, die Zeilen ballten sich unten und rissen oben auf (s.
+ * Feedback). Jetzt wie `buildField()`s `targetH` in column.js: `nRows`
+ * Zeilen, die in PIXELN gleichmäßig über die Plotfläche verteilt sind (per
+ * `y.inv`), unabhängig von Level-Dichte UND Achsenmodus (log/lin, Zoom) --
+ * dieselbe optische Gleichverteilung wie die Cross-Section, nur dass dort
+ * `targetH` das per logspace()/linspace() vorwegnimmt und hier `y.inv` direkt
+ * die aktuell sichtbare Skala befragt. An jeder Zeile wird die Säule per
+ * `sampleAt()` (grid.js) auf die Zielhöhe interpoliert.
+ * Zeitachse bewusst UNGEDÜNNT -- die Chartbreite ist über `CHART_PX_PER_HOUR`
  * an `CHART_BARB_SIZE` gekoppelt (windbarb.js), ein Fähnchen pro Stunde passt
  * dadurch by construction ohne Überlappung, exakt wie in der Cross-Section.
- * Reale Levelhöhe `grid.z[ix]` statt fixer Referenzhöhe -- GRAMETs y-Skala
- * bildet ohnehin direkt auf Meter ab (anders als crosssection.js' `targetH`).
  */
 export function drawWindBarbOverlay(ctx, grid, x, y, opts = {}) {
-  const { nk, times, u, v } = grid;
-  const nt = times.length;
+  const { times } = grid;
   const nRows = opts.nRows ?? 7;
-  const size = opts.size ?? 16;
+  const size = opts.size ?? 20;
   const color = opts.color ?? "#0b1220";
-  const stepK = Math.max(1, Math.round(nk / nRows));
 
-  for (let k = Math.floor(stepK / 2); k < nk; k += stepK) {
-    for (let i = 0; i < nt; i++) {
-      const ix = i * nk + k;
-      const uu = u[ix], vv = v[ix];
-      if (!Number.isFinite(uu) || !Number.isFinite(vv)) continue;
-      const spdKt = Math.hypot(uu, vv) * KT_PER_MS;
-      const dirDeg = (Math.atan2(-uu, -vv) * 180 / Math.PI + 360) % 360;
-      drawBarb(ctx, x(times[i]), y(grid.z[ix]), spdKt, dirDeg, { size, color });
+  for (let r = 0; r < nRows; r++) {
+    const py = y.top + (y.bot - y.top) * (r + 0.5) / nRows;
+    const h = y.inv(py);
+    for (let i = 0; i < times.length; i++) {
+      const s = sampleAt(grid, i, h);
+      if (!Number.isFinite(s.u) || !Number.isFinite(s.v)) continue;
+      const spdKt = Math.hypot(s.u, s.v) * KT_PER_MS;
+      const dirDeg = (Math.atan2(-s.u, -s.v) * 180 / Math.PI + 360) % 360;
+      drawBarb(ctx, x(times[i]), py, spdKt, dirDeg, { size, color });
     }
   }
 }
