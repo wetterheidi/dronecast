@@ -30,6 +30,36 @@ export function drawWindRow(ctx, grid, x, top, height, opts = {}) {
   }
 }
 
+/**
+ * Windfiedern in der Höhenprofil-Hauptfläche, dieselbe Systematik wie
+ * `windArrows()` in crosssection.js: Höhenlevel auf `nRows` Zeilen
+ * ausgedünnt (Levelindex-Schrittweite `stepK`, zentriert per Halb-Offset),
+ * Zeitachse bewusst UNGEDÜNNT — die Chartbreite ist über `CHART_PX_PER_HOUR`
+ * an `CHART_BARB_SIZE` gekoppelt (windbarb.js), ein Fähnchen pro Stunde passt
+ * dadurch by construction ohne Überlappung, exakt wie in der Cross-Section.
+ * Reale Levelhöhe `grid.z[ix]` statt fixer Referenzhöhe -- GRAMETs y-Skala
+ * bildet ohnehin direkt auf Meter ab (anders als crosssection.js' `targetH`).
+ */
+export function drawWindBarbOverlay(ctx, grid, x, y, opts = {}) {
+  const { nk, times, u, v } = grid;
+  const nt = times.length;
+  const nRows = opts.nRows ?? 7;
+  const size = opts.size ?? 16;
+  const color = opts.color ?? "#0b1220";
+  const stepK = Math.max(1, Math.round(nk / nRows));
+
+  for (let k = Math.floor(stepK / 2); k < nk; k += stepK) {
+    for (let i = 0; i < nt; i++) {
+      const ix = i * nk + k;
+      const uu = u[ix], vv = v[ix];
+      if (!Number.isFinite(uu) || !Number.isFinite(vv)) continue;
+      const spdKt = Math.hypot(uu, vv) * KT_PER_MS;
+      const dirDeg = (Math.atan2(-uu, -vv) * 180 / Math.PI + 360) % 360;
+      drawBarb(ctx, x(times[i]), y(grid.z[ix]), spdKt, dirDeg, { size, color });
+    }
+  }
+}
+
 /** Herkunft/Geschwindigkeit (kt) als Fieder, Ursprung = Symbolzentrum,
  *  unrotiert zeigt der Schaft nach oben (Nordhalbkugel-Fähnchen). */
 function drawBarb(ctx, cx, cy, spdKt, dirDeg, { size = 22, color = "#0b1220" } = {}) {

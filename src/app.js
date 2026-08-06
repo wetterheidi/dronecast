@@ -585,6 +585,7 @@ function renderGm() {
       isotherms: settings.gmIsothermsOn,
       isotachs: settings.gmIsotachsOn,
       hazards: settings.gmHazardsOn,
+      windbarbs: settings.gmWindbarbsOn,
     },
   });
 }

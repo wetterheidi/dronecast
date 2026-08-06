@@ -21,6 +21,7 @@ const DEFAULTS = {
   gmIsothermsOn: true,
   gmIsotachsOn: true,
   gmHazardsOn: true, // Vereisung + Turbulenz (Kontur-Flächen + Symbole)
+  gmWindbarbsOn: false, // Fiedern in der Hauptfläche, Default aus (Testfeature, s. Feedback)
   lastPoint: null, // { lat, lon } – zuletzt gewählter Operationspunkt
   baseLayer: "OpenStreetMap", // Name der aktiven Leaflet-Basiskarte
   satLayerOn: false,

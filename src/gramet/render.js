@@ -18,7 +18,7 @@ import { sampleAt } from "./grid.js";
 import { contour } from "./derive.js";
 import { drawClouds, cbCells, drawCbShafts, drawCbAnvils } from "./texture.js";
 import { hashSeed, hashRand } from "./noise.js";
-import { drawWindRow, WIND_ROW_HEIGHT } from "./rows/wind.js";
+import { drawWindRow, WIND_ROW_HEIGHT, drawWindBarbOverlay } from "./rows/wind.js";
 import { drawNumberRow, NUMBER_ROW_HEIGHT } from "./rows/numberRow.js";
 import { niceLogHeights, niceTicks, fmtH } from "../crosssection.js";
 import { CHART_PX_PER_HOUR } from "../windbarb.js";
@@ -167,6 +167,16 @@ export function renderGramet(host, grid, view, state = {}) {
   if (toggles.isotherms !== false) drawIsotherms(ctx, view.isotherms, x, y);
   if (toggles.isotachs !== false) drawIsotachs(ctx, view.isotachs, x, y);
   if (toggles.tropopause !== false) drawTropopause(ctx, view.tropopause, x, y);
+
+  // Windfiedern: opt-in (Default aus, s. settings.js), weil sie die ohnehin
+  // volle Hauptfläche (Wolken/Hazards/Niederschlag) zusätzlich belasten --
+  // deshalb das dämpfende Fade darunter, statt jedem Fähnchen einen eigenen
+  // Halo zu geben (Test auf Wunsch, s. Feedback).
+  if (toggles.windbarbs) {
+    ctx.fillStyle = "rgba(255,255,255,0.6)";
+    ctx.fillRect(x.left, mainTop, x.right - x.left, mainBot - mainTop);
+    drawWindBarbOverlay(ctx, grid, x, y);
+  }
 
   ctx.strokeStyle = MUTED; ctx.lineWidth = 1;
   ctx.strokeRect(x.left + 0.5, mainTop + 0.5, pw - 1, mainH - 1);
