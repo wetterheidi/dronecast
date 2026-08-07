@@ -72,8 +72,11 @@ const FOG_BASE_M = 30;           // m AGL — darunter gilt eine Basis als Nebel
 // direkter als die RH-Heuristik, die bodennah nur über den Dunst-Guard
 // zwischen Dunst und Wolke unterscheidet. PLATZHALTER wie die QCOND_SCALE_*-
 // Konstanten oben (unvalidiert, s. METHODIK.md 4.1/4.3).
-const FOG_QW_CHECK_M = 50;  // m AGL — Level-Reichweite der Nebelprüfung
-const FOG_QW_MIN = 1e-5;    // kg/kg — Kondensat-Schwelle für „Nebel vorhanden"
+// Exportiert (statt wie `FOG_BASE_M` nur gespiegelt): `hazards/fog.js`
+// braucht dieselbe Kondensat-Schwelle für die grid-native Prüfung, zwei
+// Kopien desselben Platzhalterwerts würden sonst leise auseinanderlaufen.
+export const FOG_QW_CHECK_M = 50;  // m AGL — Level-Reichweite der Nebelprüfung
+export const FOG_QW_MIN = 1e-5;    // kg/kg — Kondensat-Schwelle für „Nebel vorhanden"
 
 // Kondensat-Skalen für die QW/QI-Stufe (Stufe 2, s. u.): getrennt für Wasser
 // und Eis, NICHT eine gemeinsame Skala — Eis erzeugt bei gleicher Masse mehr

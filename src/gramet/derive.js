@@ -12,6 +12,7 @@ import { metarWeather } from "../briefing.js";
 import * as icing from "./hazards/icing.js";
 import * as turbulence from "./hazards/turbulence.js";
 import * as convection from "./hazards/convection.js";
+import * as fog from "./hazards/fog.js";
 
 const KELVIN = 273.15;
 const KT_PER_MS = 1.94384;
@@ -81,6 +82,10 @@ export function deriveView(grid) {
   const nt = grid.times.length;
   const cloudBase = new Float32Array(nt);
   for (let i = 0; i < nt; i++) cloudBase[i] = cloudBaseAt(grid, d.cloudFrac, i);
+  // Einmal berechnen und an precipEntries/cbColumns weiterreichen -- deren
+  // metarWeather()-Aufrufe sollen dasselbe FG/BR/HZ-Ergebnis sehen wie die
+  // Wetter-Zeile, nicht mit einer zweiten Berechnung auseinanderlaufen.
+  const fogCols = fog.computeColumns(grid, d.cloudFrac);
 
   return {
     isotherms,
@@ -89,8 +94,9 @@ export function deriveView(grid) {
     daylight: daylightArr,
     cloudFrac: d.cloudFrac,
     cloudBase,
-    precip: precipEntries(grid, cloudBase),
-    cb: cbColumns(grid, d.cloudFrac, cloudBase, tropopauseLine),
+    precip: precipEntries(grid, cloudBase, fogCols),
+    cb: cbColumns(grid, d.cloudFrac, cloudBase, tropopauseLine, fogCols),
+    fog: fogCols,
     hazards: {
       icing: icing.computeGrid(grid, d.cloudFrac),
       turbulence: turbulence.computeGrid(grid, d.ri, d.shear2, d.nm),
@@ -399,17 +405,21 @@ function freezingHeightAt(grid, i) {
  * Feedback). Phase (Regen/Schnee) kommt jetzt ebenfalls aus dem METAR-Kürzel
  * (SN/SG/FZ...), nicht mehr nur aus `snowfall > 0`.
  */
-function precipEntries(grid, cloudBase) {
+function precipEntries(grid, cloudBase, fogCols) {
   const out = [];
   const { times, surface } = grid;
   if (!surface) return out;
   const cloudFrac = deriveGrid(grid).cloudFrac;
   for (let i = 0; i < times.length; i++) {
-    const label = Number.isFinite(surface.wcode?.[i]) ? metarWeather(surface.wcode[i]) : "N/A";
+    const label = Number.isFinite(surface.wcode?.[i])
+      ? metarWeather(surface.wcode[i], fog.toPhenomenon(fogCols[i])) : "N/A";
     const amt = surface.precip[i];
     const hasAmount = Number.isFinite(amt) && amt > PRECIP_MIN_RATE;
     const hasWx = label !== "NSW" && label !== "N/A";
-    const isFogOnly = label === "FG" || label === "FZFG"; // Nebel ist kein Niederschlag
+    // Nebel/Diesigkeit/Dunst sind kein Niederschlag -- ohne diesen Ausschluss
+    // bekäme jede reine BR/HZ-Stunde (kein `hasAmount`, aber `hasWx` durch das
+    // Label) fälschlich einen Niederschlagsvorhang.
+    const isFogOnly = label === "FG" || label === "FZFG" || label === "BR" || label === "HZ";
     if (!hasAmount && (!hasWx || isFogOnly)) continue;
 
     const freezingZ = freezingHeightAt(grid, i);
@@ -467,7 +477,7 @@ function precipEntries(grid, cloudBase) {
  * sich tatsächlich ein Amboss ausbreiten kann. +SH zählt bewusst NICHT als
  * Cb-Signal: Schauerintensität allein belegt keinen vergletscherten Oberrand.
  */
-function cbColumns(grid, cloudFrac, cloudBase, tropopauseLine) {
+function cbColumns(grid, cloudFrac, cloudBase, tropopauseLine, fogCols) {
   const { nk, times, surface } = grid;
   const conv = convection.computeColumns(grid);
   const out = [];
@@ -482,7 +492,8 @@ function cbColumns(grid, cloudFrac, cloudBase, tropopauseLine) {
         if (!Number.isFinite(deepTop) || z > deepTop) deepTop = z;
       }
     }
-    const label = Number.isFinite(surface?.wcode?.[i]) ? metarWeather(surface.wcode[i]) : "N/A";
+    const label = Number.isFinite(surface?.wcode?.[i])
+      ? metarWeather(surface.wcode[i], fog.toPhenomenon(fogCols[i])) : "N/A";
     const wxThunder = label.includes("TS");
     const wxShower = label.includes("SH");
     const cape = surface?.cape ? surface.cape[i] : NaN;

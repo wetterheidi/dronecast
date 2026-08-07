@@ -121,7 +121,8 @@
       "Bash(node gramet-check-final.mjs)",
       "Bash(sed 's/01-after-click.png/30-noglow-click.png/; s/02-gramet.png/31-noglow-gramet.png/; s/03-gramet-crop.png/32-noglow-crop.png/' gramet-check.mjs)",
       "Bash(node gramet-check-noglow.mjs)",
-      "Bash(node gramet-check-heightcolor.mjs)"
+      "Bash(node gramet-check-heightcolor.mjs)",
+      "Bash(node fog-check.mjs)"
     ]
   }
 }

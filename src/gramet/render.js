@@ -24,6 +24,7 @@ import { niceLogHeights, niceTicks, fmtH } from "../crosssection.js";
 import { CHART_PX_PER_HOUR } from "../windbarb.js";
 import { fmtHeight, fmtWind, fmtTemp, fmtDir } from "../units.js";
 import { metarWeather } from "../briefing.js";
+import * as fog from "./hazards/fog.js";
 
 const INK = "#0b0b0b", MUTED = "#52514e", GRID = "#d9d8d3";
 // Rechter Rand: Platz für die Beschriftungskästchen der Isothermen/Isotachen/
@@ -96,30 +97,30 @@ const ISOTACH_DASH = [7, 3, 1, 3];
 const ROW_DEFS = {
   wind: {
     height: WIND_ROW_HEIGHT, label: ["Wind", "10 m"],
-    draw: (ctx, grid, x, top, h) => drawWindRow(ctx, grid, x, top, h),
+    draw: (ctx, grid, view, x, top, h) => drawWindRow(ctx, grid, x, top, h),
   },
   tempdew: {
     height: NUMBER_ROW_HEIGHT, label: ["T /", "Taupunkt"],
-    draw: (ctx, grid, x, top, h) => drawNumberRow(ctx, grid.times, x, top, h, [
+    draw: (ctx, grid, view, x, top, h) => drawNumberRow(ctx, grid.times, x, top, h, [
       { values: grid.surface.t2m, fmt: (v) => fmtTemp(v), color: "#c0392b" },
       { values: grid.surface.td2m, fmt: (v) => fmtTemp(v), color: "#2980b9" },
     ]),
   },
   gust: {
     height: NUMBER_ROW_HEIGHT * 0.7, label: ["Böen", "10 m"],
-    draw: (ctx, grid, x, top, h) => drawNumberRow(ctx, grid.times, x, top, h, [
+    draw: (ctx, grid, view, x, top, h) => drawNumberRow(ctx, grid.times, x, top, h, [
       { values: grid.surface.gust, fmt: (v) => fmtWind(v), color: "#6a3d9a" },
     ]),
   },
   pressure: {
     height: NUMBER_ROW_HEIGHT * 0.7, label: ["SLP", "hPa"],
-    draw: (ctx, grid, x, top, h) => drawNumberRow(ctx, grid.times, x, top, h, [
+    draw: (ctx, grid, view, x, top, h) => drawNumberRow(ctx, grid.times, x, top, h, [
       { values: grid.surface.pmsl, fmt: (v) => String(Math.round(v)), color: "#1a6b4a" },
     ]),
   },
   weather: {
     height: NUMBER_ROW_HEIGHT * 0.55, label: ["Wetter", "(METAR)"],
-    draw: (ctx, grid, x, top, h) => drawWeatherRow(ctx, grid, x, top, h),
+    draw: (ctx, grid, view, x, top, h) => drawWeatherRow(ctx, grid, view, x, top, h),
   },
 };
 
@@ -165,11 +166,22 @@ export function renderGramet(host, grid, view, state = {}) {
 
   const toggles = state.layerToggles ?? {};
   drawBackground(ctx, grid, view, x, y, mainTop, mainBot);
+  // BR/HZ (kein cloudFrac-Signal, s. `drawFogHaze`) vor Wolken/Hazards/
+  // Niederschlag, damit die auf dem Schleier noch klar lesbar bleiben statt
+  // darin zu verschwimmen. FG dagegen ALS FLÄCHE (`drawFogBlock`, s. dort) --
+  // die normale Ellipsentextur wirkt für Nebel zu "gefleckt"/wolkig, echter
+  // Bodennebel ist optisch eintönig (s. Feedback) -- deshalb auch VOR den
+  // Wolken, damit `drawClouds()` (s. u., mit maskierter cloudFrac) darin
+  // nichts mehr zu zeichnen hat.
+  drawFogHaze(ctx, grid, view, x, y, mainTop, mainBot);
+  drawFogBlock(ctx, grid, view, x, y);
   // Zellzerlegung einmal ziehen: Schaft, Amboss und Symbol müssen auf demselben
   // Turm sitzen (s. `cbCells`).
   const cells = toggles.cb !== false ? cbCells(grid, view.cb, x, y) : [];
   if (toggles.cb !== false) drawCbShafts(ctx, cells, x, y);
-  if (toggles.clouds !== false) drawClouds(ctx, grid, view.cloudFrac, x, y);
+  // FG-Zellen aus der Ellipsentextur ausblenden (s. `drawFogBlock`) -- sonst
+  // säße die "Reiskorn"-Wolkentextur unter/über dem flachen Nebelblock.
+  if (toggles.clouds !== false) drawClouds(ctx, grid, maskFog(grid, view.cloudFrac, view.fog), x, y);
   if (toggles.cb !== false) {
     drawCbAnvils(ctx, cells, x, y);
     drawCbGlyphs(ctx, cells);
@@ -214,7 +226,7 @@ export function renderGramet(host, grid, view, state = {}) {
     const def = ROW_DEFS[id];
     ctx.save();
     ctx.beginPath(); ctx.rect(x.left, rowTop, pw, def.height); ctx.clip();
-    def.draw(ctx, grid, x, rowTop, def.height);
+    def.draw(ctx, grid, view, x, rowTop, def.height);
     ctx.restore();
     ctx.strokeStyle = GRID; ctx.lineWidth = 1;
     ctx.strokeRect(x.left + 0.5, rowTop + 0.5, pw - 1, def.height - 1);
@@ -234,7 +246,7 @@ export function renderGramet(host, grid, view, state = {}) {
   plot.append(axis, canvas);
 
   host.append(plot);
-  setupHover(host, canvas, axis, grid, { x, y, mainTop, mainBot });
+  setupHover(host, canvas, axis, grid, { x, y, mainTop, mainBot, view });
   return canvas;
 }
 
@@ -348,6 +360,183 @@ const DEPTH_REF_MIN = 10, DEPTH_REF_MAX = 12000;
 const DEPTH_MAX_ALPHA = 0.55;
 function depthAt(z) {
   return clamp((z - DEPTH_REF_MIN) / (DEPTH_REF_MAX - DEPTH_REF_MIN), 0, 1);
+}
+
+// --- Nebel/Dunst (BR/HZ) -------------------------------------------------------
+//
+// FG braucht hier nichts -- läuft komplett über `drawClouds()` (`cloudFrac`
+// ist am Boden bereits hoch) plus das Label in der Wetter-Zeile. BR/HZ haben
+// per Definition (s. `hazards/fog.js`) KEIN cloudFrac-Signal -- Luft ist
+// nicht gesättigt -- und brauchen daher einen eigenen Schleier.
+//
+// Zwei UNABHÄNGIGE Verläufe (waagerecht: welche Stunde/welcher Typ+welche
+// Stärke, senkrecht: wie nah am Boden) lassen sich nicht in einem einzigen
+// Canvas-Gradient kombinieren. Deshalb der Offscreen-Umweg (gleiche Technik
+// wie die Zenit-Tiefe oben, nur mit vertauschten Rollen): zuerst waagerecht
+// Farbe+Stärke je Stunde aufmalen (wie der Tag/Nacht-Grundverlauf in
+// `drawBackground`, nur mit BR-/HZ-Farbe statt Nacht/Tag), danach per
+// `destination-in` mit der senkrechten Form maskieren (Boden voll, ab
+// `HAZE_REF_MAX` nichts mehr) -- an der tatsächlichen HÖHE festgemacht wie
+// `DEPTH_REF_MAX` oben, nicht an Panel-Pixeln, sonst hätte dieselbe Höhe bei
+// "Gesamthöhe" und "bis Flughöhe" unterschiedlich viel Schleier.
+const HAZE_REF_MIN = 10, HAZE_REF_MAX = 400; // m AGL -- Reichweite des Schleiers
+// Kräftiger als im ersten Entwurf (0.5/gedämpfte Baseline) -- BR/HZ waren
+// dort kaum vom normalen Himmel zu unterscheiden (s. Feedback).
+const HAZE_MAX_ALPHA = 0.7;
+const BR_COLOR = "225,235,238"; // weißlich -- BR ist feucht (Diesigkeit)
+const HZ_COLOR = "196,155,74";  // ockerfarben -- HZ simuliert trockenen Staubdunst
+
+/** Schleierfarbe+-stärke einer Stunde. Grenzen aus `hazards/fog.js`, damit
+ *  Visual und Label deckungsgleich einsetzen. Baseline+Rampe statt reinem
+ *  0..1-Verhältnis, damit "gerade eben BR/HZ" nicht schon fast unsichtbar
+ *  ist -- rein optisch gewählt, nicht kalibriert. */
+function hazeColorAlpha(entry, rh0) {
+  if (!entry || !Number.isFinite(rh0)) return null;
+  if (entry.type === "BR") {
+    const t = clamp((rh0 - fog.BR_RH_MIN) / (100 - fog.BR_RH_MIN), 0, 1);
+    return { color: BR_COLOR, alpha: HAZE_MAX_ALPHA * (0.65 + 0.35 * t) };
+  }
+  if (entry.type === "HZ") {
+    const t = clamp((rh0 - fog.HZ_RH_MIN) / (fog.BR_RH_MIN - fog.HZ_RH_MIN), 0, 1);
+    return { color: HZ_COLOR, alpha: HAZE_MAX_ALPHA * (0.45 + 0.4 * t) };
+  }
+  return null;
+}
+
+function drawFogHaze(ctx, grid, view, x, y, top, bot) {
+  const { times, nk } = grid;
+  const span = x.right - x.left, h = bot - top;
+  if (span <= 0 || h <= 0 || !view.fog) return;
+
+  // Waagerecht: Farbe+Stärke je Stunde, wie der Tag/Nacht-Grundverlauf.
+  const colorGrad = ctx.createLinearGradient(x.left, 0, x.right, 0);
+  let lastOff = -1, anyHaze = false;
+  for (let i = 0; i < times.length; i++) {
+    let off = clamp((x(times[i]) - x.left) / span, 0, 1);
+    if (off <= lastOff) off = Math.min(1, lastOff + 1e-4);
+    const ca = hazeColorAlpha(view.fog[i], grid.rh[i * nk]);
+    if (ca) anyHaze = true;
+    colorGrad.addColorStop(off, ca ? `rgba(${ca.color},${ca.alpha})` : "rgba(0,0,0,0)");
+    lastOff = off;
+  }
+  if (!anyHaze) return; // nichts zu zeichnen -- Offscreen-Aufwand sparen
+
+  const dpr = window.devicePixelRatio || 1;
+  const offCanvas = document.createElement("canvas");
+  offCanvas.width = Math.max(1, Math.round(span * dpr));
+  offCanvas.height = Math.max(1, Math.round(h * dpr));
+  const octx = offCanvas.getContext("2d");
+  octx.scale(dpr, dpr);
+  octx.translate(-x.left, -top);
+
+  octx.fillStyle = colorGrad;
+  octx.fillRect(x.left, top, span, h);
+
+  // Senkrecht: Form als Maske, an der tatsächlichen Höhe festgemacht (s. o.).
+  const shape = octx.createLinearGradient(0, top, 0, bot);
+  const HAZE_SHAPE_STEPS = 24;
+  for (let s = 0; s <= HAZE_SHAPE_STEPS; s++) {
+    const py = top + h * s / HAZE_SHAPE_STEPS;
+    const z = y.inv(py);
+    const a = clamp(1 - (z - HAZE_REF_MIN) / (HAZE_REF_MAX - HAZE_REF_MIN), 0, 1);
+    shape.addColorStop(s / HAZE_SHAPE_STEPS, `rgba(0,0,0,${a})`);
+  }
+  octx.globalCompositeOperation = "destination-in";
+  octx.fillStyle = shape;
+  octx.fillRect(x.left, top, span, h);
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.drawImage(offCanvas, x.left, top, span, h);
+  ctx.restore();
+}
+
+// --- Nebel (FG) als Fläche ------------------------------------------------------
+//
+// Echter Bodennebel ist optisch eintönig -- keine einzelnen Quellwolken,
+// sondern eine gleichmäßig grau verhangene Schicht (s. Feedback: die normale
+// Ellipsentextur von `drawClouds()` sah für Nebel zu "gefleckt"/wolkig aus).
+// Deshalb eine eigene, FLACHE Fläche statt der Ellipsentechnik: `contour()`
+// (marching squares, dieselbe Funktion wie für Isotachen/Hazard-Flächen)
+// liefert eine glatte Umrisslinie um alle FG-Zellen, gefüllt mit einem
+// einzigen Grauton statt Textur.
+//
+// Ersatz-Obergrenze, wenn die Klassifikation keine liefert (WW-Code-Fallback
+// ohne RH/Kondensat-Top, s. hazards/fog.js): eine typische flache Nebelschicht,
+// rein optisch gewählt, nicht kalibriert.
+const FG_BLOCK_FALLBACK_M = 100;
+const FOG_BLOCK_NIGHT = "#3a3d40", FOG_BLOCK_DAY = "#9aa0a6";
+const FOG_BLOCK_ALPHA = 0.88;
+
+/** FG-Obergrenze einer Stunde, mit Ersatzwert (s. o.). `null`, wenn die
+ *  Stunde kein FG ist. */
+function fgTopAt(entry) {
+  if (!entry || entry.type !== "FG") return null;
+  return entry.top ?? FG_BLOCK_FALLBACK_M;
+}
+
+/** 0/1-Feld (nt*nk): 1, wo eine Zelle innerhalb der FG-Schicht der jeweiligen
+ *  Stunde liegt -- Grundlage sowohl für `drawFogBlock()` (Fläche) als auch
+ *  für `maskFog()` (Ellipsentextur dort aussparen). */
+function fgField(grid, fogCols) {
+  const { nk, times } = grid;
+  const field = new Float32Array(times.length * nk);
+  let any = false;
+  for (let i = 0; i < times.length; i++) {
+    const topZ = fgTopAt(fogCols?.[i]);
+    if (topZ == null) continue;
+    for (let k = 0; k < nk; k++) {
+      const ix = i * nk + k;
+      if (grid.z[ix] <= topZ) { field[ix] = 1; any = true; }
+    }
+  }
+  return any ? field : null;
+}
+
+/** `cloudFrac`, mit auf 0 gesetzten FG-Zellen -- für `drawClouds()`, damit
+ *  dort keine Ellipsentextur unter/über dem flachen Nebelblock entsteht.
+ *  `view.cloudFrac` selbst bleibt unverändert (Vereisung/Wolkenbasis/Hover-
+ *  Tooltip sollen Nebel weiterhin als echte Wolke sehen -- physikalisch ist
+ *  er das ja auch, nur die TEXTUR soll ihn nicht mehr zeichnen). */
+function maskFog(grid, cloudFrac, fogCols) {
+  const field = fgField(grid, fogCols);
+  if (!field) return cloudFrac;
+  const out = Float32Array.from(cloudFrac);
+  for (let ix = 0; ix < out.length; ix++) if (field[ix]) out[ix] = 0;
+  return out;
+}
+
+function drawFogBlock(ctx, grid, view, x, y) {
+  const field = fgField(grid, view.fog);
+  if (!field) return;
+
+  // Farbverlauf wie der Himmel/Boden: bei Tag heller/durchscheinender Nebel,
+  // bei Nacht dunkler -- dieselbe Stopptechnik wie `drawBackground`.
+  const grad = ctx.createLinearGradient(x.left, 0, x.right, 0);
+  const span = x.right - x.left;
+  let lastOff = -1;
+  for (let i = 0; i < grid.times.length; i++) {
+    let off = clamp((x(grid.times[i]) - x.left) / span, 0, 1);
+    if (off <= lastOff) off = Math.min(1, lastOff + 1e-4);
+    grad.addColorStop(off, mixHex(FOG_BLOCK_NIGHT, FOG_BLOCK_DAY, view.daylight[i]));
+    lastOff = off;
+  }
+
+  const polylines = contour(grid, field, 0.5);
+  ctx.save();
+  ctx.globalAlpha = FOG_BLOCK_ALPHA;
+  ctx.fillStyle = grad;
+  for (const pl of polylines) {
+    if (pl.length < 2) continue;
+    ctx.beginPath();
+    pl.forEach((p, idx) => {
+      const px = x(p.t), py = y(p.z);
+      if (idx === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    });
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 // --- Boden ---------------------------------------------------------------------
@@ -896,7 +1085,7 @@ function drawTimeAxis(ctx, times, x, yTop, yBot) {
 // --- Hover (DOM-Overlay) -------------------------------------------------------
 
 function setupHover(host, canvas, axis, grid, info) {
-  const { x, y, mainTop, mainBot } = info;
+  const { x, y, mainTop, mainBot, view } = info;
   host.style.position = host.style.position || "relative";
   const tip = document.createElement("div");
   tip.className = "gm-tip";
@@ -926,7 +1115,7 @@ function setupHover(host, canvas, axis, grid, info) {
     // die gehoverte Höhe -- daher explizit gekennzeichnet.
     const code = grid.surface?.wcode?.[i];
     const ww = Number.isFinite(code)
-      ? `${metarWeather(code)} (ww ${String(code).padStart(2, "0")})`
+      ? `${metarWeather(code, fog.toPhenomenon(view.fog?.[i]))} (ww ${String(code).padStart(2, "0")})`
       : "N/A";
     // Menge ebenfalls Boden und zusätzlich rückwärtsgewandt: Open-Meteo gibt
     // `precipitation` als Summe der VORANGEHENDEN Stunde aus, während ww zum
@@ -959,7 +1148,7 @@ function setupHover(host, canvas, axis, grid, info) {
 
 // weather_code als METAR-nahes Kürzel (dieselbe Tabelle wie im Briefing) --
 // "NSW"/"N/A" (kein signifikantes Wetter) wird wie im echten METAR weggelassen.
-function drawWeatherRow(ctx, grid, x, top, height) {
+function drawWeatherRow(ctx, grid, view, x, top, height) {
   const { times, surface } = grid;
   if (!surface?.wcode) return;
   ctx.font = "10px system-ui, sans-serif";
@@ -969,12 +1158,19 @@ function drawWeatherRow(ctx, grid, x, top, height) {
   for (let i = 0; i < times.length; i++) {
     const code = surface.wcode[i];
     if (!Number.isFinite(code)) continue;
-    const label = metarWeather(code);
+    const entry = view?.fog?.[i];
+    const label = metarWeather(code, fog.toPhenomenon(entry));
     if (label === "NSW" || label === "N/A") continue;
     const px = x(times[i]);
     if (px - lastX < 30) continue;
+    // Unsichere Befunde (RH-Fallback statt CLC/Kondensat, s. hazards/fog.js)
+    // gedämpft statt in der vollen Warnfarbe -- Konfidenz-Konvention wie bei
+    // der Wolkenbasislinie im Meteogramm (dort gestrichelt statt Farbe, hier
+    // reicht Alpha, weil Text keine Linienart hat).
+    ctx.globalAlpha = entry && entry.certain === false ? 0.55 : 1;
     ctx.fillStyle = weatherColor(label);
     ctx.fillText(label, px, cy);
+    ctx.globalAlpha = 1;
     lastX = px;
   }
 }
@@ -982,7 +1178,9 @@ function weatherColor(label) {
   if (label.includes("TS")) return "#b71c1c";
   if (label.includes("SN") || label.includes("SG")) return "#1565c0";
   if (label.includes("FZ")) return "#6a1b9a";
-  if (label.includes("FG")) return "#616161";
+  if (label === "FG") return "#616161";
+  if (label === "BR") return "#78909c";
+  if (label === "HZ") return "#8d6e63";
   return "#01579b";
 }
 

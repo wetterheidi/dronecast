@@ -74,11 +74,13 @@ function buildSurface(surface, times, col) {
     ws10 = new Float32Array(nt).fill(NaN), wd10 = new Float32Array(nt).fill(NaN),
     gust = new Float32Array(nt).fill(NaN), precip = new Float32Array(nt).fill(NaN),
     snow = new Float32Array(nt).fill(NaN), cape = new Float32Array(nt).fill(NaN),
-    wcode = new Float32Array(nt).fill(NaN);
+    wcode = new Float32Array(nt).fill(NaN), visibility = new Float32Array(nt).fill(NaN);
   // pressure_msl kommt direkt aus der Säule (dieselbe Instanz/Zeitreihe wie die
   // Level-Daten, s. column.js) -- 1:1 indexiert, kein nearestIndex-Abgleich nötig.
   const pmsl = col?.pmsl ? Float32Array.from(col.pmsl) : new Float32Array(nt).fill(NaN);
-  if (!surface?.time?.length) return { t2m, td2m, ws10, wd10, gust, precip, snow, cape, wcode, pmsl };
+  if (!surface?.time?.length) {
+    return { t2m, td2m, ws10, wd10, gust, precip, snow, cape, wcode, visibility, pmsl };
+  }
 
   const V = surface.vars || {};
   const pick = (name, out, factor = 1) => {
@@ -100,7 +102,8 @@ function buildSurface(surface, times, col) {
   pick("snowfall", snow);
   pick("cape", cape);
   pick("weather_code", wcode);
-  return { t2m, td2m, ws10, wd10, gust, precip, snow, cape, wcode, pmsl };
+  pick("visibility", visibility);
+  return { t2m, td2m, ws10, wd10, gust, precip, snow, cape, wcode, visibility, pmsl };
 }
 
 export function idx(grid, t, k) { return t * grid.nk + k; }

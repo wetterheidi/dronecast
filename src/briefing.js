@@ -168,17 +168,26 @@ const WMO_TO_TAF = {
   95: "TSRA", 96: "TSGR", 99: "+TSGR",
 };
 /**
- * METAR-nahes Wettersymbol aus `weather_code` — korrigiert um den
- * physikalischen Nebelnachweis aus der Säule (`physFog`, clouds.js
- * `groundFog`): meldet weather_code KEIN signifikantes Wetter, bestätigt die
- * Säule (andere/genauere Instanz) aber Nebel, wird FG/FZFG ergänzt. Zeigt
- * weather_code bereits etwas Schwereres (Gewitter, Niederschlag), bleibt das
- * unverändert — Nebel wird nicht darübergestülpt.
+ * METAR-nahes Wettersymbol aus `weather_code` — korrigiert um einen
+ * physikalischen/RH-basierten Bodenbefund (`phenomenon`; für Nebel bislang
+ * `clouds.js` `groundFog()`, seit GRAMETs Nebel/Dunst-Diagnose auch
+ * `gramet/hazards/fog.js` `toPhenomenon()`): meldet weather_code KEIN
+ * signifikantes Wetter, liefert der Befund aber Nebel/Diesigkeit/Dunst, wird
+ * FG/FZFG/BR/HZ ergänzt (Priorität FG > BR > HZ, das schwerste Phänomen
+ * gewinnt). Zeigt weather_code bereits etwas Schwereres (Gewitter,
+ * Niederschlag), bleibt das unverändert — nichts wird darübergestülpt.
+ *
+ * `phenomenon` bewusst mit denselben Feldnamen wie bisher `physFog`
+ * (`fog`/`freezing`) plus `mist`/`haze` — bestehende Aufrufer (nur `fog`/
+ * `freezing` setzend) funktionieren unverändert weiter.
  */
-export function metarWeather(code, physFog = null) {
+export function metarWeather(code, phenomenon = null) {
   const c = parseInt(code, 10);
   const w = Number.isNaN(c) ? "N/A" : (WMO_TO_TAF[c] || "N/A");
-  if (physFog?.fog && (w === "NSW" || w === "N/A")) return physFog.freezing ? "FZFG" : "FG";
+  if (w !== "NSW" && w !== "N/A") return w;
+  if (phenomenon?.fog) return phenomenon.freezing ? "FZFG" : "FG";
+  if (phenomenon?.mist) return "BR";
+  if (phenomenon?.haze) return "HZ";
   return w;
 }
 
