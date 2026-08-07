@@ -39,6 +39,28 @@ const PANEL_BG = "#fcfcfb";
 // Wolkenschraffur verschwinden) -- näher am Original-GRAMET-Kontrast.
 const NIGHT_COLOR = "#050b1e", DAY_COLOR = "#2b5c93";
 
+// Bodenstreifen unter dem Hauptpanel. GRAMET ist eine reine Punktprognose
+// (ein Ort über die Zeit, nicht eine Route über den Raum) -- ein Geländeprofil
+// wie im Cross-Section-Chart ergibt hier keinen Sinn, die Höhe des einen
+// Punkts ändert sich ja nicht. Statt einer Silhouette also ein schmaler,
+// horizontaler Streifen im ohnehin leeren GAP zwischen Hauptpanel und
+// Zahlenzeilen -- reine Bodenkontakt-Anzeige, kein Höhenprofil, verdrängt
+// darum auch keine echten Daten (s. Feedback).
+const GROUND_H = 14;
+// Folgt derselben Tag/Nacht-Kurve wie der Himmel (`view.daylight`), damit
+// Boden und Himmel zur selben Stunde gemeinsam dunkeln/hellen. Deutlich
+// dunkler als eine "natürliche" Erdfarbe gewählt (nicht nur ein anderer
+// Farbton, sondern spürbar geringere Leuchtdichte als NIGHT_COLOR/DAY_COLOR)
+// -- mit einer nur leicht dunkleren Erdfarbe verschwamm der Boden mit dem
+// Himmel zu ähnlich heller Fläche, die Horizontlinie blieb die einzige
+// Trennung (s. Feedback).
+const GROUND_NIGHT = "#0a0603", GROUND_DAY = "#076f30";
+// Zieht den Bodenton zusätzlich Richtung Reifweiß, wenn `surface.t2m` <= 0 °C
+// ist -- keine neue Datenquelle nötig, das Feld liegt in `grid.surface`
+// ohnehin schon für die T/Taupunkt-Zeile bereit. Für Drohnenpiloten ist eine
+// Frostnacht am Startpunkt relevant, das Signal soll also sichtbar sein.
+const GROUND_FROST = "#dfe6ea";
+
 // Hazard-Flächen als Kontur-Umriss (marching squares, s. `derive.js`
 // `contour()`) statt Zellraster -- entspricht der GRAMET-Konvention aus dem
 // Referenz-Screenshot (gestrichelt umrandete Fläche statt Pixelraster).
@@ -119,10 +141,10 @@ export function renderGramet(host, grid, view, state = {}) {
   const pw = Math.max(hours * CHART_PX_PER_HOUR, containerPw);
 
   const rowsH = activeRows.reduce((s, id) => s + ROW_DEFS[id].height, 0);
-  const mainH = Math.max(240, (host.clientHeight || 560) - TOPAX - rowsH - GAP * 2 - BOT);
+  const mainH = Math.max(240, (host.clientHeight || 560) - TOPAX - GROUND_H - rowsH - GAP * 2 - BOT);
 
   const W = M.l + pw + M.r;
-  const H = TOPAX + mainH + GAP + rowsH + GAP + BOT;
+  const H = TOPAX + mainH + GROUND_H + GAP + rowsH + GAP + BOT;
   const dpr = window.devicePixelRatio || 1;
 
   const canvas = document.createElement("canvas");
@@ -185,8 +207,9 @@ export function renderGramet(host, grid, view, state = {}) {
   ctx.strokeRect(x.left + 0.5, mainTop + 0.5, pw - 1, mainH - 1);
   drawHeightAxis(ctx, y, zMin, zMax, x, lin);
   timeGridLines(ctx, times, x, mainTop, mainBot);
+  drawGround(ctx, grid, view, x, mainBot, GROUND_H);
 
-  let rowTop = mainBot + GAP;
+  let rowTop = mainBot + GROUND_H + GAP;
   for (const id of activeRows) {
     const def = ROW_DEFS[id];
     ctx.save();
@@ -284,6 +307,36 @@ function drawBackground(ctx, grid, view, x, top, bot) {
   }
   ctx.fillStyle = grad;
   ctx.fillRect(x.left, top, span, bot - top);
+}
+
+// --- Boden ---------------------------------------------------------------------
+
+// Schmaler Streifen direkt unter dem Hauptpanel, s. Kommentar an `GROUND_H`.
+// Gleiche Verlaufstechnik wie `drawBackground` (ein Farbstopp je Zeitschritt),
+// zusätzlich pro Stopp Richtung `GROUND_FROST` gezogen, wenn die Bodentemperatur
+// an oder unter dem Gefrierpunkt liegt -- linear ausgereizt bis -5 °C, damit ein
+// Streifen mit nur -0.5 °C nicht schon voll bereift wirkt.
+const GROUND_FROST_SPAN = 5;
+function drawGround(ctx, grid, view, x, top, h) {
+  const { times, surface } = grid;
+  const span = x.right - x.left;
+  const grad = ctx.createLinearGradient(x.left, 0, x.right, 0);
+  let lastOff = -1;
+  for (let i = 0; i < times.length; i++) {
+    let off = clamp((x(times[i]) - x.left) / span, 0, 1);
+    if (off <= lastOff) off = Math.min(1, lastOff + 1e-4);
+    const dayNight = blend3(GROUND_NIGHT, GROUND_DAY, view.daylight[i]);
+    const t2m = surface?.t2m?.[i];
+    const frostT = Number.isFinite(t2m) ? clamp(-t2m / GROUND_FROST_SPAN, 0, 1) : 0;
+    grad.addColorStop(off, rgbStr(blendRGB(dayNight, hex(GROUND_FROST), frostT)));
+    lastOff = off;
+  }
+  ctx.fillStyle = grad;
+  ctx.fillRect(x.left, top, span, h);
+
+  // Horizontlinie: dunkler Kontaktschatten, wo der Himmel auf den Boden trifft.
+  ctx.strokeStyle = "rgba(0,0,0,0.3)"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(x.left, top + 0.5); ctx.lineTo(x.right, top + 0.5); ctx.stroke();
 }
 
 // --- Hazard-Flächen (Vereisung berechnet, s. hazards/icing.js; Turbulenz noch
@@ -901,3 +954,13 @@ function mixHex(a, b, f) {
   return `rgb(${r},${g},${bl})`;
 }
 function hex(h) { return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; }
+// RGB-Varianten von `mixHex`/`hex`, für den Bodenstreifen: dort wird in zwei
+// Schritten gemischt (Tag/Nacht, dann Richtung Reif), `mixHex` nimmt aber nur
+// Hex-Strings entgegen und liefert bereits einen "rgb(...)"-String zurück --
+// den könnte man kein zweites Mal durch `hex()` parsen.
+function blendRGB(a, b, f) {
+  const ff = clamp(f, 0, 1);
+  return [0, 1, 2].map((k) => Math.round(a[k] + (b[k] - a[k]) * ff));
+}
+function blend3(hexA, hexB, f) { return blendRGB(hex(hexA), hex(hexB), f); }
+function rgbStr(c) { return `rgb(${c[0]},${c[1]},${c[2]})`; }
