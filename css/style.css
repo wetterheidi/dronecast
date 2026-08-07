@@ -628,12 +628,20 @@ input[type="range"]::-moz-range-thumb {
   #panelhead {
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: 7;
+    height: 48px;
     margin: -12px -14px 10px;
-    padding: 10px 14px;
+    padding: 0 14px;
     background: rgba(252, 252, 251, 0.96);
   }
-  #panel.collapsed { max-height: 46px; overflow: hidden; }
+  #panel.collapsed { max-height: 48px; overflow: hidden; }
+
+  /* Masterzeit klebt normalerweise selbst oben (siehe Basis-Regel weiter
+     oben), das würde sie mobil aber exakt über den Panel-Kopf legen --
+     beide sind sticky mit top:0. Hier direkt unter dem 48px hohen Kopf
+     andocken lassen, damit Titel & Klapp-Pfeil beim Scrollen sichtbar
+     bleiben statt verdeckt zu werden. */
+  #mastertime { top: 48px; }
 
   /* Touch-Ziele vergrößern; 16px verhindert iOS-Safari-Auto-Zoom. */
   select, input, button { font-size: 16px; }
@@ -644,6 +652,30 @@ input[type="range"]::-moz-range-thumb {
 
   /* Overlays bildschirmfüllend. */
   #meteogram, #crosssection, #gramet, #gonogo, #briefing { inset: 0; border-radius: 0; z-index: 1300; }
+
+  /* Overlay-Kopf: bei schmalen Screens umbrechen statt seitlich abzuschneiden.
+     Schließen-Button fest oben rechts, damit er unabhängig vom Umbruch der
+     übrigen Kopfzeilen-Elemente (Layerschalter, Höhenbereich, Export …)
+     immer an derselben Stelle erreichbar bleibt. */
+  .mg-head {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    position: relative;
+    padding-right: 40px;
+  }
+  #mg-close, #xs-close, #gm-close, #brf-close, #gng-close {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    margin-left: 0;
+  }
+  .gm-layers { flex-wrap: wrap; row-gap: 4px; }
+
+  /* Mehrspaltige Formulare (Einstellungen, Drohnenprofil-Editor) auf eine
+     Spalte reduzieren -- zwei/drei Selects nebeneinander sind auf
+     Telefonbreite zu schmal für die Labels. */
+  .grid2, .grid3, .dp-grid { grid-template-columns: 1fr; }
+  .dp-actions { flex-wrap: wrap; }
 
   .leaflet-top.leaflet-left { top: env(safe-area-inset-top); }
 }
