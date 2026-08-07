@@ -46,10 +46,20 @@ export async function fetchSurface(lat, lon, modelKey, forecastDays, fetchImpl =
     nights.push({ sunrise: sr[i], sunset: ss[i] });
   }
 
+  // `time` reicht immer bis zum angefragten forecast_days-Horizont, auch wenn
+  // das Modell (z. B. ICON-D2, ~48 h) real kürzer vorhersagt — die API füllt
+  // den Rest der Kernvariable mit null statt das Array zu kürzen. Auf den
+  // echten Modellhorizont zurückschneiden, sonst zeigen Meteogramm & Co. eine
+  // "leere" Verlängerung bis zum gewählten Zeithorizont.
+  const cut = vars.temperature_2m ? lastFiniteIndex(vars.temperature_2m) + 1 : time.length;
+  const trim = (arr) => (cut < arr.length ? arr.slice(0, cut) : arr);
+  const trimmedVars = {};
+  for (const key of Object.keys(vars)) trimmedVars[key] = trim(vars[key]);
+
   return {
-    time,
+    time: trim(time),
     units: data.hourly_units || {},
-    vars,
+    vars: trimmedVars,
     elevation: data.elevation,
     nights,
   };
@@ -100,4 +110,19 @@ export function nearestIndex(timeSec, tMs) {
 
 function round5(x) {
   return Math.round(x * 1e5) / 1e5;
+}
+
+/** Letzter Index, an dem mindestens eine der übergebenen Kernreihen noch einen
+ *  endlichen Wert hat — jenseits davon liefert das Modell nur noch null (der
+ *  angefragte forecast_days-Horizont reicht weiter als der reale Modelllauf).
+ *  Genutzt, um Zeitreihen auf den tatsächlich verfügbaren Zeitraum zu kürzen. */
+export function lastFiniteIndex(...arrays) {
+  let last = -1;
+  for (const arr of arrays) {
+    if (!arr) continue;
+    for (let i = arr.length - 1; i > last; i--) {
+      if (Number.isFinite(arr[i])) { last = i; break; }
+    }
+  }
+  return last;
 }

@@ -98,7 +98,8 @@
       "Bash(sed 's/01-after-click.png/06-ground-click.png/; s/02-gramet.png/07-ground-gramet.png/; s/03-gramet-crop.png/08-ground-crop.png/' gramet-check.mjs)",
       "Bash(node gramet-check-ground.mjs)",
       "Bash(sed 's/01-after-click.png/10-contrast-click.png/; s/02-gramet.png/11-contrast-gramet.png/; s/03-gramet-crop.png/12-contrast-crop.png/' gramet-check.mjs)",
-      "Bash(node gramet-check-contrast.mjs)"
+      "Bash(node gramet-check-contrast.mjs)",
+      "Bash(node --check src/weather.js)"
     ]
   }
 }

@@ -7,6 +7,7 @@
 
 import { API_BASE, MODELS } from "./config.js";
 import { cloudFraction } from "./clouds.js";
+import { lastFiniteIndex } from "./weather.js";
 
 const KMH_TO_MS = 1 / 3.6;
 
@@ -83,9 +84,25 @@ export async function fetchColumn(lat, lon, modelKey, forecastDays, fetchImpl = 
     clc.push(toArr(H[`cloud_cover_level${l}`], T, 1));
   }
   const pmsl = toArr(H.pressure_msl, T, 1);
+
+  // `time` reicht immer bis zum angefragten forecast_days-Horizont, auch wenn
+  // das Modell (z. B. ICON-D2, ~48 h) real kürzer vorhersagt — die Level-
+  // Variablen werden für die überzähligen Stunden nur mit null aufgefüllt statt
+  // das Array zu kürzen. Auf den tatsächlichen Modellhorizont zurückschneiden
+  // (unterstes Level + SLP als Indikator), sonst zeigen GRAMET/Cross-Section
+  // eine "leere" Verlängerung bis zum gewählten Zeithorizont.
+  const cut = lastFiniteIndex(t[0], pmsl) + 1;
+  const trim = (arr) => (cut < arr.length ? arr.slice(0, cut) : arr);
+  const trimLevels = (byLevel) => (cut < T ? byLevel.map(trim) : byLevel);
+
   // `model` mitgeführt für modellspezifische Konstanten in clouds.js
   // (RH_CRIT_Z_REF unterscheidet sich zwischen ICON-D2/EU, s. dort).
-  return { time, h, u, v, t, rh, p, w, q, qw, qi, clc, pmsl, nLevels: h.length, elevation: data.elevation, model: modelKey };
+  return {
+    time: trim(time),
+    h: trimLevels(h), u: trimLevels(u), v: trimLevels(v), t: trimLevels(t), rh: trimLevels(rh),
+    p: trimLevels(p), w: trimLevels(w), q: trimLevels(q), qw: trimLevels(qw), qi: trimLevels(qi), clc: trimLevels(clc),
+    pmsl: trim(pmsl), nLevels: h.length, elevation: data.elevation, model: modelKey,
+  };
 }
 
 /**
