@@ -110,7 +110,18 @@
       "Bash(npx --no-install chromium-cli --version)",
       "Bash(curl -sD - -o /dev/null \"https://open-meteo.mah.priv.at/data/dwd_icon_d2/static/meta.json\" -H \"Origin: http://localhost:5183\")",
       "Bash(node /private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/5eae45ea-ee8a-4fab-9073-18ac2d1088a2/scratchpad/test_model_run.js)",
-      "Bash(grep -n \"[0-9]\\\\{2,4\\\\}px\" css/style.css)"
+      "Bash(grep -n \"[0-9]\\\\{2,4\\\\}px\" css/style.css)",
+      "Bash(sed 's/01-after-click.png/14-sky-click.png/; s/02-gramet.png/15-sky-gramet.png/; s/03-gramet-crop.png/16-sky-crop.png/' gramet-check.mjs)",
+      "Bash(node gramet-check-sky.mjs)",
+      "Bash(sed 's/01-after-click.png/19-debug-click.png/; s/02-gramet.png/20-debug-gramet.png/; s/03-gramet-crop.png/21-debug-crop.png/' gramet-check.mjs)",
+      "Bash(node gramet-check-debug.mjs)",
+      "Bash(sed 's/01-after-click.png/23-debug2-click.png/; s/02-gramet.png/24-debug2-gramet.png/; s/03-gramet-crop.png/25-debug2-crop.png/' gramet-check.mjs)",
+      "Bash(node gramet-check-debug2.mjs)",
+      "Bash(sed 's/01-after-click.png/27-final-click.png/; s/02-gramet.png/28-final-gramet.png/; s/03-gramet-crop.png/29-final-crop.png/' gramet-check.mjs)",
+      "Bash(node gramet-check-final.mjs)",
+      "Bash(sed 's/01-after-click.png/30-noglow-click.png/; s/02-gramet.png/31-noglow-gramet.png/; s/03-gramet-crop.png/32-noglow-crop.png/' gramet-check.mjs)",
+      "Bash(node gramet-check-noglow.mjs)",
+      "Bash(node gramet-check-heightcolor.mjs)"
     ]
   }
 }

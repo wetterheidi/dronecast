@@ -164,7 +164,7 @@ export function renderGramet(host, grid, view, state = {}) {
   const y = makeYScale(mainTop, mainBot, zMin, zMax, lin);
 
   const toggles = state.layerToggles ?? {};
-  drawBackground(ctx, grid, view, x, mainTop, mainBot);
+  drawBackground(ctx, grid, view, x, y, mainTop, mainBot);
   // Zellzerlegung einmal ziehen: Schaft, Amboss und Symbol müssen auf demselben
   // Turm sitzen (s. `cbCells`).
   const cells = toggles.cb !== false ? cbCells(grid, view.cb, x, y) : [];
@@ -294,9 +294,11 @@ function makeYScale(top, bot, hMin, hMax, lin) {
 
 // --- Hintergrund (Tag/Nacht) --------------------------------------------------
 
-function drawBackground(ctx, grid, view, x, top, bot) {
+function drawBackground(ctx, grid, view, x, y, top, bot) {
   const { times } = grid;
-  const span = x.right - x.left;
+  const span = x.right - x.left, h = bot - top;
+
+  // Grundverlauf Tag/Nacht -- waagerecht, unverändert.
   const grad = ctx.createLinearGradient(x.left, 0, x.right, 0);
   let lastOff = -1;
   for (let i = 0; i < times.length; i++) {
@@ -306,7 +308,46 @@ function drawBackground(ctx, grid, view, x, top, bot) {
     lastOff = off;
   }
   ctx.fillStyle = grad;
-  ctx.fillRect(x.left, top, span, bot - top);
+  ctx.fillRect(x.left, top, span, h);
+
+  // Senkrechte Tiefe: Zenit dunkler als Horizont, multiplikativ statt additiv
+  // aufgetragen -- bei Nacht ist der Grundton schon fast schwarz, ein
+  // additiver dunkler Schleier hätte dort nichts mehr zu vertiefen (unten
+  // bliebe er sichtbar grau) und bei Tag hätte er den ganzen Himmel gleich
+  // stark eingetrübt statt nur oben. Multiplikativ skaliert die Vertiefung
+  // stattdessen mit dem, was schon da ist.
+  //
+  // An der tatsächlichen HÖHE festgemacht (`y.inv`), nicht an der Panel-
+  // Pixelposition -- sonst hätte dieselbe Höhe in "Gesamthöhe" und "bis
+  // Flughöhe" unterschiedliche Farbe, weil dort jeweils etwas anderes an der
+  // Panel-Oberkante steht (s. Feedback). Dafür reicht ein simpler 2-Stopp-
+  // Gradient nicht: `y.inv` ist bei log-Achse nichtlinear in der Pixel-
+  // koordinate, also wird die Kurve wie beim Tag/Nacht-Verlauf aus vielen
+  // Stopps abgetastet -- hier gleichmäßig über die PIXEL (nicht über die
+  // Höhe), damit die Auflösung unabhängig vom aktuellen Zoomfenster reicht.
+  const depth = ctx.createLinearGradient(0, top, 0, bot);
+  const DEPTH_STEPS = 40;
+  for (let s = 0; s <= DEPTH_STEPS; s++) {
+    const py = top + h * s / DEPTH_STEPS;
+    const alpha = DEPTH_MAX_ALPHA * depthAt(y.inv(py));
+    depth.addColorStop(s / DEPTH_STEPS, `rgba(2,6,16,${alpha})`);
+  }
+  ctx.save();
+  ctx.globalCompositeOperation = "multiply";
+  ctx.fillStyle = depth;
+  ctx.fillRect(x.left, top, span, h);
+  ctx.restore();
+}
+
+// Feste Referenzspanne für die Zenit-Verdunklung, bewusst UNABHÄNGIG von
+// `grid.z`/`zMax` (s. Kommentar oben): 10 m (derselbe Bodenwert wie
+// `hMinData` in `renderGramet`) bis 12000 m, grob Tropopausenniveau -- ab da
+// ist der Himmel ohnehin schon fast im vollen Zenit-Ton, höher als in der
+// Praxis gezeigt lohnt keine weitere Abstufung.
+const DEPTH_REF_MIN = 10, DEPTH_REF_MAX = 12000;
+const DEPTH_MAX_ALPHA = 0.55;
+function depthAt(z) {
+  return clamp((z - DEPTH_REF_MIN) / (DEPTH_REF_MAX - DEPTH_REF_MIN), 0, 1);
 }
 
 // --- Boden ---------------------------------------------------------------------
