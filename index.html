@@ -210,11 +210,15 @@
       <summary>Einstellungen</summary>
       <label class="row">
         <span class="label">Modell</span>
-        <select id="set-model">
-          <option value="icon_d2">ICON-D2 (~2,2 km)</option>
-          <option value="icon_eu">ICON-EU (~6,5 km)</option>
-        </select>
+        <span class="inline-group">
+          <select id="set-model">
+            <option value="icon_d2">ICON-D2 (~2,2 km)</option>
+            <option value="icon_eu">ICON-EU (~6,5 km)</option>
+          </select>
+          <button id="model-run-info" type="button" title="Modelllauf anzeigen" aria-pressed="false">ℹ</button>
+        </span>
       </label>
+      <div class="hint mono" id="model-run-hint" hidden></div>
       <div class="grid2">
         <label>Vorhersage bis (Höhe AGL)
           <select id="set-maxheight"></select>

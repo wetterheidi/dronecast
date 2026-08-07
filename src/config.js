@@ -2,12 +2,18 @@
 export const API_BASE = "https://open-meteo.mah.priv.at";
 
 // Oberflächen-/Single-Level-Felder (Niederschlag, Böen, CAPE, Bewölkung, …):
-// Michaels Instanz führt einen Teil davon inzwischen selbst (Downloadgruppe
-// "heidiVars", u. a. wind_gusts_10m, temperature_2m, cape, precipitation —
-// siehe gustoverlay.js), aber nicht den vollen Satz (z. B. cloud_cover*,
-// wind_speed/direction_10m, precipitation_probability fehlen dort). Für
-// Felder außerhalb von heidiVars bleibt die öffentliche Instanz mit
-// demselben ICON-Modell die Quelle. Hybrid-Quelle, siehe weather.js.
+// `weather.js` (fetchSurface, Basis des "Jetzt"-Blocks/Meteogramms) holt
+// aktuell PAUSCHAL ALLES von hier, der öffentlichen, gemeterten Instanz —
+// trotz gleichem ICON-Modell nicht Michaels Instanz, um Vermischung von
+// Quellen im selben Datensatz zu vermeiden (siehe SURFACE_CORE/-OPTIONAL).
+// Michaels Instanz (Downloadgruppe "heidiVars", API_BASE) liefert per
+// Stichprobe (2026-08) tatsächlich mit echten Werten: temperature_2m,
+// relative_humidity_2m, dew_point_2m, precipitation, weather_code,
+// wind_gusts_10m, visibility, cape, snowfall. Als NULL (nicht Teil der
+// Downloadgruppe): cloud_cover*, wind_speed_10m, wind_direction_10m,
+// precipitation_probability, freezing_level_height — für diese bleibt die
+// öffentliche Instanz ohnehin nötig. gustoverlay.js nutzt diesen Split
+// bereits gezielt für wind_gusts_10m (primär API_BASE, Fallback hierher).
 export const SURFACE_API_BASE = "https://api.open-meteo.com";
 
 // Levelzählung der API: N=1 oberstes, N=nLevels unterstes Modelllevel (~10 m AGL).

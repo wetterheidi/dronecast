@@ -1,6 +1,6 @@
 import { MODELS, PREVIEW_HEIGHTS } from "./config.js";
 import { WindField } from "./windfield.js";
-import { fetchSurface, nearestIndex } from "./weather.js";
+import { fetchSurface, fetchModelRunInit, nearestIndex } from "./weather.js";
 import { initTimeControls, setRange, getMasterMs, subscribe as subscribeTime } from "./timeController.js";
 import { renderMeteogram } from "./meteogram.js";
 import { fetchColumn, buildField } from "./column.js";
@@ -300,6 +300,7 @@ function clearForecast() {
   el("crosssection").hidden = true;
   el("gramet").hidden = true;
   el("gonogo").hidden = true;
+  el("model-run-hint").hidden = true;
 }
 
 async function loadForecast() {
@@ -323,11 +324,15 @@ async function loadForecast() {
   const tMax = now + settings.forecastDays * 24 * 3600e3;
 
   try {
-    // Oberflächenvariablen und Modell-Level-Windfeld parallel holen.
+    // Oberflächenvariablen und Modell-Level-Windfeld parallel holen. Der
+    // Modelllauf-Zeitstempel (fürs Infobutton) hängt am selben Modell, ist
+    // aber unkritisch — ein Fehler dabei darf das restliche Laden nicht
+    // verhindern (daher eigenes .catch statt scharf in Promise.all).
     const wf = new WindField(settings.model);
-    const [surface] = await Promise.all([
+    const [surface, , modelRunInit] = await Promise.all([
       fetchSurface(lat, lon, settings.model, settings.forecastDays),
       wf.init(lat, lon, settings.maxHeight, now, tMax),
+      fetchModelRunInit(settings.model).catch(() => null),
     ]);
 
     // Modell-eigene Orographie am Punkt (bilinear) — zum Abgleich mit der
@@ -341,9 +346,10 @@ async function loadForecast() {
 
     // Die Modell-Level-Winde auf den Vorschau-Höhen berechnet renderNow zur
     // jeweils gewählten Masterzeit neu (billige In-Memory-Interpolation).
-    state.data = { surface, loadedAt: now, wf, modelElevation };
+    state.data = { surface, loadedAt: now, wf, modelElevation, modelRunInit };
     setMasterRange(); // Zeitfenster auf die echte Zeitreihe verfeinern
     setStatus(`Geladen · ${model.label} · Elevation ${fmtHeight(surface.elevation)}`, "");
+    updateModelRunHint();
     // Punktvorhersage beim ersten Laden aufklappen; danach die Nutzerwahl
     // (auf-/zugeklappt) über Neuladen hinweg respektieren.
     const firstReveal = el("now").hidden;
@@ -360,6 +366,28 @@ async function loadForecast() {
   } finally {
     el("load").disabled = false;
   }
+}
+
+// Infobutton neben der Modellauswahl: zeigt den Initialisierungszeitpunkt
+// des aktuell geladenen Modelllaufs (z. B. "00-UTC-Lauf") in Lokalzeit.
+el("model-run-info").addEventListener("click", () => {
+  const hint = el("model-run-hint");
+  const show = hint.hidden;
+  hint.hidden = !show;
+  el("model-run-info").setAttribute("aria-pressed", String(show));
+});
+
+function updateModelRunHint() {
+  const t = state.data?.modelRunInit;
+  const hint = el("model-run-hint");
+  if (!Number.isFinite(t)) {
+    hint.textContent = "Modelllauf: nicht verfügbar";
+    return;
+  }
+  const label = new Date(t * 1000).toLocaleString("de-DE", {
+    weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+  });
+  hint.textContent = `Modelllauf: ${label} Uhr`;
 }
 
 // ---------------------------------------------------------------------------

@@ -99,7 +99,17 @@
       "Bash(node gramet-check-ground.mjs)",
       "Bash(sed 's/01-after-click.png/10-contrast-click.png/; s/02-gramet.png/11-contrast-gramet.png/; s/03-gramet-crop.png/12-contrast-crop.png/' gramet-check.mjs)",
       "Bash(node gramet-check-contrast.mjs)",
-      "Bash(node --check src/weather.js)"
+      "Bash(node --check src/weather.js)",
+      "Bash(curl -s \"https://api.open-meteo.com/v1/forecast?latitude=48.2&longitude=16.37&hourly=temperature_2m&models=icon_d2&forecast_days=1&timeformat=unixtime\")",
+      "Bash(curl -s \"https://api.open-meteo.com/data/dwd_icon_d2/static/meta.json\")",
+      "Bash(curl -s \"https://api.open-meteo.com/data/dwd_icon/static/meta.json\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" \"https://open-meteo.mah.priv.at/data/dwd_icon_d2/static/meta.json\")",
+      "Bash(curl -s \"https://open-meteo.mah.priv.at/data/dwd_icon_d2/static/meta.json\")",
+      "Bash(node -e \"require\\('@babel/core'\\)\")",
+      "Bash(npx --no-install vite build)",
+      "Bash(npx --no-install chromium-cli --version)",
+      "Bash(curl -sD - -o /dev/null \"https://open-meteo.mah.priv.at/data/dwd_icon_d2/static/meta.json\" -H \"Origin: http://localhost:5183\")",
+      "Bash(node /private/tmp/claude-501/-Users-wetterheidi-Documents-Git-droneforecast/5eae45ea-ee8a-4fab-9073-18ac2d1088a2/scratchpad/test_model_run.js)"
     ]
   }
 }

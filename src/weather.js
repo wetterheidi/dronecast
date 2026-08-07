@@ -1,4 +1,4 @@
-import { SURFACE_API_BASE, MODELS, SURFACE_CORE, SURFACE_OPTIONAL } from "./config.js";
+import { API_BASE, SURFACE_API_BASE, MODELS, SURFACE_CORE, SURFACE_OPTIONAL } from "./config.js";
 
 /**
  * Holt die stündlichen Oberflächen-/Standardvariablen (limitierende Faktoren)
@@ -63,6 +63,29 @@ export async function fetchSurface(lat, lon, modelKey, forecastDays, fetchImpl =
     elevation: data.elevation,
     nights,
   };
+}
+
+/**
+ * Initialisierungszeitpunkt des aktuell verfügbaren Modelllaufs (z. B.
+ * der "00-UTC-Lauf"), unabhängig von Ort/Höhe. Quelle: Michaels Instanz
+ * (`API_BASE`, siehe config.js) — deren statisches Meta-JSON je Datensatz
+ * liefert `last_run_initialisation_time` (unixtime s). Nicht die öffentliche
+ * OpenMeteo-Instanz (`SURFACE_API_BASE`); "Open-Meteo" bezeichnet hier nur
+ * das API-/Datenformat, das auch Michaels Server verwendet.
+ * Liefert null bei Fehler (z. B. Netzwerk), damit der Infobutton im Panel
+ * nicht das gesamte Laden blockiert.
+ */
+export async function fetchModelRunInit(modelKey, fetchImpl = fetch.bind(globalThis)) {
+  const model = MODELS[modelKey];
+  if (!model) throw new Error(`Unbekanntes Modell: ${modelKey}`);
+  try {
+    const resp = await fetchImpl(`${API_BASE}/data/${model.dataset}/static/meta.json`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return Number.isFinite(data.last_run_initialisation_time) ? data.last_run_initialisation_time : null;
+  } catch {
+    return null;
+  }
 }
 
 async function tryFetch(url, fetchImpl) {
