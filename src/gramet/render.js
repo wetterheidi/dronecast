@@ -166,21 +166,18 @@ export function renderGramet(host, grid, view, state = {}) {
 
   const toggles = state.layerToggles ?? {};
   drawBackground(ctx, grid, view, x, y, mainTop, mainBot);
-  // BR/HZ (kein cloudFrac-Signal, s. `drawFogHaze`) vor Wolken/Hazards/
-  // Niederschlag, damit die auf dem Schleier noch klar lesbar bleiben statt
-  // darin zu verschwimmen. FG dagegen ALS FLÄCHE (`drawFogBlock`, s. dort) --
-  // die normale Ellipsentextur wirkt für Nebel zu "gefleckt"/wolkig, echter
-  // Bodennebel ist optisch eintönig (s. Feedback) -- deshalb auch VOR den
-  // Wolken, damit `drawClouds()` (s. u., mit maskierter cloudFrac) darin
+  // FG/BR/HZ gemeinsam als ein Schleier (s. `drawFogHaze`/`hazeColorAlpha`)
+  // vor Wolken/Hazards/Niederschlag, damit die auf dem Schleier noch klar
+  // lesbar bleiben statt darin zu verschwimmen -- auch VOR den Wolken, damit
+  // `drawClouds()` (s. u., mit maskierter cloudFrac) innerhalb der FG-Schicht
   // nichts mehr zu zeichnen hat.
   drawFogHaze(ctx, grid, view, x, y, mainTop, mainBot);
-  drawFogBlock(ctx, grid, view, x, y);
   // Zellzerlegung einmal ziehen: Schaft, Amboss und Symbol müssen auf demselben
   // Turm sitzen (s. `cbCells`).
   const cells = toggles.cb !== false ? cbCells(grid, view.cb, x, y) : [];
   if (toggles.cb !== false) drawCbShafts(ctx, cells, x, y);
-  // FG-Zellen aus der Ellipsentextur ausblenden (s. `drawFogBlock`) -- sonst
-  // säße die "Reiskorn"-Wolkentextur unter/über dem flachen Nebelblock.
+  // FG-Zellen aus der Ellipsentextur ausblenden (s. `maskFog`) -- sonst säße
+  // die "Reiskorn"-Wolkentextur unter dem Nebelschleier.
   if (toggles.clouds !== false) drawClouds(ctx, grid, maskFog(grid, view.cloudFrac, view.fog), x, y);
   if (toggles.cb !== false) {
     drawCbAnvils(ctx, cells, x, y);
@@ -379,27 +376,38 @@ function depthAt(z) {
 // `HAZE_REF_MAX` nichts mehr) -- an der tatsächlichen HÖHE festgemacht wie
 // `DEPTH_REF_MAX` oben, nicht an Panel-Pixeln, sonst hätte dieselbe Höhe bei
 // "Gesamthöhe" und "bis Flughöhe" unterschiedlich viel Schleier.
-const HAZE_REF_MIN = 10, HAZE_REF_MAX = 400; // m AGL -- Reichweite des Schleiers
+const HAZE_REF_MIN = 10, HAZE_REF_MAX = 400; // m AGL -- gemeinsame Reichweite des Schleiers für FG/BR/HZ
 // Kräftiger als im ersten Entwurf (0.5/gedämpfte Baseline) -- BR/HZ waren
 // dort kaum vom normalen Himmel zu unterscheiden (s. Feedback).
 const HAZE_MAX_ALPHA = 0.7;
 const BR_COLOR = "225,235,238"; // weißlich -- BR ist feucht (Diesigkeit)
 const HZ_COLOR = "196,155,74";  // ockerfarben -- HZ simuliert trockenen Staubdunst
+// FG läuft über denselben Schleier wie BR/HZ (gleiche Reichweite/Verlaufsform
+// statt eines eigenen scharf konturierten Blocks, s. Feedback: der harte
+// Umriss mit fixem 100-m-Fallback-Top passte weder farblich noch in der Höhe
+// zum weichen 400-m-Verlauf von BR/HZ), nur mit deutlich höherer Opazität --
+// "man sieht buchstäblich nichts mehr" statt eines durchscheinenden Schleiers.
+const FG_COLOR = "210,212,214"; // selbe (weißliche) Familie wie BR, Richtung Grau
+const FG_ALPHA = 0.92;
 
-/** Schleierfarbe+-stärke einer Stunde. Grenzen aus `hazards/fog.js`, damit
- *  Visual und Label deckungsgleich einsetzen. Baseline+Rampe statt reinem
+/** Schleierfarbe+-stärke einer Stunde. Sicht ist jetzt das primäre Kriterium
+ *  (s. `hazards/fog.js`) -- Rampe daher an der Position innerhalb des
+ *  Sichtweiten-Bands (FG_VIS_MAX_M..HAZE_VIS_MAX_M) festgemacht, nicht mehr
+ *  an RH. `visM` fehlt nur im seltenen Rand-/Instanzfall ohne Sichtweiten-
+ *  daten (Fallback-Klassifikation in `fog.js`) -- dort bleibt RH die einzige
+ *  verfügbare Größe für eine grobe Rampe. Baseline+Rampe statt reinem
  *  0..1-Verhältnis, damit "gerade eben BR/HZ" nicht schon fast unsichtbar
  *  ist -- rein optisch gewählt, nicht kalibriert. */
-function hazeColorAlpha(entry, rh0) {
-  if (!entry || !Number.isFinite(rh0)) return null;
-  if (entry.type === "BR") {
-    const t = clamp((rh0 - fog.BR_RH_MIN) / (100 - fog.BR_RH_MIN), 0, 1);
-    return { color: BR_COLOR, alpha: HAZE_MAX_ALPHA * (0.65 + 0.35 * t) };
-  }
-  if (entry.type === "HZ") {
-    const t = clamp((rh0 - fog.HZ_RH_MIN) / (fog.BR_RH_MIN - fog.HZ_RH_MIN), 0, 1);
-    return { color: HZ_COLOR, alpha: HAZE_MAX_ALPHA * (0.45 + 0.4 * t) };
-  }
+function hazeColorAlpha(entry, visM, rh0) {
+  if (!entry) return null;
+  if (entry.type === "FG") return { color: FG_COLOR, alpha: FG_ALPHA };
+  const t = Number.isFinite(visM)
+    ? clamp(1 - (visM - fog.FG_VIS_MAX_M) / (fog.HAZE_VIS_MAX_M - fog.FG_VIS_MAX_M), 0, 1)
+    : Number.isFinite(rh0)
+      ? clamp((rh0 - (entry.type === "BR" ? fog.BR_RH_FALLBACK_MIN : fog.HZ_RH_FALLBACK_MIN)) / 20, 0, 1)
+      : 0.5;
+  if (entry.type === "BR") return { color: BR_COLOR, alpha: HAZE_MAX_ALPHA * (0.65 + 0.35 * t) };
+  if (entry.type === "HZ") return { color: HZ_COLOR, alpha: HAZE_MAX_ALPHA * (0.45 + 0.4 * t) };
   return null;
 }
 
@@ -414,7 +422,7 @@ function drawFogHaze(ctx, grid, view, x, y, top, bot) {
   for (let i = 0; i < times.length; i++) {
     let off = clamp((x(times[i]) - x.left) / span, 0, 1);
     if (off <= lastOff) off = Math.min(1, lastOff + 1e-4);
-    const ca = hazeColorAlpha(view.fog[i], grid.rh[i * nk]);
+    const ca = hazeColorAlpha(view.fog[i], grid.surface?.visibility?.[i], grid.rh[i * nk]);
     if (ca) anyHaze = true;
     colorGrad.addColorStop(off, ca ? `rgba(${ca.color},${ca.alpha})` : "rgba(0,0,0,0)");
     lastOff = off;
@@ -451,40 +459,31 @@ function drawFogHaze(ctx, grid, view, x, y, top, bot) {
   ctx.restore();
 }
 
-// --- Nebel (FG) als Fläche ------------------------------------------------------
+// --- Nebel (FG): Ellipsentextur ausblenden ---------------------------------------
 //
-// Echter Bodennebel ist optisch eintönig -- keine einzelnen Quellwolken,
-// sondern eine gleichmäßig grau verhangene Schicht (s. Feedback: die normale
-// Ellipsentextur von `drawClouds()` sah für Nebel zu "gefleckt"/wolkig aus).
-// Deshalb eine eigene, FLACHE Fläche statt der Ellipsentechnik: `contour()`
-// (marching squares, dieselbe Funktion wie für Isotachen/Hazard-Flächen)
-// liefert eine glatte Umrisslinie um alle FG-Zellen, gefüllt mit einem
-// einzigen Grauton statt Textur.
+// FG wird seit der Sichtweiten-Umstellung über denselben Schleier wie BR/HZ
+// gezeichnet (s. `drawFogHaze`/`hazeColorAlpha` oben) -- kein eigener Block
+// mehr. Die normale Ellipsentextur von `drawClouds()` soll innerhalb der
+// FG-Schicht trotzdem nicht mitlaufen (s. Feedback: wirkt für Nebel zu
+// "gefleckt"/wolkig, echter Bodennebel ist optisch eintönig) -- dafür bleibt
+// eine schmale Maskierung nötig, unabhängig von der (weicheren, weiter
+// reichenden) Schleier-Optik.
 //
-// Ersatz-Obergrenze, wenn die Klassifikation keine liefert (WW-Code-Fallback
-// ohne RH/Kondensat-Top, s. hazards/fog.js): eine typische flache Nebelschicht,
-// rein optisch gewählt, nicht kalibriert.
-const FG_BLOCK_FALLBACK_M = 100;
-const FOG_BLOCK_NIGHT = "#3a3d40", FOG_BLOCK_DAY = "#9aa0a6";
-const FOG_BLOCK_ALPHA = 0.88;
+// Ersatz-Obergrenze, wenn die Klassifikation keine liefert (Sichtweiten-/
+// WW-Code-Fallback ohne RH/Kondensat-Top, s. hazards/fog.js): eine typische
+// flache Nebelschicht, rein optisch gewählt, nicht kalibriert.
+const FG_MASK_FALLBACK_M = 100;
 
-/** FG-Obergrenze einer Stunde, mit Ersatzwert (s. o.). `null`, wenn die
- *  Stunde kein FG ist. */
-function fgTopAt(entry) {
-  if (!entry || entry.type !== "FG") return null;
-  return entry.top ?? FG_BLOCK_FALLBACK_M;
-}
-
-/** 0/1-Feld (nt*nk): 1, wo eine Zelle innerhalb der FG-Schicht der jeweiligen
- *  Stunde liegt -- Grundlage sowohl für `drawFogBlock()` (Fläche) als auch
- *  für `maskFog()` (Ellipsentextur dort aussparen). */
+/** 0/1-Feld (nt*nk): 1, wo eine Zelle innerhalb der (für die Maskierung
+ *  angenommenen) FG-Schicht der jeweiligen Stunde liegt. */
 function fgField(grid, fogCols) {
   const { nk, times } = grid;
   const field = new Float32Array(times.length * nk);
   let any = false;
   for (let i = 0; i < times.length; i++) {
-    const topZ = fgTopAt(fogCols?.[i]);
-    if (topZ == null) continue;
+    const entry = fogCols?.[i];
+    if (!entry || entry.type !== "FG") continue;
+    const topZ = entry.top ?? FG_MASK_FALLBACK_M;
     for (let k = 0; k < nk; k++) {
       const ix = i * nk + k;
       if (grid.z[ix] <= topZ) { field[ix] = 1; any = true; }
@@ -494,49 +493,16 @@ function fgField(grid, fogCols) {
 }
 
 /** `cloudFrac`, mit auf 0 gesetzten FG-Zellen -- für `drawClouds()`, damit
- *  dort keine Ellipsentextur unter/über dem flachen Nebelblock entsteht.
- *  `view.cloudFrac` selbst bleibt unverändert (Vereisung/Wolkenbasis/Hover-
- *  Tooltip sollen Nebel weiterhin als echte Wolke sehen -- physikalisch ist
- *  er das ja auch, nur die TEXTUR soll ihn nicht mehr zeichnen). */
+ *  dort keine Ellipsentextur unter dem Nebelschleier entsteht. `view.cloudFrac`
+ *  selbst bleibt unverändert (Vereisung/Wolkenbasis/Hover-Tooltip sollen Nebel
+ *  weiterhin als echte Wolke sehen -- physikalisch ist er das ja auch, nur die
+ *  TEXTUR soll ihn nicht mehr zeichnen). */
 function maskFog(grid, cloudFrac, fogCols) {
   const field = fgField(grid, fogCols);
   if (!field) return cloudFrac;
   const out = Float32Array.from(cloudFrac);
   for (let ix = 0; ix < out.length; ix++) if (field[ix]) out[ix] = 0;
   return out;
-}
-
-function drawFogBlock(ctx, grid, view, x, y) {
-  const field = fgField(grid, view.fog);
-  if (!field) return;
-
-  // Farbverlauf wie der Himmel/Boden: bei Tag heller/durchscheinender Nebel,
-  // bei Nacht dunkler -- dieselbe Stopptechnik wie `drawBackground`.
-  const grad = ctx.createLinearGradient(x.left, 0, x.right, 0);
-  const span = x.right - x.left;
-  let lastOff = -1;
-  for (let i = 0; i < grid.times.length; i++) {
-    let off = clamp((x(grid.times[i]) - x.left) / span, 0, 1);
-    if (off <= lastOff) off = Math.min(1, lastOff + 1e-4);
-    grad.addColorStop(off, mixHex(FOG_BLOCK_NIGHT, FOG_BLOCK_DAY, view.daylight[i]));
-    lastOff = off;
-  }
-
-  const polylines = contour(grid, field, 0.5);
-  ctx.save();
-  ctx.globalAlpha = FOG_BLOCK_ALPHA;
-  ctx.fillStyle = grad;
-  for (const pl of polylines) {
-    if (pl.length < 2) continue;
-    ctx.beginPath();
-    pl.forEach((p, idx) => {
-      const px = x(p.t), py = y(p.z);
-      if (idx === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-    });
-    ctx.closePath();
-    ctx.fill();
-  }
-  ctx.restore();
 }
 
 // --- Boden ---------------------------------------------------------------------

@@ -5,12 +5,22 @@
  * `derive.js` (Array `{...} | null`, ein Eintrag je Stunde), NICHT
  * `icing.computeGrid()`.
  *
- * WICHTIGE EINSCHRÄNKUNG: Open-Meteo/ICON liefert über `weather_code` keine
- * Dunst-/Diesigkeits-Codes (WMO 05/10 — die WMO_TO_TAF-Tabelle in
- * `briefing.js` bildet nur 0…3 → NSW ab). Modelle diagnostizieren keinen
- * Aerosol-Dunst. Der WW-Code kann daher NUR für FG (45/48) als Fallback-
- * Signal dienen, nie für BR/HZ — die kommen ausschließlich aus RH, ohne
- * Cross-Check. Entsprechend niedriger die Konfidenz (`certain`) dort.
+ * SICHTWEITE ALS PRIMÄRES KRITERIUM (Handbuch Flugwetterdienste, Band Obs):
+ *   FG: Sicht < 1000 m (immer, unabhängig von RH — Ausnahme BCFG, die WW
+ *       nicht unterscheidet, s. u.)
+ *   BR: 1000–5000 m UND RH ≥ 80 %
+ *   HZ: 1000–5000 m UND RH < 80 %
+ * `grid.surface.visibility` (Open-Meteo/ICON-Modelldiagnose, dieselbe Größe,
+ * die auch im Briefing angezeigt wird) ist damit der Wahrheitsanker — nicht
+ * mehr eine reine RH-Schwelle ohne Sichtbezug. Das behebt zwei Probleme der
+ * ersten Fassung:
+ *  - RH ≥ 60 % allein sagt fast nichts über Sicht aus (an einem feuchten
+ *    Sommertag mit bester Sicht schnell erreicht) — führte zu BR/HZ an
+ *    Stunden, an denen das Modell selbst (Briefing-Sichtspalte) >10 km Sicht
+ *    zeigte.
+ *  - Widerspricht `weather_code` (45/48 = Nebel) der modelleigenen Sicht
+ *    (>5000 m), gewinnt jetzt die Sicht — WW wird nur noch konsultiert, wenn
+ *    gar keine Sichtweite vorliegt.
  *
  * Priorität je Stunde, jeweils NUR wenn das unterste Level (k=0, ~10 m AGL)
  * den Schwellwert erreicht (Bodenkontakt-Pflicht — sonst würde erhöhter
@@ -18,36 +28,49 @@
  *
  *  1. Kondensat direkt (qw+qi > FOG_QW_MIN, mirrors `groundFog()` aus
  *     `clouds.js`, hier grid-nativ statt Column-Objekt, da `grid.qw`/`qi`
- *     ohnehin schon flache Arrays sind) → FG, sicher — stärkstes
- *     physikalisches Signal.
- *  2. `cloudFrac >= CF_BKN` → FG; sicher nur, wenn CLC (Tier 1 der
- *     `cloudFraction()`-Kaskade) das trägt — kommt der Wert stattdessen aus
- *     dem RH-Sundqvist-Fallback (Tier 3; der bodennahe Dunst-Guard ist unter
- *     der aktuellen Kalibrierung laut `clouds.js` FAKTISCH INAKTIV), gilt das
- *     als unsicher.
- *  3. `weather_code` 45/48 → FG, unsicher, KEINE Obergrenze (mirrors den
- *     bestehenden `groundFog()`+`metarWeather()`-Fallback: der WW-Code
- *     erzwingt keine Höhenaussage).
- *  4. RH ≥ BR_RH_MIN → BR, sicher (RH ist ein echtes Modellfeld, kein
- *     Fallback).
- *  5. RH ≥ HZ_RH_MIN → HZ, IMMER unsicher, IMMER ohne Obergrenze — Dunst ist
- *     aerosolbedingt, dafür lässt sich aus RH keine physikalische
- *     Obergrenze herleiten (eine PBL-Höhe wäre nur eine grobe Näherung und
- *     bräuchte einen neuen Datenfetch — bewusst weggelassen).
- *  6. sonst kein Befund (`null`).
+ *     ohnehin schon flache Arrays sind) → FG, sicher, mit echter Obergrenze
+ *     (Höhen-Scan) — stärkstes physikalisches Signal, geht der Sichtweiten-
+ *     Diagnose bewusst vor (direkter Nachweis von Flüssigwasser/Eis am
+ *     Boden schlägt eine abgeleitete/parametrisierte Sichtdiagnose).
+ *  2. `cloudFrac >= CF_BKN` → FG, mit echter Obergrenze; sicher nur, wenn CLC
+ *     (Tier 1 der `cloudFraction()`-Kaskade) das trägt — kommt der Wert
+ *     stattdessen aus dem RH-Sundqvist-Fallback (Tier 3; der bodennahe
+ *     Dunst-Guard ist unter der aktuellen Kalibrierung laut `clouds.js`
+ *     FAKTISCH INAKTIV), gilt das als unsicher.
+ *  3. Sonst, wenn `visibility[i]` vorhanden ist:
+ *     a. < FG_VIS_MAX_M → FG, sicher, KEINE Obergrenze (Sicht ist ein
+ *        Flächenwert, kein Höhenprofil — anders als 1./2. lässt sich daraus
+ *        keine physikalische Nebeldecke herleiten).
+ *     b. ≤ HAZE_VIS_MAX_M → BR (RH ≥ BR_HZ_RH_SPLIT) oder HZ (sonst), beide
+ *        sicher (Sicht UND RH sind reale Modellfelder, kein Fallback).
+ *     c. sonst kein Befund — AUCH wenn RH hoch ist oder `weather_code`
+ *        Nebel meldet (s. Priorität 4): die Sicht ist hier die Wahrheit.
+ *  4. Sonst (keine Sichtweite verfügbar — seltener Rand-/Instanzfall):
+ *     a. `weather_code` 45/48 → FG, unsicher, keine Obergrenze (alter
+ *        `groundFog()`+`metarWeather()`-Fallback).
+ *     b. RH ≥ BR_RH_FALLBACK_MIN → BR, unsicher.
+ *     c. RH ≥ HZ_RH_FALLBACK_MIN → HZ, unsicher.
+ *  5. sonst kein Befund (`null`).
  *
- * BR_RH_MIN/HZ_RH_MIN sind wie an anderer Stelle im Wolkenmodul PLATZHALTER,
- * unvalidiert — rein plausibel gewählt, keine Kalibrierung gegen echte
- * Beobachtungen (s. METHODIK.md-Vorbehalte in clouds.js).
+ * Alle RH-/Sicht-Schwellen sind wie an anderer Stelle im Wolkenmodul
+ * PLATZHALTER bzw. direkt aus dem Handbuch übernommen, nicht gegen echte
+ * Beobachtungen an dieser App kalibriert (s. METHODIK.md-Vorbehalte in
+ * clouds.js).
  */
 
 import { CF_BKN, FOG_QW_MIN } from "../../clouds.js";
 
-// Exportiert, damit der Dunst-Schleier in render.js (BR/HZ, s. dort) exakt
-// an derselben Schwelle einsetzt wie das Label -- sonst könnten Visual und
-// Klassifikation leise auseinanderlaufen.
-export const BR_RH_MIN = 90; // % — Boden-RH, ab der Sicht auf Diesigkeitsniveau sinkt
-export const HZ_RH_MIN = 60; // % — Boden-RH, ab der überhaupt von Dunst die Rede sein kann
+// Handbuch-Schwellen (Sicht in m, RH-Split in %) -- primäres Kriterium, s. o.
+export const FG_VIS_MAX_M = 1000;
+export const HAZE_VIS_MAX_M = 5000;
+export const BR_HZ_RH_SPLIT = 80;
+
+// Nur für den seltenen Fall ohne Sichtweitendaten (Priorität 4) -- reiner
+// RH-Fallback wie in der ersten Fassung, entsprechend als `certain: false`
+// markiert. Exportiert, damit render.js denselben Wert für die (seltene)
+// Fallback-Rampe nutzt.
+export const BR_RH_FALLBACK_MIN = 90;
+export const HZ_RH_FALLBACK_MIN = 60;
 
 const KELVIN = 273.15;
 
@@ -98,15 +121,26 @@ export function classifyColumn(grid, cloudFrac, i) {
     const certain = Number.isFinite(grid.clc[ix0]);
     return { type: "FG", top: scanTop(grid, i, CF_BKN, (ix) => cloudFrac[ix]), certain, freezing };
   }
+
+  const vis = grid.surface?.visibility?.[i];
+  const rh0 = grid.rh[ix0];
+  if (Number.isFinite(vis)) {
+    if (vis < FG_VIS_MAX_M) return { type: "FG", top: null, certain: true, freezing };
+    if (vis <= HAZE_VIS_MAX_M) {
+      const type = Number.isFinite(rh0) && rh0 >= BR_HZ_RH_SPLIT ? "BR" : "HZ";
+      return { type, top: null, certain: true, freezing: false };
+    }
+    return null; // Sicht > HAZE_VIS_MAX_M -- gilt auch gegen einen widersprüchlichen wcode/RH (s. o.)
+  }
+
   const wcode = grid.surface?.wcode?.[i];
   if (wcode === 45 || wcode === 48) {
     return { type: "FG", top: null, certain: false, freezing };
   }
-  const rh0 = grid.rh[ix0];
-  if (Number.isFinite(rh0) && rh0 >= BR_RH_MIN) {
-    return { type: "BR", top: scanTop(grid, i, BR_RH_MIN, (ix) => grid.rh[ix]), certain: true, freezing: false };
+  if (Number.isFinite(rh0) && rh0 >= BR_RH_FALLBACK_MIN) {
+    return { type: "BR", top: null, certain: false, freezing: false };
   }
-  if (Number.isFinite(rh0) && rh0 >= HZ_RH_MIN) {
+  if (Number.isFinite(rh0) && rh0 >= HZ_RH_FALLBACK_MIN) {
     return { type: "HZ", top: null, certain: false, freezing: false };
   }
   return null;
