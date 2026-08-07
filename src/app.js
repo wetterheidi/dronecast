@@ -1111,7 +1111,10 @@ function initSettings() {
   el("set-unitwind").value = settings.unitWind;
   el("set-unittemp").value = settings.unitTemp;
 
-  bind("set-model", "model");
+  // Modellwechsel ändert die Datenbasis grundlegend (anderes Gitter/andere API).
+  // Ist ein Punkt geladen, sofort automatisch neu abrufen statt auf den
+  // manuellen "Vorhersage laden"-Button zu warten.
+  bind("set-model", "model", () => { if (state.data) loadForecast(); });
   bind("set-maxheight", "maxHeight", () => {
     needReload();
     // Cross-Section/GRAMET können sofort nachziehen: die Säule enthält alle
@@ -1157,12 +1160,9 @@ function fillOptions(id, values, label) {
   el(id).innerHTML = values.map((v) => `<option value="${v}">${label(v)}</option>`).join("");
 }
 
-// Modellwechsel ändert die Datenbasis grundlegend (anderes Gitter/andere API):
-// erneutes Laden nötig. Der Horizont lädt inzwischen automatisch neu (s. o.).
 function needReload() {
   if (state.data) setStatus("Einstellung geändert — bitte Vorhersage neu laden.", "busy");
 }
-el("set-model").addEventListener("change", needReload);
 
 // ---------------------------------------------------------------------------
 // Panel ein-/ausklappen (mobil)
