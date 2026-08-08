@@ -425,19 +425,23 @@ export function cbCells(grid, cb, x, y) {
 
     for (const { cx, hw } of cellLayout(runSeed, X0, X1, hourPx)) {
       const x0 = cx - hw, x1 = cx + hw;
-      // Zelle erbt Oberrand/Basis der Stunden, über denen sie steht: Oberrand
-      // der höchste (kleinstes y) im überdeckten Bereich, damit die Kuppe nicht
-      // unter einen benachbarten, höheren Modellwert rutscht; Basis als
-      // interpolierte Linie, sie darf über die Zelle leicht kippen.
+      // Zelle erbt den Oberrand der Stunden, über denen sie steht: der
+      // höchste (kleinstes y) im überdeckten Bereich, damit die Kuppe nicht
+      // unter einen benachbarten, höheren Modellwert rutscht.
       const yTop = Math.min(edgeAt(pts, "yT", x0), edgeAt(pts, "yT", cx), edgeAt(pts, "yT", x1));
-      const bot = (px) => edgeAt(pts, "yB", px);
-      const yBot = Math.max(bot(x0), bot(x1));
       // Stunde, die der Zellmitte am nächsten liegt -- sie bestimmt Typ (Amboss
-      // ja/nein) und Symbol.
+      // ja/nein), Symbol UND die Basis.
       let hour = i;
       for (let k = i; k <= j; k++) {
         if (Math.abs(pts[k - i].cx - cx) < Math.abs(pts[hour - i].cx - cx)) hour = k;
       }
+      // Basis waagerecht auf Höhe der zugeordneten Stunde -- keine
+      // Interpolation mehr zwischen Nachbarstunden, sonst kippt die
+      // Unterkante einer einzelnen Wolke schräg, was unrealistisch aussieht
+      // (s. Feedback). Zwischen Zellen verschiedener Stunden ergibt sich die
+      // Stufe von selbst, ganz ohne eigene Stufenfunktion.
+      const yBot = pts[hour - i].yB;
+      const bot = () => yBot;
       // Seed je ZELLE, nicht je Lauf: sonst trügen alle Türme eines Nachmittags
       // dieselbe Kuppelform und dasselbe Randrauschen.
       const seed = hashSeed(`cbcell:${meta.lat},${meta.lon},${times[i]}:${Math.round(cx)}`);
@@ -494,6 +498,14 @@ function paintCell(ctx, cell) {
  *
  * Läufe hier nur über `kind === "cb"`: TCU haben per Definition keinen Amboss.
  * Ein Lauf aus tcu,tcu,cb,cb bekommt also nur über der Cb-Hälfte einen Deckel.
+ *
+ * Zellen, deren Oberrand von der Höhenskala an die Chartdecke gekappt wurde
+ * (`cell.yTop <= y.top`, s. `makeYScale`-Clamp), bekommen KEINEN Amboss: der
+ * echte Modelloberrand liegt dann bei oder über der aktuell angezeigten
+ * Höhengrenze (Flughöhe im Zoom, sonst Gitterdeckel), und der Amboss säße
+ * fälschlich direkt auf dieser Grenze, als reichte die Wolke nicht weiter
+ * hinauf. Schaft und Symbol bleiben -- die Wolke ist oben schlicht
+ * abgeschnitten (s. Feedback).
  */
 export function drawCbAnvils(ctx, cells, x, y) {
   ctx.save();
@@ -501,7 +513,7 @@ export function drawCbAnvils(ctx, cells, x, y) {
   setSpotStyle(ctx, ANVIL_TUNING);
 
   for (const cell of cells) {
-    if (cell.kind !== "cb") continue;
+    if (cell.kind !== "cb" || cell.yTop <= y.top + 0.5) continue;
     const { x0: X0, x1: X1, hourPx, yBot } = cell;
     // Deckel über den höchsten Modellwert der Zelle: die weiche Kante der Kuppe
     // streut nach oben (s. ANVIL_OVERSHOOT), diese Fusseln sollen nicht über
