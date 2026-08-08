@@ -4,7 +4,7 @@ import { fetchSurface, fetchModelRunInit, nearestIndex } from "./weather.js";
 import { initTimeControls, setRange, getMasterMs, subscribe as subscribeTime } from "./timeController.js";
 import { renderMeteogram } from "./meteogram.js";
 import { fetchColumn, buildField } from "./column.js";
-import { cloudCeiling, cloudLayers, groundFog } from "./clouds.js";
+import { cloudCeiling, cloudLayers, classifyFog } from "./clouds.js";
 import { renderCrossSection } from "./crosssection.js";
 import { gridFromColumn, sampleAt, derive } from "./gramet/grid.js";
 import { deriveView } from "./gramet/derive.js";
@@ -520,12 +520,13 @@ async function openMeteogram() {
   // Höhe im ganzen Profil, auch wenn eine tiefere FEW/SCT-Schicht darunter
   // liegt; für die Meteogramm-Linie soll aber die tatsächliche unterste
   // Wolke inkl. ihrer eigenen Kategorie erscheinen).
-  let lowestLayer = null, mgGroundFog = null;
+  let lowestLayer = null, mgFog = null;
   try {
     const col = await ensureColumn();
     if (col.time.length === surface.time.length) {
       lowestLayer = surface.time.map((_, i) => cloudLayers(col, i, { maxLayers: 1 })[0] ?? null);
-      mgGroundFog = surface.time.map((_, i) => groundFog(col, i));
+      mgFog = surface.time.map((_, i) =>
+        classifyFog(col, i, surface.vars.visibility?.[i], surface.vars.weather_code?.[i]));
     }
   } catch { /* Säule nicht verfügbar -> Meteogramm bleibt bei reiner LCL-Schätzung */ }
 
@@ -537,7 +538,7 @@ async function openMeteogram() {
     moon: { events },
     maxHeightM: settings.maxHeight,
     lowestLayer,
-    groundFog: mgGroundFog,
+    fog: mgFog,
   });
 }
 
@@ -716,14 +717,15 @@ async function openGoNoGo() {
     try {
       const col = await ensureColumn();
       const ccLow = state.data.surface.vars.cloud_cover_low;
+      const visArr = state.data.surface.vars.visibility, wcArr = state.data.surface.vars.weather_code;
       const sameLength = col.time.length === state.data.surface.time.length;
       state.data.cloudCeiling = sameLength
         ? state.data.surface.time.map((_, i) => cloudCeiling(col, i, { ccLowPct: ccLow?.[i] })?.baseM ?? null)
         : null;
-      state.data.groundFog = sameLength
-        ? state.data.surface.time.map((_, i) => groundFog(col, i))
+      state.data.fog = sameLength
+        ? state.data.surface.time.map((_, i) => classifyFog(col, i, visArr?.[i], wcArr?.[i]))
         : null;
-    } catch { state.data.cloudCeiling = null; state.data.groundFog = null; }
+    } catch { state.data.cloudCeiling = null; state.data.fog = null; }
   }
   // Vereisung: IPI-Bandmaximum aus derselben Säule, kein eigener Request
   // (s. `icingBandMaxAt`). Gitter wird mit GRAMET geteilt (`state.data.gmGrid`)
@@ -758,7 +760,7 @@ async function openGoNoGo() {
   }
   renderGoNoGoTable(el("gng-body"), evaluateGoNoGo(
     state.data.surface, state.data.windBandMax, getProfile(settings.droneProfile), settings.maxHeight,
-    state.data.cloudCeiling ?? null, state.data.groundFog ?? null, state.data.icingBandMax ?? null,
+    state.data.cloudCeiling ?? null, state.data.fog ?? null, state.data.icingBandMax ?? null,
     state.data.turbulenceBandMax ?? null,
   ));
 }
@@ -1169,7 +1171,7 @@ function refreshViews() {
   if (!el("gonogo").hidden && state.data?.windBandMax) {
     renderGoNoGoTable(el("gng-body"), evaluateGoNoGo(
       state.data.surface, state.data.windBandMax, getProfile(settings.droneProfile), settings.maxHeight,
-      state.data.cloudCeiling ?? null, state.data.groundFog ?? null,
+      state.data.cloudCeiling ?? null, state.data.fog ?? null,
     ));
   }
   if (!el("briefing").hidden && state.data?.col) {

@@ -11,7 +11,8 @@
  */
 
 import { sampleColumnAtHeight } from "./column.js";
-import { cloudFraction, cloudLayers, groundFog } from "./clouds.js";
+import { cloudFraction, cloudLayers, classifyFog } from "./clouds.js";
+import { toPhenomenon } from "./gramet/hazards/fog.js";
 import {
   windToDisplay, tempToDisplay, heightToDisplay,
   windUnit, tempUnit, heightUnit,
@@ -80,14 +81,15 @@ export function buildBriefingContent({ surface, col, point, modelLabel, maxHeigh
     const sec = surface.time[i];
     const ci = colIdxByTime.get(sec);
     const clouds = ci != null ? metarCloudsForHour(col, ci) : "N/A";
-    const physFog = ci != null ? groundFog(col, ci) : null;
+    const fogEntry = ci != null ? classifyFog(col, ci, at("visibility", i), at("weather_code", i)) : null;
+    const phenomenon = ci != null ? toPhenomenon(fogEntry) : null;
     html += `<tr>
       <td>${ymdUTC(sec)}</td>
       <td>${hhmmZ(sec)}</td>
       <td>${metarDir(at("wind_direction_10m", i))}</td>
       <td>${windGust(at("wind_speed_10m", i), at("wind_gusts_10m", i))}</td>
       <td>${metarVis(at("visibility", i))}</td>
-      <td>${metarWeather(at("weather_code", i), physFog)}</td>
+      <td>${metarWeather(at("weather_code", i), phenomenon)}</td>
       <td>${clouds}</td>
       <td>${fmtNum(tempToDisplay(at("temperature_2m", i)), 0)}</td>
     </tr>`;
@@ -168,27 +170,34 @@ const WMO_TO_TAF = {
   95: "TSRA", 96: "TSGR", 99: "+TSGR",
 };
 /**
- * METAR-nahes Wettersymbol aus `weather_code` — korrigiert um einen
- * physikalischen/RH-basierten Bodenbefund (`phenomenon`; für Nebel bislang
- * `clouds.js` `groundFog()`, seit GRAMETs Nebel/Dunst-Diagnose auch
+ * METAR-nahes Wettersymbol aus `weather_code` — korrigiert um den
+ * sichtbasierten Bodenbefund `phenomenon` (`clouds.js` `classifyFog()` bzw.
  * `gramet/hazards/fog.js` `toPhenomenon()`): meldet weather_code KEIN
  * signifikantes Wetter, liefert der Befund aber Nebel/Diesigkeit/Dunst, wird
  * FG/FZFG/BR/HZ ergänzt (Priorität FG > BR > HZ, das schwerste Phänomen
  * gewinnt). Zeigt weather_code bereits etwas Schwereres (Gewitter,
  * Niederschlag), bleibt das unverändert — nichts wird darübergestülpt.
  *
- * `phenomenon` bewusst mit denselben Feldnamen wie bisher `physFog`
- * (`fog`/`freezing`) plus `mist`/`haze` — bestehende Aufrufer (nur `fog`/
- * `freezing` setzend) funktionieren unverändert weiter.
+ * SONDERFALL FG/FZFG: `weather_code` 45/48 gilt NICHT automatisch, sobald ein
+ * `phenomenon`-Objekt vorliegt (auch ein leeres, s. `toPhenomenon()`) — dann
+ * entscheidet die sichtbasierte Diagnose, nicht der rohe Code (der sonst
+ * einer per Sicht widerlegten Nebelmeldung widersprechen könnte, s. Feedback:
+ * Meteogramm/Briefing zeigten "FG" über Stunden, in denen GRAMETs
+ * Sichtdiagnose längst kein Nebel mehr sah). Nur OHNE jedes `phenomenon`
+ * (Spalte nicht geladen) bleibt der rohe Code die einzige Quelle.
+ *
+ * `phenomenon` mit den Feldnamen `fog`/`freezing`/`mist`/`haze` — bestehende
+ * Aufrufer (nur `fog`/`freezing` setzend) funktionieren unverändert weiter.
  */
 export function metarWeather(code, phenomenon = null) {
   const c = parseInt(code, 10);
   const w = Number.isNaN(c) ? "N/A" : (WMO_TO_TAF[c] || "N/A");
-  if (w !== "NSW" && w !== "N/A") return w;
+  const isFogFamily = w === "FG" || w === "FZFG";
+  if (w !== "NSW" && w !== "N/A" && !(isFogFamily && phenomenon)) return w;
   if (phenomenon?.fog) return phenomenon.freezing ? "FZFG" : "FG";
   if (phenomenon?.mist) return "BR";
   if (phenomenon?.haze) return "HZ";
-  return w;
+  return isFogFamily ? "NSW" : w;
 }
 
 /** Windrichtung METAR: auf 10° gerundet, 360 für Nord, dreistellig. */

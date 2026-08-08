@@ -21,8 +21,12 @@
  *     unabhängig, arbeitet nur auf der fertigen CF-Kurve).
  *
  * Daneben, unabhängig von der CF-Kurve:
- *  - `groundFog()`: physikalische Nebelerkennung direkt aus QW/QI am Boden,
- *    Ersatz/Ergänzung für die bisherige Sicht-/`weather_code`-Erkennung.
+ *  - `classifyFog()`: Nebel/Dunst-Diagnose (FG/BR/HZ) col-native, mit der
+ *    Sichtweite als primärem Kriterium (Kondensat/Wolkenanteil am Boden gehen
+ *    voran, `weather_code` ist nur Fallback ohne Sichtwert) — dieselbe
+ *    Priorität wie die grid-native Variante `gramet/hazards/fog.js`
+ *    `classifyColumn()` für GRAMET, damit Meteogramm/Go-No-Go/Briefing nicht
+ *    der GRAMET-Diagnose widersprechen (s. METHODIK.md 4.3).
  */
 
 // --- Kalibrierung ------------------------------------------------------------
@@ -61,22 +65,36 @@ export const CF_FEW = 0.10, CF_SCT = 0.25, CF_BKN = 0.50, CF_OVC = 0.90;
 // nur optischer Dunst, keine Wolke → RH_crit dort auf RH_CRIT_SURF_GUARD
 // anheben (RH < ~90 % ⇒ CF = 0). Gesättigte Schichten mit Basis < FOG_BASE_M
 // berühren den Boden = Nebel: aus Wolken-Layern/Ceiling ausgenommen, getragen
-// von der Modell-Sicht + weather_code — bzw., wo verfügbar, von `groundFog()`
-// (s. u., physikalisch aus QW/QI) — siehe METHODIK.md 4.3.
+// von `classifyFog()` (s. u.) — siehe METHODIK.md 4.3.
 const Z_SURF_M = 150;            // m AGL — Dicke der bodennahen Dunstschicht
 const RH_CRIT_SURF_GUARD = 90;   // % — Mindest-RH_crit direkt am Boden
 const FOG_BASE_M = 30;           // m AGL — darunter gilt eine Basis als Nebel
 
-// Physikalische Nebelerkennung (`groundFog()`, s. u.): nennenswertes Kondensat
-// (QW+QI) an einem bodennahen Level unterhalb FOG_QW_CHECK_M gilt als Nebel —
-// direkter als die RH-Heuristik, die bodennah nur über den Dunst-Guard
-// zwischen Dunst und Wolke unterscheidet. PLATZHALTER wie die QCOND_SCALE_*-
-// Konstanten oben (unvalidiert, s. METHODIK.md 4.1/4.3).
-// Exportiert (statt wie `FOG_BASE_M` nur gespiegelt): `hazards/fog.js`
-// braucht dieselbe Kondensat-Schwelle für die grid-native Prüfung, zwei
-// Kopien desselben Platzhalterwerts würden sonst leise auseinanderlaufen.
-export const FOG_QW_CHECK_M = 50;  // m AGL — Level-Reichweite der Nebelprüfung
+// Physikalische Nebelerkennung (`classifyFog()`, s. u.): nennenswertes
+// Kondensat (QW+QI) im untersten Level (k=0, ~10 m AGL — Bodenkontakt-
+// Pflicht, sonst würde erhöhter Nebel/erhöhte Feuchte fälschlich als
+// Bodenphänomen gezeigt) gilt als Nebel — direkter als die RH-Heuristik, die
+// bodennah nur über den Dunst-Guard zwischen Dunst und Wolke unterscheidet.
+// PLATZHALTER wie die QCOND_SCALE_*-Konstanten oben (unvalidiert, s.
+// METHODIK.md 4.1/4.3). Exportiert (statt wie `FOG_BASE_M` nur gespiegelt):
+// `hazards/fog.js` braucht dieselbe Kondensat-Schwelle für die grid-native
+// Prüfung, zwei Kopien desselben Platzhalterwerts würden sonst leise
+// auseinanderlaufen.
 export const FOG_QW_MIN = 1e-5;    // kg/kg — Kondensat-Schwelle für „Nebel vorhanden"
+
+// Sicht-/RH-Schwellen für `classifyFog()` (Handbuch Flugwetterdienste, Band
+// Obs) — dieselben Werte, die `gramet/hazards/fog.js` `classifyColumn()` für
+// die grid-native GRAMET-Diagnose importiert. EINE Quelle, damit die beiden
+// Pfade nicht leise auseinanderlaufen (genau das war vorher der Fall: das
+// Meteogramm/die Go-No-Go-Hazardzeile hingen noch am alten `weather_code`-
+// Trigger ohne Sichtbezug, während GRAMET schon sichtbasiert klassifizierte —
+// s. Feedback).
+export const FG_VIS_MAX_M = 1000;      // m — Sicht darunter ⇒ FG, unabhängig von RH
+export const HAZE_VIS_MAX_M = 5000;    // m — 1000–5000 m ⇒ BR/HZ, sonst kein Befund
+export const BR_HZ_RH_SPLIT = 80;      // % — RH-Split BR (≥) vs. HZ (<) im Sichtband
+// Nur für den seltenen Fall ohne Sichtweitendaten: reiner RH-Fallback.
+export const BR_RH_FALLBACK_MIN = 90;  // %
+export const HZ_RH_FALLBACK_MIN = 60;  // %
 
 // Kondensat-Skalen für die QW/QI-Stufe (Stufe 2, s. u.): getrennt für Wasser
 // und Eis, NICHT eine gemeinsame Skala — Eis erzeugt bei gleicher Masse mehr
@@ -299,36 +317,54 @@ export function lowestCloudBase(col, i) {
 }
 
 /**
- * Physikalische Nebelerkennung zur Stunde `i`: prüft die Level unterhalb
- * `FOG_QW_CHECK_M` (von unten nach oben) auf nennenswertes Kondensat
- * (`qw + qi > FOG_QW_MIN`). Anders als die CF-Kurve (die bodennah RH-basiert
- * zwischen Dunst und Wolke unterscheidet, `RH_CRIT_SURF_GUARD`) ist das ein
- * direkter Nachweis von Flüssigwasser/Eis am Boden — Nebel im physikalischen
- * Sinn, unabhängig vom Sundqvist-Fallback.
+ * Nebel/Dunst-Diagnose (FG/BR/HZ) zur Stunde `i`, col-native Gegenstück zu
+ * `gramet/hazards/fog.js` `classifyColumn()` (dort grid-native für GRAMETs
+ * Höhenschnitt) — SICHTWEITE ALS PRIMÄRES KRITERIUM, exakt dieselbe Priorität
+ * und dieselben Schwellen wie dort (s. ausführliche Herleitung im Kopf-
+ * kommentar von `hazards/fog.js`):
+ *  1. Kondensat direkt am untersten Level (`qw+qi > FOG_QW_MIN`) → FG, sicher
+ *     — stärkstes physikalisches Signal, geht der Sichtdiagnose bewusst vor.
+ *  2. Bodennahe Wolkenfraktion `cfAt(col,0,i) ≥ CF_BKN` → FG; sicher nur, wenn
+ *     `clc` das trägt (sonst RH-Sundqvist-Fallback, unsicher).
+ *  3. Sonst, wenn `visibility` vorhanden ist: < FG_VIS_MAX_M → FG; ≤
+ *     HAZE_VIS_MAX_M → BR (RH ≥ BR_HZ_RH_SPLIT) oder HZ; sonst kein Befund —
+ *     AUCH wenn `wcode` Nebel meldet (die Sicht ist hier die Wahrheit).
+ *  4. Sonst (keine Sichtweite verfügbar): `wcode` 45/48 → FG, unsicher; RH-
+ *     Fallback für BR/HZ, unsicher.
+ *  5. sonst kein Befund (`null`).
  *
- * `freezing`: unterkühlter Nebel (T ≤ 0 °C im Nebel-Level) — friert auf
+ * `freezing`: unterkühlter Nebel (T ≤ 0 °C im untersten Level) — friert auf
  * Oberflächen (Rotorblätter!) auf, relevanter Hazard über die reine
  * Sichtbehinderung hinaus.
  *
- * @returns {{ fog: boolean, freezing: boolean } | null} `null`, wenn `qw`/`qi`
- *   auf dieser Instanz (noch) nicht geführt werden — Aufrufer fällt dann auf
- *   die Sicht-/`weather_code`-Erkennung zurück (siehe METHODIK.md 4.3).
+ * @param {number} [visibility] Sicht (m), i. d. R. `surface.vars.visibility[i]`
+ * @param {number} [wcode] `weather_code[i]`, nur Fallback ohne Sichtwert
+ * @returns {{type: "FG"|"BR"|"HZ", certain: boolean, freezing: boolean} | null}
  */
-export function groundFog(col, i) {
-  let sawData = false;
-  for (let k = 0; k < col.nLevels; k++) {
-    const h = col.h[k]?.[i];
-    if (!Number.isFinite(h)) continue;
-    if (h > FOG_QW_CHECK_M) break; // Level von unten nach oben sortiert
-    const qw = col.qw?.[k]?.[i], qi = col.qi?.[k]?.[i];
-    if (!Number.isFinite(qw) && !Number.isFinite(qi)) continue; // Instanz ohne QW/QI
-    sawData = true;
-    if ((qw || 0) + (qi || 0) > FOG_QW_MIN) {
-      const t = col.t?.[k]?.[i];
-      return { fog: true, freezing: Number.isFinite(t) && t <= 0 };
+export function classifyFog(col, i, visibility, wcode) {
+  const t0 = col.t?.[0]?.[i];
+  const freezing = Number.isFinite(t0) && t0 <= 0;
+
+  const qw0 = col.qw?.[0]?.[i], qi0 = col.qi?.[0]?.[i];
+  if ((qw0 || 0) + (qi0 || 0) > FOG_QW_MIN) return { type: "FG", certain: true, freezing };
+
+  const cf0 = cfAt(col, 0, i);
+  if (cf0 >= CF_BKN) return { type: "FG", certain: Number.isFinite(col.clc?.[0]?.[i]), freezing };
+
+  const rh0 = col.rh?.[0]?.[i];
+  if (Number.isFinite(visibility)) {
+    if (visibility < FG_VIS_MAX_M) return { type: "FG", certain: true, freezing };
+    if (visibility <= HAZE_VIS_MAX_M) {
+      const type = Number.isFinite(rh0) && rh0 >= BR_HZ_RH_SPLIT ? "BR" : "HZ";
+      return { type, certain: true, freezing: false };
     }
+    return null; // Sicht > HAZE_VIS_MAX_M -- gilt auch gegen einen widersprüchlichen wcode/RH
   }
-  return sawData ? { fog: false, freezing: false } : null;
+
+  if (wcode === 45 || wcode === 48) return { type: "FG", certain: false, freezing };
+  if (Number.isFinite(rh0) && rh0 >= BR_RH_FALLBACK_MIN) return { type: "BR", certain: false, freezing: false };
+  if (Number.isFinite(rh0) && rh0 >= HZ_RH_FALLBACK_MIN) return { type: "HZ", certain: false, freezing: false };
+  return null;
 }
 
 /**

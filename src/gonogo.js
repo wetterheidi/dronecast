@@ -30,10 +30,13 @@ const KMH_TO_MS = 1 / 3.6;
  *                     (clouds.js `cloudCeiling`), null wo keine tiefe BKN-
  *                     Schicht liegt. Fehlt es ganz (Säule nicht geladen),
  *                     fällt die Wolkenbasis-Zeile auf die LCL-Schätzung zurück.
- * @param groundFogArr Optionales Array parallel zu surface.time:
- *                     `{fog, freezing} | null` aus der Säule (clouds.js
- *                     `groundFog`) — physikalischer Nebelnachweis aus QW/QI,
- *                     ergänzt (nicht ersetzt) die `weather_code`-Erkennung.
+ * @param fogArr       Optionales Array parallel zu surface.time:
+ *                     `{type, certain, freezing} | null` aus der Säule
+ *                     (clouds.js `classifyFog`) — sichtbasierte Nebel/Dunst-
+ *                     Diagnose, dieselbe Priorität wie GRAMETs
+ *                     `hazards/fog.js`, ERSETZT (nicht mehr additiv zu) die
+ *                     reine `weather_code`-Erkennung, damit die "Sonstige
+ *                     Hazards"-Zeile nicht der GRAMET-Diagnose widerspricht.
  * @param icingBandMaxArr Optionales Array parallel zu surface.time:
  *                     `{ipi, bandBottomM, bandTopM}` (Maximum des
  *                     Icing-Potential-Index, 0..1, `hazards/icing.js` `ipiAt`,
@@ -54,7 +57,7 @@ const KMH_TO_MS = 1 / 3.6;
  *            conclusion: [{status, limitingId}] }
  */
 export function evaluate(
-  surface, windBandMax, profile, opHeightM, cloudCeilingArr = null, groundFogArr = null, icingBandMaxArr = null,
+  surface, windBandMax, profile, opHeightM, cloudCeilingArr = null, fogArr = null, icingBandMaxArr = null,
   turbulenceBandMaxArr = null,
 ) {
   const time = surface.time;
@@ -82,7 +85,7 @@ export function evaluate(
       time.map((_, i) => (T ? T[i] ?? null : null))),
     icingRow(time, icingBandMaxArr, opHeightM),
     turbulenceRow(time, turbulenceBandMaxArr, opHeightM),
-    hazardRow(time, wc, visArr, groundFogArr),
+    hazardRow(time, wc, visArr, fogArr),
   ];
 
   const conclusion = time.map((_, i) => conclusionAt(rows, i));
@@ -165,21 +168,24 @@ function rangeRow(id, label, kind, minLimit, maxLimit, defaultMarginPct, valuesR
   return { id, label, kind, cells };
 }
 
-// Gewitter/gefrierender Niederschlag aus weather_code -> rot. Nebel: aus
-// weather_code (45/48) ODER dem physikalischen Nachweis aus der Säule
-// (groundFogArr, clouds.js `groundFog` — andere/genauere Instanz als die
-// Oberflächen-API, daher additiv, nicht ersetzend). Als eigene Warnung nur,
-// wenn die Sicht-Zeile die Lage nicht ohnehin numerisch abdeckt (Modell
-// liefert `visibility` an diesem Zeitpunkt nicht).
-function hazardRow(time, wc, visArr, groundFogArr) {
+// Gewitter/gefrierender Niederschlag aus weather_code -> rot. Nebel: liegt
+// `fogArr` vor (clouds.js `classifyFog`, sichtbasiert), entscheidet dessen
+// Befund ALLEIN -- ERSETZT den rohen weather_code-Trigger, dessen 45/48 einer
+// per Sicht widerlegten Nebelmeldung widersprechen konnte (s. Feedback).
+// Fehlt `fogArr` ganz (Säule nicht geladen), bleibt weather_code 45/48 der
+// einzige verfügbare Nebel-Hinweis. Als eigene Warnung nur, wenn die
+// Sicht-Zeile die Lage nicht ohnehin numerisch abdeckt (Modell liefert
+// `visibility` an diesem Zeitpunkt nicht).
+function hazardRow(time, wc, visArr, fogArr) {
   const cells = time.map((_, i) => {
     const code = wc?.[i];
     if (code === 95 || code === 96 || code === 99) return { status: "red", text: "Gewitter" };
     if (code === 56 || code === 57 || code === 66 || code === 67) return { status: "red", text: "gefr. Niederschlag" };
-    const physFog = groundFogArr ? groundFogArr[i] : null;
-    if (code === 45 || code === 48 || physFog?.fog) {
+    const fog = fogArr ? fogArr[i] : null;
+    const isFog = fogArr ? fog?.type === "FG" : (code === 45 || code === 48);
+    if (isFog) {
       const visKnown = visArr ? visArr[i] != null : false;
-      const freezing = code === 48 || physFog?.freezing;
+      const freezing = fogArr ? fog?.freezing : code === 48;
       return { status: visKnown ? "green" : "yellow", text: freezing ? "Gefr. Nebel" : "Nebel" };
     }
     return { status: "green", text: "–" };

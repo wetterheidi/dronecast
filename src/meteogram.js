@@ -15,9 +15,11 @@
  *       Okta-Kategorie FEW/SCT/BKN/OVC), verfeinert die LCL-Schätzung der
  *       Wolkenbasis — optional, fehlt z. B. wenn die Säule (noch) nicht
  *       geladen ist (dann reine LCL-Schätzung).
- *     groundFog?: ({fog,freezing}|null)[] }  // physikalischer Nebelnachweis
- *       aus QW/QI je Stunde (clouds.js `groundFog`) — optional, ergänzt (ODER-
- *       verknüpft) die `weather_code`-Nebelerkennung im Bewölkungs-Panel.
+ *     fog?: ({type:"FG"|"BR"|"HZ", certain, freezing}|null)[] }  // sichtbasierte
+ *       Nebel/Dunst-Diagnose je Stunde (clouds.js `classifyFog`, dieselbe
+ *       Priorität wie GRAMETs `hazards/fog.js` `classifyColumn`) — optional,
+ *       ERSETZT die reine `weather_code`-Nebelerkennung im Bewölkungs-Panel
+ *       (vorher ODER-verknüpft, konnte GRAMET widersprechen, s. Feedback).
  * Wind wird aus den 10-m-Bodenfeldern gezeichnet (Höhenwinde -> Cross-Section).
  */
 
@@ -153,9 +155,11 @@ function setupHover(svg, m, ctx) {
       `Wolken t ${pct(V.cloud_cover_low[i])} · m ${pct(V.cloud_cover_mid[i])} · h ${pct(V.cloud_cover_high[i])}`,
       `Basis ${base ? fmtHeight(base.baseM) : "–"} · Sicht ${F(V.visibility[i], (v) => `${(v / 1000).toFixed(1)} km`)}`,
     ];
-    const physFog = m.groundFog ? m.groundFog[i] : null;
-    const ww = wwCat(V.weather_code[i]) || (physFog?.fog ? WW_TYPES.find((w) => w.key === "fog") : null);
-    if (ww) lines.splice(1, 0, `Wetter: ${ww.label}${physFog?.freezing ? " (gefrierend)" : ""}`);
+    const ww = fogWwCat(m.fog, i, V.weather_code[i]);
+    if (ww) {
+      const fog = m.fog ? m.fog[i] : null;
+      lines.splice(1, 0, `Wetter: ${ww.label}${ww.key === "fog" && fog?.freezing ? " (gefrierend)" : ""}`);
+    }
     drawTip(ov, px, py, lines, W, H);
   });
   svg.addEventListener("pointerleave", clearOv);
@@ -190,8 +194,10 @@ function drawMoonRow(g, m, x, yTop, yBot) {
 }
 
 // Signifikantes Wetter (WMO ww) pro Stunde als farbige Zellen — auch für
-// Erscheinungen ohne Niederschlagsmenge (Nebel, Gewitter). Nebel: weather_code
-// ODER physikalischer Nachweis aus der Säule (m.groundFog, s. drawCloud).
+// Erscheinungen ohne Niederschlagsmenge (Nebel, Gewitter). Nebel: sichtbasierte
+// Diagnose aus der Säule (m.fog, clouds.js `classifyFog`, s. `fogWwCat`) statt
+// des rohen weather_code — dieselbe Priorität wie GRAMET, damit sich beide
+// Ansichten nicht widersprechen (s. Feedback).
 function drawWeatherRibbon(g, m, x, yTop, yBot) {
   const WC = m.vars.weather_code;
   frame(g, yTop, yBot, x, "Wetter (ww)");
@@ -199,8 +205,7 @@ function drawWeatherRibbon(g, m, x, yTop, yBot) {
   const cy0 = yTop + 16, ch = yBot - cy0 - 3;
   const present = new Set();
   m.time.forEach((t, i) => {
-    const physFog = m.groundFog ? m.groundFog[i] : null;
-    const cat = wwCat(WC[i]) || (physFog?.fog ? WW_TYPES.find((w) => w.key === "fog") : null);
+    const cat = fogWwCat(m.fog, i, WC[i]);
     if (!cat) return;
     present.add(cat.key);
     g.append(mk("rect", { x: x(t) - cellW / 2, y: cy0, width: cellW, height: ch, fill: cat.color }));
@@ -286,13 +291,12 @@ function drawCloud(g, m, x, yTop, yBot) {
   areaUnder(g, m.time, hi, (v) => y(v), x, yBot - 6, COL.cloudHigh);
   areaUnder(g, m.time, mi, (v) => y(v), x, yBot - 6, COL.cloudMid);
   areaUnder(g, m.time, lo, (v) => y(v), x, yBot - 6, COL.cloudLow);
-  // Nebel als orange Marker am Boden: weather_code ODER physikalischer
-  // Nachweis aus der Säule (m.groundFog, additiv — andere Instanz als die
-  // Oberflächen-API).
+  // Nebel als orange Marker am Boden: dieselbe sichtbasierte Diagnose wie im
+  // Wetter-Ribbon (`fogWwCat`) -- kein eigener weather_code-Check mehr, sonst
+  // liefe dieser Marker der Ribbon-/GRAMET-Diagnose leise auseinander.
   const bw = Math.max(1.5, (x(m.time[1]) - x(m.time[0])) * 0.9);
   m.time.forEach((t, i) => {
-    const physFog = m.groundFog ? m.groundFog[i] : null;
-    if (WC[i] === 45 || WC[i] === 48 || physFog?.fog) {
+    if (fogWwCat(m.fog, i, WC[i])?.key === "fog") {
       g.append(mk("rect", { x: x(t) - bw / 2, y: yBot - 10, width: bw, height: 8, fill: COL.fog }));
     }
   });
@@ -539,6 +543,22 @@ function wwCat(code) {
   if (code >= 61 && code <= 65) return byKey("rain");
   if (code >= 51 && code <= 55) return byKey("drizzle");
   return null; // 0-3: klar/bewölkt -> keine Zelle
+}
+
+// wwCat() mit sichtbasierter Nebel-Korrektur: liegt `fogArr` (m.fog,
+// clouds.js `classifyFog`, deckt Kondensat/Wolkenanteil/Sicht/weather_code-
+// Fallback bereits vollständig ab) für diese Stunde vor, entscheidet dessen
+// Befund ALLEIN über Nebel — auch wenn `weather_code` 45/48 meldet, aber
+// `classifyFog` (Sicht > HAZE_VIS_MAX_M) keinen Nebel sieht (sonst genau der
+// Widerspruch zu GRAMET, der hier behoben werden soll, s. Feedback). Andere
+// ww-Codes (Regen, Schnee, Gewitter, ...) bleiben unberührt. Fehlt `fogArr`
+// ganz (Säule nicht geladen), bleibt `wwCat()`s roher weather_code-Trigger
+// der einzige verfügbare Nebel-Hinweis.
+function fogWwCat(fogArr, i, code) {
+  if (!fogArr) return wwCat(code);
+  if (fogArr[i]?.type === "FG") return WW_TYPES.find((w) => w.key === "fog");
+  if (code === 45 || code === 48) return null; // von classifyFog widerlegt
+  return wwCat(code);
 }
 
 // --- SVG-Helfer ------------------------------------------------------------

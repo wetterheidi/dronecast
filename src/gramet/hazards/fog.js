@@ -21,12 +21,17 @@
  *  - Widerspricht `weather_code` (45/48 = Nebel) der modelleigenen Sicht
  *    (>5000 m), gewinnt jetzt die Sicht — WW wird nur noch konsultiert, wenn
  *    gar keine Sichtweite vorliegt.
+ * Dieselbe Priorität/Schwellen gelten jetzt col-nativ über `clouds.js`
+ * `classifyFog()` auch für Meteogramm, Go-No-Go-Tabelle und Briefing — vorher
+ * hingen diese noch am alten `weather_code`/Kondensat-Trigger ohne Sichtbezug
+ * und konnten der hier beschriebenen GRAMET-Diagnose widersprechen (Nebel-
+ * Zelle über Stunden, an denen die Sicht laut Modell längst wieder gut war).
  *
  * Priorität je Stunde, jeweils NUR wenn das unterste Level (k=0, ~10 m AGL)
  * den Schwellwert erreicht (Bodenkontakt-Pflicht — sonst würde erhöhter
  * Nebel/erhöhte Feuchte fälschlich als Bodenphänomen gezeigt):
  *
- *  1. Kondensat direkt (qw+qi > FOG_QW_MIN, mirrors `groundFog()` aus
+ *  1. Kondensat direkt (qw+qi > FOG_QW_MIN, mirrors `classifyFog()` aus
  *     `clouds.js`, hier grid-nativ statt Column-Objekt, da `grid.qw`/`qi`
  *     ohnehin schon flache Arrays sind) → FG, sicher, mit echter Obergrenze
  *     (Höhen-Scan) — stärkstes physikalisches Signal, geht der Sichtweiten-
@@ -46,8 +51,8 @@
  *     c. sonst kein Befund — AUCH wenn RH hoch ist oder `weather_code`
  *        Nebel meldet (s. Priorität 4): die Sicht ist hier die Wahrheit.
  *  4. Sonst (keine Sichtweite verfügbar — seltener Rand-/Instanzfall):
- *     a. `weather_code` 45/48 → FG, unsicher, keine Obergrenze (alter
- *        `groundFog()`+`metarWeather()`-Fallback).
+ *     a. `weather_code` 45/48 → FG, unsicher, keine Obergrenze (`metarWeather()`-
+ *        Fallback, ebenso in `classifyFog()`).
  *     b. RH ≥ BR_RH_FALLBACK_MIN → BR, unsicher.
  *     c. RH ≥ HZ_RH_FALLBACK_MIN → HZ, unsicher.
  *  5. sonst kein Befund (`null`).
@@ -58,19 +63,17 @@
  * clouds.js).
  */
 
-import { CF_BKN, FOG_QW_MIN } from "../../clouds.js";
-
-// Handbuch-Schwellen (Sicht in m, RH-Split in %) -- primäres Kriterium, s. o.
-export const FG_VIS_MAX_M = 1000;
-export const HAZE_VIS_MAX_M = 5000;
-export const BR_HZ_RH_SPLIT = 80;
-
-// Nur für den seltenen Fall ohne Sichtweitendaten (Priorität 4) -- reiner
-// RH-Fallback wie in der ersten Fassung, entsprechend als `certain: false`
-// markiert. Exportiert, damit render.js denselben Wert für die (seltene)
-// Fallback-Rampe nutzt.
-export const BR_RH_FALLBACK_MIN = 90;
-export const HZ_RH_FALLBACK_MIN = 60;
+// Schwellen (Sicht in m, RH-Split in %) leben in `clouds.js`, EINE Quelle für
+// beide Instanzen derselben Klassifikation (hier grid-nativ für GRAMET, dort
+// `classifyFog()` col-nativ für Meteogramm/Go-No-Go/Briefing) -- zwei Kopien
+// derselben Handbuch-Schwellen würden sonst leise auseinanderlaufen (genau
+// das war vorher der Fall, s. Feedback). Re-exportiert, damit `render.js`
+// (`fog.FG_VIS_MAX_M` etc., Namespace-Import) unverändert weiterläuft.
+import {
+  CF_BKN, FOG_QW_MIN,
+  FG_VIS_MAX_M, HAZE_VIS_MAX_M, BR_HZ_RH_SPLIT, BR_RH_FALLBACK_MIN, HZ_RH_FALLBACK_MIN,
+} from "../../clouds.js";
+export { FG_VIS_MAX_M, HAZE_VIS_MAX_M, BR_HZ_RH_SPLIT, BR_RH_FALLBACK_MIN, HZ_RH_FALLBACK_MIN };
 
 const KELVIN = 273.15;
 
@@ -156,14 +159,19 @@ export function computeColumns(grid, cloudFrac) {
 
 /**
  * Klassifikations-Eintrag → `metarWeather()`-Phänomen-Objekt
- * (`{fog, freezing, mist, haze}`, s. `briefing.js`).
+ * (`{fog, freezing, mist, haze}`, s. `briefing.js`). Liefert AUCH für
+ * `entry === null` ein echtes (nur leeres) Objekt, nicht `null` — die
+ * Unterscheidung "Diagnose gelaufen, nichts gefunden" (leeres Objekt) vs.
+ * "Diagnose gar nicht gelaufen" (`null`, z. B. Spalte nicht geladen) ist
+ * genau das, worauf `metarWeather()` seine Vorrangregel stützt: nur ein
+ * ECHTES leeres Ergebnis darf einen widersprüchlichen `weather_code` (45/48)
+ * überstimmen.
  */
 export function toPhenomenon(entry) {
-  if (!entry) return null;
   return {
-    fog: entry.type === "FG",
-    mist: entry.type === "BR",
-    haze: entry.type === "HZ",
-    freezing: entry.freezing,
+    fog: entry?.type === "FG",
+    mist: entry?.type === "BR",
+    haze: entry?.type === "HZ",
+    freezing: entry?.freezing ?? false,
   };
 }

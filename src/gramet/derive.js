@@ -62,7 +62,7 @@ const TCU_MIN_ABOVE_FREEZING_M = 1524; // 5000 ft
 // systematisch zu spät aus, und bei trockener Konvektion (weather_code meldet
 // dann NSW, kein SH) ist dieser Pfad der einzige Weg zur Spalte. Nicht
 // kalibriert.
-const TRIGGER_EXCESS_K = 2;
+const TRIGGER_EXCESS_K = 1;
 
 // Fällt keine Wolke im CF_FEW-Sinn im Profil auf (Niederschlag aber laut
 // weather_code/Menge gemeldet), Ersatz-Obergrenze für den Niederschlags-
