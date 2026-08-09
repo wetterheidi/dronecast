@@ -923,12 +923,18 @@ zurückgegeben statt eines Crashs oder eines stillen Abschneidens:
   numerisch innerhalb der ICON-D2-Bbox (`latMin: 43.18`), liefert aber eine
   leere Zeitreihe (`col.time.length === 0`) zurück. Geprüft NACH jedem Fetch.
 
-`selectWaypointsToFetch()` — **Platzhalter-Policy**: feste Obergrenze
-(12 Spalten), gleichmäßig über die dichte Wegpunktliste verteilt. Die
-eigentlich vorgesehene Policy (Sampling-Dichte an der Modellauflösung
-ausrichten — räumlich UND zeitlich —, statt mehr Spalten zu holen, als das
-Modell an tatsächlich neuen Werten hergibt) ist bewusst noch nicht gebaut;
-diese eine Funktion ist der einzige Ort, der sich dafür später ändern muss.
+`selectWaypointsToFetch()` — **kombinierte Sampling-Policy**: ein Wegpunkt
+wird erst tatsächlich gefetcht, wenn seit dem zuletzt gefetchten ENTWEDER die
+Modell-Zeitauflösung (Open-Meteo liefert stündlich, unabhängig vom Modell)
+ODER die Modell-Gitterweite (`MODELS[key].gridMeters`, [config.js](src/config.js),
+via Haversine-Distanz) überschritten ist — was zuerst eintritt. Erster und
+letzter Wegpunkt sind immer dabei, damit der Pfad nicht vor seinem echten
+Ende endet. Bildet ab, wann das Modell überhaupt neue Information hergibt,
+statt pauschal eine feste Spaltenzahl übers Gitter zu verteilen. Feste
+Obergrenze (`maxCols`, Default 12) bleibt als **Notbremse** erhalten — greift
+nur noch im Ausnahmefall (z. B. ein sehr langer Loiter-Flug, der die
+Zeitschwelle laufend reißt, ohne räumlich voranzukommen), dann gleichmäßig
+ausgedünnt wie zuvor als Regelfall.
 
 `posOfPath(waypoints)` separat exportiert, damit ein späteres Terrain-Profil
 (s. u.) dieselbe Positionsberechnung wiederverwendet, statt unabhängig davon
@@ -954,9 +960,34 @@ Säule über eine gemeinsame Zeitreihe. Nimmt EIN Modell für den gesamten Pfad
 an (`nk` konstant über alle Wegpunkte) — ein Modellwechsel mitten im Pfad ist
 nicht vorgesehen, der Pfad stoppt stattdessen am Bbox-Rand (s. o.).
 `sliceColumnAtTime()` ([column.js](src/column.js)) reduziert eine
-Mehrtages-Säule auf einen Levelquerschnitt zur nächstgelegenen Modellstunde —
-**Rundung, keine echte Zeitinterpolation** (v1, gleiches Muster wie
-`buildSurface()`s `nearestIndex`-Abgleich in 7.1).
+Mehrtages-Säule auf einen Levelquerschnitt zu einer Zielzeit — **echte
+lineare Zeitinterpolation** zwischen den beiden Nachbarstunden in `col.time`
+(`bracketTime()`, gleiches Bracket/Lerp-Muster wie `bracket()`/`lerp()` für
+die Höhe in 7.1), außerhalb des abgedeckten Zeitraums auf den jeweiligen Rand
+geklammert. Ursprünglich (v1) nur eine Rundung auf die nächste Modellstunde —
+inzwischen nachgerüstet, kommt sowohl den Anker-Spalten als auch dem
+Resampling (s. u.) zugute.
+
+**Resampling auf feste Kadenz** ([src/gramet/resample.js](src/gramet/resample.js)),
+`resamplePath(waypointColumns, intervalSec)` — entkoppelt die Fetch-Dichte
+(oben, an der Modellauflösung ausgerichtet) von der Anzeige-Dichte (frei
+wählbar, z. B. alle 10 Minuten, unabhängig davon, wie grob das Modell
+tatsächlich auflöst). Zweistufige Interpolation je Ausgabespalte zwischen den
+beiden umgebenden echten Wegpunkten A/B:
+1. **Zeitlich, innerhalb jeder Säule** — `sliceColumnAtTime(A.col, t)` bzw.
+   `sliceColumnAtTime(B.col, t)` bei der Zielzeit `t` der Ausgabespalte (beide
+   Säulen sind Mehrtages-Säulen, decken `t` also ab).
+2. **Räumlich, zwischen den beiden** so zeit-korrigierten Levelquerschnitten —
+   linear nach Streckenanteil `f` gewichtet, ebenso für `lat`/`lon`/`elevation`.
+
+Oberflächenwerte (Böen/Sicht/SLP/Wettercode) werden dabei bewusst NICHT
+interpoliert, sondern vom jeweils näheren der beiden Wegpunkte übernommen
+(Entscheidung: eine kategoriale Größe wie der Wettercode lässt sich ohnehin
+nicht sinnvoll linear interpolieren, und für die übrigen wäre der
+Zusatzaufwand gegenüber dem Vertikalprofil — der Haupttafel mit Isothermen/
+Wolken/Hazards — nicht gerechtfertigt). Opt-in über `fetchGridForPath`s
+`opts.resampleIntervalSec` — ohne diese Option bleibt es bei einer Spalte pro
+tatsächlich gefetchtem Wegpunkt, unverändertes Verhalten.
 
 **Rendering** ([src/gramet/render.js](src/gramet/render.js)):
 - **Eigener `ResizeObserver`** statt des bisherigen globalen
@@ -1020,4 +1051,4 @@ vereinfachende Annahme steckt:
 | GRAMET Niederschlags-Fallback-Obergrenze (7.4) | 2000 m, grobe Annahme für flachen Niesel-/Sprühregen ohne erkannte Wolkenspur |
 | GRAMET Vereisung (7.6) | `f_T`-Fenster und IPI-Kategorie-Schwellen (0,15/0,30/0,45) unkalibriert; `cloudFrac` statt eigener LWC-Größe |
 | GRAMET Turbulenz (7.7) | `Ri`/Scher-Gate-Schwellen (0,25/1,0 bzw. 0,02/0,05 s⁻¹), Windstärke-Gate (5/10 m/s) und TFI-Kategorie-Schwellen (0,15/0,30/0,60) unkalibriert; sieht KEINE feuchte/konvektive Instabilität (nur trockenes `θ`); Onset-Kriterium weiterhin ohne echte Intensitätsskalierung, s. 7.7 |
-| GRAMET Path-Modus (7.8) | Noch nicht an eine UI angebunden; Sampling-Policy fest (12 Spalten, kein Bezug zur Modellauflösung); `sliceColumnAtTime` rundet auf die nächste Modellstunde statt zu interpolieren; Terrain-Profil geplant, noch nicht gebaut |
+| GRAMET Path-Modus (7.8) | Noch nicht an eine UI angebunden; Resampling interpoliert Oberflächenwerte NICHT (nächster Wegpunkt statt Interpolation, bewusst); Terrain-Profil geplant, noch nicht gebaut |

@@ -122,14 +122,17 @@ function buildSurface(surface, times, col) {
  * für den gesamten Pfad an (`nk` konstant über alle Wegpunkte) -- das
  * Verlassen der Modell-Bbox wird schon vor dem Fetch abgefangen (s. `path.js`),
  * hier wird nur noch zusammengesetzt.
- * @param waypointColumns Array<{ lat, lon, t (Unixsekunden, echte Ankunftszeit),
- *   pos (X-Achsen-Positionswert, von `path.js` vorberechnet), col (vollständiges
- *   `fetchColumn()`-Ergebnis für DIESEN Wegpunkt), surface (optional, wie
- *   `fetchSurface()` an diesem Wegpunkt) }>
+ * @param waypointColumns Array<{ lat, lon, t (Unixsekunden, Zielzeitpunkt),
+ *   pos (X-Achsen-Positionswert), elevation, model, surface (optional, wie
+ *   `fetchSurface()`), col (vollständiges `fetchColumn()`-Ergebnis, wird bei
+ *   Bedarf per `sliceColumnAtTime()` auf `t` reduziert), levelSlice (optional
+ *   -- bereits fertiger Levelquerschnitt, z. B. aus `resample.js`
+ *   `resamplePath()`; wenn gesetzt, wird `col` NICHT mehr gesliced, nur noch
+ *   für `pmsl` in `buildSurfaceFromWaypoints` gebraucht) }>
  */
 export function gridFromWaypoints(waypointColumns) {
   const nt = waypointColumns.length;
-  const nk = waypointColumns[0].col.nLevels;
+  const nk = waypointColumns[0].levelSlice?.h.length ?? waypointColumns[0].col.nLevels;
   const z = new Float32Array(nt * nk), T = new Float32Array(nt * nk),
     u = new Float32Array(nt * nk), v = new Float32Array(nt * nk),
     w = new Float32Array(nt * nk), qv = new Float32Array(nt * nk),
@@ -142,9 +145,9 @@ export function gridFromWaypoints(waypointColumns) {
 
   for (let i = 0; i < nt; i++) {
     const wp = waypointColumns[i];
-    const slice = sliceColumnAtTime(wp.col, wp.t);
+    const slice = wp.levelSlice ?? sliceColumnAtTime(wp.col, wp.t);
     times[i] = wp.t; pos[i] = wp.pos; lat[i] = wp.lat; lon[i] = wp.lon;
-    elevation[i] = wp.col.elevation;
+    elevation[i] = wp.elevation;
     for (let k = 0; k < nk; k++) {
       const ix = i * nk + k;
       z[ix] = slice.h[k];
@@ -163,7 +166,7 @@ export function gridFromWaypoints(waypointColumns) {
 
   return {
     meta: {
-      lat: lat[0], lon: lon[0], elevation: elevation[0], model: waypointColumns[0].col.model,
+      lat: lat[0], lon: lon[0], elevation: elevation[0], model: waypointColumns[0].model,
       dt: nt > 1 ? pos[1] - pos[0] : 3600, mode: "path",
     },
     times, nk, pos, lat, lon, elevation,

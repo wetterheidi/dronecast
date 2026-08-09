@@ -40,11 +40,11 @@ function buildStraightPath({ lat0, lon0, bearingDeg, speedMs, durationH, stepMin
 const statusEl = document.getElementById("status");
 const hostEl = document.getElementById("gm-body");
 
-async function run(waypoints, label) {
+async function run(waypoints, label, opts = {}) {
   statusEl.textContent = `${label} — lade ${waypoints.length} Wegpunkte (Netzwerk) …`;
   hostEl.innerHTML = "";
   try {
-    const { grid, view, pathStop } = await fetchGridForPath(waypoints, "icon_d2", 3);
+    const { grid, view, pathStop } = await fetchGridForPath(waypoints, "icon_d2", 3, undefined, opts);
     statusEl.textContent = pathStop
       ? `${label} — gestoppt bei Wegpunkt ${pathStop.index}: ${pathStop.reason}`
       : `${label} — ${grid.times.length} Spalten geladen`;
@@ -74,4 +74,15 @@ document.getElementById("run-exit").addEventListener("click", () => {
     durationH: 3, stepMin: 10, startSec,
   });
   run(waypoints, "Verlässt die Bbox");
+});
+
+document.getElementById("run-resampled").addEventListener("click", () => {
+  // Gleicher Pfad wie "Innerhalb der Bbox", aber mit Resampling auf eine
+  // feste 10-Minuten-Kadenz (s. `resample.js`) statt einer Spalte pro
+  // tatsächlich gefetchtem (sparsamen) Wegpunkt.
+  const waypoints = buildStraightPath({
+    lat0: 48.14, lon0: 11.58, bearingDeg: 45, speedMs: 40,
+    durationH: 3, stepMin: 10, startSec,
+  });
+  run(waypoints, "Resampled alle 10 min", { resampleIntervalSec: 600 });
 });

@@ -322,20 +322,31 @@ droneforecast — kein Custom-Element-Wrapper, keine Paket-Extraktion, keine
 Änderungen an `trajectories`. Details/Datenmodell in METHODIK.md 7.8; hier nur
 der Backlog-Blick, was als Nächstes drankäme:
 
-**Gebaut (nachgerüstet):** Oberflächenwerte pro Wegpunkt — `path.js` ruft
-jetzt parallel zur Säule auch `fetchSurface()` je Wegpunkt auf, Böen/Sicht/
-SLP/Wettercode sind im Path-Modus damit genauso befüllt wie im Ort/Zeit-Modus,
-s. METHODIK.md 7.8.
+**Gebaut (nachgerüstet):**
+- Oberflächenwerte pro Wegpunkt — `path.js` ruft parallel zur Säule auch
+  `fetchSurface()` je Wegpunkt auf, Böen/Sicht/SLP/Wettercode sind im
+  Path-Modus damit genauso befüllt wie im Ort/Zeit-Modus.
+- Sampling-Policy — `selectWaypointsToFetch()` nutzt jetzt die kombinierte
+  Policy (Modell-Zeitauflösung ODER -Gitterweite, je nachdem was zuerst
+  eintritt) statt der festen 12er-Platzhalterverteilung; feste Obergrenze
+  bleibt nur noch als Notbremse für Extremfälle.
+- Resampling auf feste Anzeige-Kadenz — neues
+  [src/gramet/resample.js](src/gramet/resample.js), entkoppelt die
+  (sparsame) Fetch-Dichte von einer frei wählbaren Anzeige-Dichte (z. B. alle
+  10 Minuten), räumlich+zeitlich interpoliert zwischen den echten
+  Wegpunkten. Oberflächenwerte werden dabei bewusst NICHT interpoliert
+  (nächster Wegpunkt reicht, s. METHODIK.md 7.8).
+- `sliceColumnAtTime()` interpoliert jetzt echt zwischen den Modellstunden
+  statt nur zu runden — Nebeneffekt der Resampling-Arbeit, kommt auch den
+  normalen Anker-Spalten zugute.
+
+Alle Details in METHODIK.md 7.8.
 
 - **Web-Component-Wrapper:** `renderGramet(host, grid, view, state)` nimmt
   bereits einen Host-Container statt fest ins droneforecast-DOM zu greifen —
   gute Ausgangsbasis. Offen: eigenes npm-Paket vs. Git-Submodule vs. Copy für
   die tatsächliche Verteilung an `trajectories`, Shadow-DOM-Kapselung fürs
   Styling, Custom-Element-Boilerplate (`<gramet-chart>` o. Ä.).
-- **Sampling-Policy für Wegpunkte:** aktuell fester Platzhalter
-  (`path.js` `selectWaypointsToFetch()`, 12 Spalten gleichmäßig verteilt).
-  Eigentlich vorgesehen: Dichte an der Modellauflösung ausrichten (räumlich
-  UND zeitlich) statt an einer festen Zahl — s. METHODIK.md 7.8.
 - **Terrain-Profil (Mapterhorn):** bewusst zurückgestellt, kompletter Recherche-
   und Umsetzungsplan in METHODIK.md 7.8 — Terrarium-kodierte Kacheln
   (`tiles.mapterhorn.com`), regional stark unterschiedliche Auflösung

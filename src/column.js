@@ -7,7 +7,7 @@
 
 import { API_BASE, MODELS } from "./config.js";
 import { cloudFraction } from "./clouds.js";
-import { lastFiniteIndex, nearestIndex } from "./weather.js";
+import { lastFiniteIndex } from "./weather.js";
 
 const KMH_TO_MS = 1 / 3.6;
 
@@ -174,20 +174,25 @@ export function sampleColumnAtHeight(col, i, ht) {
 
 /**
  * Säule (mehrere Tage, ein Ort) auf einen einzelnen Levelquerschnitt zur
- * nächstgelegenen Modellstunde reduziert -- für den GRAMET-Path-Modus
- * (`grid.js` `gridFromWaypoints`), wo pro Wegpunkt eine eigene Säule geholt,
- * aber nur die Ankunftsstunde daraus gebraucht wird. Rundung auf die
- * nächste Stunde (dieselbe Konvention wie `grid.js` `buildSurface`), keine
- * echte Zeitinterpolation -- v1, s. Plan.
+ * Zielzeit `tTargetSec` reduziert -- für den GRAMET-Path-Modus (`grid.js`
+ * `gridFromWaypoints`, `resample.js` `resamplePath`), wo pro Wegpunkt eine
+ * eigene Mehrstunden-Säule geholt, aber nur ein Zeitpunkt daraus gebraucht
+ * wird. Echte lineare Zeitinterpolation zwischen den beiden Nachbarstunden
+ * in `col.time` (`bracketTime`, gleiches Bracket/Lerp-Muster wie `bracket()`/
+ * `lerp()` oben für die Höhe) -- außerhalb des abgedeckten Zeitraums wird auf
+ * den jeweiligen Rand geklammert.
  */
 export function sliceColumnAtTime(col, tTargetSec) {
-  const i = nearestIndex(col.time, tTargetSec * 1000);
-  if (i < 0) return null;
+  if (!col.time.length) return null;
+  const { i0, i1, f } = bracketTime(col.time, tTargetSec);
   const nk = col.nLevels;
   const pick = (byLevel) => {
     if (!byLevel) return null;
     const out = new Float64Array(nk);
-    for (let k = 0; k < nk; k++) out[k] = byLevel[k][i];
+    for (let k = 0; k < nk; k++) {
+      const a = byLevel[k][i0], b = byLevel[k][i1];
+      out[k] = a + f * (b - a);
+    }
     return out;
   };
   return {
@@ -210,6 +215,17 @@ function bracket(hi, ht) {
 function lerp(arrByLevel, br, i) {
   const a = arrByLevel[br.k0][i], b = arrByLevel[br.k1][i];
   return a + br.f * (b - a);
+}
+// Wie `bracket()`, nur auf der Zeitachse statt der Höhe -- Ränder klammern
+// statt zu extrapolieren (Ziel außerhalb der Säule => nächstliegende Stunde).
+function bracketTime(time, t) {
+  const T = time.length;
+  if (t <= time[0]) return { i0: 0, i1: 0, f: 0 };
+  let i = 1;
+  while (i < T && time[i] < t) i++;
+  if (i >= T) return { i0: T - 1, i1: T - 1, f: 0 };
+  const f = (t - time[i - 1]) / (time[i] - time[i - 1]);
+  return { i0: i - 1, i1: i, f };
 }
 function zeroCrossing(hi, tByLevel, i) {
   for (let k = 0; k < hi.length - 1; k++) {

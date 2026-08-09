@@ -11,6 +11,7 @@ import { fetchColumn } from "../column.js";
 import { fetchSurface } from "../weather.js";
 import { gridFromWaypoints } from "./grid.js";
 import { deriveView } from "./derive.js";
+import { resamplePath } from "./resample.js";
 
 // Bbox-Verlassen VOR dem Fetch prüfen, nicht danach: `fetchColumn` nutzt
 // `cell_selection: "nearest"` (s. column.js) -- ein Punkt außerhalb der Bbox
@@ -33,6 +34,19 @@ const BBOX_STOP_REASON = "Rand des Modellgebiets erreicht";
 // mit echten Koordinaten reproduziert -- kein hypothetischer Randfall.
 const NO_DATA_STOP_REASON = "Keine Modelldaten an diesem Punkt";
 
+// Open-Meteo liefert immer stündlich, unabhängig vom Modell (`grid.js`s
+// `meta.dt` ist faktisch immer 3600s) -- die zeitliche Auflösung ist also
+// eine Konstante, keine Modell-Eigenschaft.
+const MODEL_TIME_RES_SEC = 3600;
+
+function haversineM(lat1, lon1, lat2, lon2) {
+  const R = 6371000, toRad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * toRad, dLon = (lon2 - lon1) * toRad;
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
 /**
  * Verstrichene Sekunden seit `waypoints[0].t` -- der X-Achsen-Positionswert
  * im Path-Modus (Entscheidung: verstrichene Zeit statt Distanz, s. Diskussion
@@ -46,21 +60,45 @@ export function posOfPath(waypoints) {
 }
 
 /**
- * Vorläufige Sampling-Policy (Platzhalter, s. Plan): feste Obergrenze,
- * gleichmäßig über die dichte Wegpunktliste verteilt. Die eigentliche Policy
- * (Modellauflösung als Kriterium, s. frühere Diskussion) wird bewusst erst
- * später verfeinert -- diese Funktion ist der einzige Ort, der sich dafür
- * ändern muss.
- * @returns Indizes in `waypoints`, aufsteigend, ohne Duplikate.
+ * Kombinierte Sampling-Policy ("Fall C", s. Diskussion): ein Wegpunkt wird
+ * erst tatsächlich gefetcht, wenn seit dem zuletzt gefetchten ENTWEDER die
+ * Modell-Zeitauflösung (`timeResSec`, Default `MODEL_TIME_RES_SEC`) ODER die
+ * Modell-Gitterweite (`distResM`, Default `model.gridMeters`) überschritten
+ * ist -- was zuerst eintritt. Bildet ab, wann das Modell überhaupt neue
+ * Information hergibt, statt pauschal eine feste Spaltenzahl übers Gitter
+ * zu verteilen.
+ * @returns Indizes in `waypoints`, aufsteigend, ohne Duplikate, immer inkl.
+ *   erstem und letztem Index.
  */
-function selectWaypointsToFetch(waypoints, opts = {}) {
+function selectWaypointsToFetch(waypoints, model, opts = {}) {
   const maxCols = opts.maxCols ?? 12;
-  if (waypoints.length <= maxCols) return waypoints.map((_, i) => i);
-  const indices = new Set();
-  for (let k = 0; k < maxCols; k++) {
-    indices.add(Math.round((k / (maxCols - 1)) * (waypoints.length - 1)));
+  const timeResSec = opts.timeResSec ?? MODEL_TIME_RES_SEC;
+  const distResM = opts.distResM ?? model.gridMeters;
+
+  const candidates = [0];
+  let last = waypoints[0];
+  for (let i = 1; i < waypoints.length; i++) {
+    const wp = waypoints[i];
+    const dt = wp.t - last.t;
+    const dist = haversineM(last.lat, last.lon, wp.lat, wp.lon);
+    if (dt >= timeResSec || dist >= distResM) {
+      candidates.push(i);
+      last = wp;
+    }
   }
-  return [...indices].sort((a, b) => a - b);
+  const lastIdx = waypoints.length - 1;
+  if (candidates[candidates.length - 1] !== lastIdx) candidates.push(lastIdx);
+
+  // Notbremse: übersteigt die so entstandene Liste trotzdem `maxCols` (z. B.
+  // ein sehr langer Loiter-Flug, der die Zeitschwelle laufend reißt, ohne
+  // räumlich voranzukommen), gleichmäßig ausdünnen -- gleiche Methode wie die
+  // frühere Platzhalter-Policy, jetzt nur noch als Fallback statt Regelfall.
+  if (candidates.length <= maxCols) return candidates;
+  const thinned = new Set();
+  for (let k = 0; k < maxCols; k++) {
+    thinned.add(candidates[Math.round((k / (maxCols - 1)) * (candidates.length - 1))]);
+  }
+  return [...thinned].sort((a, b) => a - b);
 }
 
 /**
@@ -70,15 +108,20 @@ function selectWaypointsToFetch(waypoints, opts = {}) {
  * s. Plan), und setzt das Gitter zusammen.
  * @param waypoints Array<{ lat, lon, t }> -- dicht, vom Aufrufer geliefert
  *   (z. B. aus einer Trajektorienberechnung), `t` in Unixsekunden.
+ * @param opts { maxCols, timeResSec, distResM (s. `selectWaypointsToFetch`),
+ *   resampleIntervalSec (optional -- wenn gesetzt, wird das gefetchte,
+ *   sparsame Gitter per `resample.js` `resamplePath()` auf diese Kadenz in
+ *   Sekunden interpoliert, z. B. 600 für alle 10 min; ohne diese Option
+ *   bleibt es bei einer Spalte pro tatsächlich gefetchtem Wegpunkt) }
  * @returns { grid, view, pathStop: { lat, lon, index, reason } | null }
  */
-export async function fetchGridForPath(waypoints, modelKey, forecastDays, fetchImpl) {
+export async function fetchGridForPath(waypoints, modelKey, forecastDays, fetchImpl, opts = {}) {
   const model = MODELS[modelKey];
   if (!model) throw new Error(`Unbekanntes Modell: ${modelKey}`);
   if (waypoints.length < 2) throw new Error("Path-Modus braucht mindestens zwei Wegpunkte");
 
   const pos = posOfPath(waypoints);
-  const indices = selectWaypointsToFetch(waypoints);
+  const indices = selectWaypointsToFetch(waypoints, model, opts);
 
   const waypointColumns = [];
   let pathStop = null;
@@ -104,14 +147,18 @@ export async function fetchGridForPath(waypoints, modelKey, forecastDays, fetchI
       pathStop = { lat: wp.lat, lon: wp.lon, index: i, reason: NO_DATA_STOP_REASON };
       break;
     }
-    waypointColumns.push({ lat: wp.lat, lon: wp.lon, t: wp.t, pos: pos[i], col, surface });
+    waypointColumns.push({
+      lat: wp.lat, lon: wp.lon, t: wp.t, pos: pos[i],
+      elevation: col.elevation, model: modelKey, col, surface,
+    });
   }
 
   if (waypointColumns.length < 2) {
     throw new Error(pathStop ? pathStop.reason : "Keine Wegpunkte im Modellgebiet");
   }
 
-  const grid = gridFromWaypoints(waypointColumns);
+  const dense = opts.resampleIntervalSec ? resamplePath(waypointColumns, opts.resampleIntervalSec) : waypointColumns;
+  const grid = gridFromWaypoints(dense);
   const view = deriveView(grid);
   return { grid, view, pathStop };
 }
