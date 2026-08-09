@@ -55,7 +55,7 @@ const GROUND_H = 14;
 // -- mit einer nur leicht dunkleren Erdfarbe verschwamm der Boden mit dem
 // Himmel zu ähnlich heller Fläche, die Horizontlinie blieb die einzige
 // Trennung (s. Feedback).
-const GROUND_NIGHT = "#0a0603", GROUND_DAY = "#076f30";
+const GROUND_NIGHT = "#0a0603", GROUND_DAY = "#afa488";
 // Zieht den Bodenton zusätzlich Richtung Reifweiß, wenn `surface.t2m` <= 0 °C
 // ist -- keine neue Datenquelle nötig, das Feld liegt in `grid.surface`
 // ohnehin schon für die T/Taupunkt-Zeile bereit. Für Drohnenpiloten ist eine
