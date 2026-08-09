@@ -874,6 +874,128 @@ Kontur-Fläche wie bei Vereisung (`drawHazardArea()`, 7.6-Muster), Symbol
   TI, GTG) verwenden zusätzlich Deformation und weitere Terme; hier bislang
   nicht nachgebildet.
 
+### 7.8 Path-Modus (Wegpunkte statt fester Ort)
+
+**Status:** Grundgerüst gebaut (2026-08), aber **noch an keine UI angebunden**
+— weder in droneforecast selbst noch anderswo. Reine Vorbereitung dafür, dass
+GRAMET perspektivisch als eigenständige Web-Komponente auch außerhalb dieser
+App eingebettet werden kann (u. a. in der Schwester-App `trajectories`, die
+dieselbe private Modell-Instanz nutzt wie `API_BASE` in
+[config.js](src/config.js)) und dort statt „Ort über Zeit" auch „Wetter
+entlang eines Flugpfads" zeigt. Motiviert die restlichen Abschnitte 7.1–7.7
+(Isolinien, Hazards, Rendering) NICHT zu verzweigen, sondern eine zweite,
+gleichwertige Art zu bauen, wie eine Gitterspalte entsteht.
+
+**Datenmodell:** `grid.pos` (Float64Array) trägt jetzt den X-Achsen-
+Positionswert, getrennt von `grid.times` (bleibt immer echte Unix-Sekunden).
+Im Ort/Zeit-Modus ist `pos[i] === times[i]` (bytegleich, keine
+Verhaltensänderung an 7.1–7.7). Im Path-Modus ist `pos[i]` die seit dem ersten
+Wegpunkt verstrichene Sekundenzahl (`path.js` `posOfPath()`), während
+`times[i]` weiterhin die echte Ankunftszeit an diesem Wegpunkt bleibt — nötig,
+weil die Tag/Nacht-Berechnung (`derive.js` `daylight()`, `astro.js`
+`sunAltitude()`) echte Zeit UND jetzt auch echten Ort braucht: `grid.lat[i]`/
+`grid.lon[i]` (Ort/Zeit-Modus: konstant; Path-Modus: pro Spalte). `grid.meta.mode`
+(`"point"`|`"path"`) schaltet die wenigen Stellen um, die sich zwischen den
+Modi unterscheiden (Achsenbeschriftung, Stop-Marker, s. u.).
+
+**Fetch-Layer** ([src/gramet/path.js](src/gramet/path.js)),
+`fetchGridForPath(waypoints, modelKey, forecastDays, fetchImpl)` mit
+`waypoints: {lat,lon,t}[]` (dicht, z. B. aus einer Trajektorienberechnung).
+Holt pro (sub-gesampeltem) Wegpunkt eine VOLLE Säule wie am Operationspunkt
+([column.js](src/column.js) `fetchColumn()`) — bewusst NICHT die pro
+Zielhöhe interpolierten Punktwerte einer Trajektorienberechnung (in
+`trajectories/windfield.js` liefert `windAt()` nur einen Höhenpunkt je
+Anfrage), weil GRAMET das GANZE Vertikalprofil je Spalte braucht, nicht nur
+die Flughöhe.
+
+Zwei Abbruchgründe, beide als `{ lat, lon, index, reason }` in `pathStop`
+zurückgegeben statt eines Crashs oder eines stillen Abschneidens:
+- **Bbox-Verlassen** ("Rand des Modellgebiets erreicht") — geprüft VOR dem
+  Fetch, weil `fetchColumn` `cell_selection: "nearest"` nutzt: ein Punkt
+  außerhalb der Bbox bekäme sonst KEINEN Fehler, sondern still die
+  nächstgelegene Zelle unter falschem Label zurück. Dieselbe Prüfung/Meldung
+  wie [windfield.js](src/windfield.js) `WindField.inBBox()`.
+- **Keine Modelldaten trotz Lage innerhalb der Bbox** ("Keine Modelldaten an
+  diesem Punkt") — realer, mit echten Koordinaten nachgewiesener Fall, kein
+  hypothetischer Randfall: `MODELS[key].bbox` ([config.js](src/config.js))
+  ist nur eine rechteckige Näherung, das tatsächliche Modellgebiet (ICON-D2)
+  ist kleiner/unregelmäßig geschnitten. Beispiel: lat 43,63°/lon 10,0° liegt
+  numerisch innerhalb der ICON-D2-Bbox (`latMin: 43.18`), liefert aber eine
+  leere Zeitreihe (`col.time.length === 0`) zurück. Geprüft NACH jedem Fetch.
+
+`selectWaypointsToFetch()` — **Platzhalter-Policy**: feste Obergrenze
+(12 Spalten), gleichmäßig über die dichte Wegpunktliste verteilt. Die
+eigentlich vorgesehene Policy (Sampling-Dichte an der Modellauflösung
+ausrichten — räumlich UND zeitlich —, statt mehr Spalten zu holen, als das
+Modell an tatsächlich neuen Werten hergibt) ist bewusst noch nicht gebaut;
+diese eine Funktion ist der einzige Ort, der sich dafür später ändern muss.
+
+`posOfPath(waypoints)` separat exportiert, damit ein späteres Terrain-Profil
+(s. u.) dieselbe Positionsberechnung wiederverwendet, statt unabhängig davon
+zu driften.
+
+**Oberflächenwerte pro Wegpunkt** (nachgerüstet): `fetchGridForPath` ruft pro
+akzeptiertem Wegpunkt zusätzlich zur Säule auch `fetchSurface()`
+([weather.js](src/weather.js)) auf — parallel zum Säulen-Fetch (`Promise.all`,
+zwei getrennte Instanzen, s. `column.js` vs. `SURFACE_API_BASE` in
+[config.js](src/config.js)), nicht sequentiell. Die Zahlen-/Wetter-Zeilen
+(Böen, Sicht, SLP, METAR-Wettercode, Niederschlag) sind damit im Path-Modus
+genauso befüllt wie im Ort/Zeit-Modus. Ein Fehlschlag von `fetchSurface`
+bricht den Pfad NICHT ab (`.catch(() => null)`) — nur die ergänzenden Zeilen
+bleiben für den betroffenen Wegpunkt leer (NaN, s. `grid.js`
+`buildSurfaceFromWaypoints()`), anders als ein Fehlschlag der Säule selbst,
+ohne die es für diese Spalte gar kein Höhenprofil gäbe.
+
+**Grid-Assemblierung** ([src/gramet/grid.js](src/gramet/grid.js)):
+`gridFromWaypoints(waypointColumns)` ist die Geschwisterfunktion zu
+`gridFromColumn()` — baut dieselbe Gitterform (s. 7.1), aber jede Spalte aus
+einer EIGENEN Säule an einem EIGENEN Ort/Zeitpunkt statt einer gemeinsamen
+Säule über eine gemeinsame Zeitreihe. Nimmt EIN Modell für den gesamten Pfad
+an (`nk` konstant über alle Wegpunkte) — ein Modellwechsel mitten im Pfad ist
+nicht vorgesehen, der Pfad stoppt stattdessen am Bbox-Rand (s. o.).
+`sliceColumnAtTime()` ([column.js](src/column.js)) reduziert eine
+Mehrtages-Säule auf einen Levelquerschnitt zur nächstgelegenen Modellstunde —
+**Rundung, keine echte Zeitinterpolation** (v1, gleiches Muster wie
+`buildSurface()`s `nearestIndex`-Abgleich in 7.1).
+
+**Rendering** ([src/gramet/render.js](src/gramet/render.js)):
+- **Eigener `ResizeObserver`** statt des bisherigen globalen
+  `window.resize`-Listeners in `app.js` — unabhängig vom Path-Modus wertvoll,
+  Voraussetzung dafür, dass ein eingebettetes GRAMET auch auf
+  Container-Größenänderungen reagiert, die das Browserfenster selbst nicht
+  betreffen.
+- `pathGridLines()`/`drawPathAxis()` — Achsen-Ticks bei runden `pos`-Werten
+  (`niceTicks()` aus [crosssection.js](src/crosssection.js)), Beschriftung
+  als verstrichene Zeit ("+45 min", "+2:15 h") statt Kalenderdatum. Aktiv nur
+  bei `grid.meta.mode === "path"`; Ort/Zeit-Modus läuft weiterhin über
+  `timeGridLines()`/`drawTimeAxis()`, unverändert.
+- `drawPathStopMarker()` — gestrichelte rote Markierung + Label am rechten
+  Chartrand, wenn `state.pathStop` gesetzt ist (kommt aus `fetchGridForPath`s
+  Rückgabe, muss vom Aufrufer durchgereicht werden).
+
+**Testen ohne UI-Anbindung:** [debug/gramet-path.html](debug/gramet-path.html)
++ `.js` — eigenständige Dev-Seite (nicht Teil des Produktionsbuilds), zwei
+Buttons (Pfad im Modellgebiet / Pfad verlässt die Bbox), baut synthetische
+Wegpunkte per Großkreis-Näherung und ruft `fetchGridForPath` + `renderGramet`
+direkt auf, ganz ohne `app.js`/`state`. `npm run dev` → `/debug/gramet-path.html`.
+
+**Bewusst zurückgestellt: Terrain-Profil.** Noch nicht umgesetzt. Geplant:
+[Mapterhorn](https://github.com/mapterhorn/mapterhorn)-Terrain-Kacheln
+(Terrarium-kodiertes WebP, `https://tiles.mapterhorn.com/{z}/{x}/{y}.webp`,
+Decodeformel `elevation = R·256 + G + B/256 − 32768`), weltweit 30 m
+Copernicus GLO-30, regional feiner (z. B. Schweiz swissALTI3D 0,5 m — die
+Auflösung ist damit NICHT einheitlich und sollte im UI erkennbar bleiben,
+statt eine überall gleiche Präzision zu suggerieren). Keine fertige
+Punkt-Elevation-API — die zuständige Kachel muss selbst geholt und der Pixel
+dekodiert werden. Attribution je Region nötig (mapterhorn.com/attribution),
+keine dokumentierten Rate-Limits, aber auch kein SLA → clientseitig cachen.
+Geplante Anbindung: eigenes `src/gramet/terrain.js`, entlang des Pfads
+DICHTER gesampelt als die (spärlicheren) Wetter-Spalten, eigener schmaler
+Streifen unterhalb des Hauptpanels — NICHT der bestehende `GROUND_H`-Streifen
+(`drawGround()`, bleibt unverändert die flache Frost-/Tag-Nacht-Anzeige,
+s. 7.1-Umfeld), `posOfPath()` wiederverwendet für dieselbe X-Achse wie die
+Wetter-Spalten.
+
 ---
 
 ## Bekannte Näherungen — Kurzübersicht
@@ -898,3 +1020,4 @@ vereinfachende Annahme steckt:
 | GRAMET Niederschlags-Fallback-Obergrenze (7.4) | 2000 m, grobe Annahme für flachen Niesel-/Sprühregen ohne erkannte Wolkenspur |
 | GRAMET Vereisung (7.6) | `f_T`-Fenster und IPI-Kategorie-Schwellen (0,15/0,30/0,45) unkalibriert; `cloudFrac` statt eigener LWC-Größe |
 | GRAMET Turbulenz (7.7) | `Ri`/Scher-Gate-Schwellen (0,25/1,0 bzw. 0,02/0,05 s⁻¹), Windstärke-Gate (5/10 m/s) und TFI-Kategorie-Schwellen (0,15/0,30/0,60) unkalibriert; sieht KEINE feuchte/konvektive Instabilität (nur trockenes `θ`); Onset-Kriterium weiterhin ohne echte Intensitätsskalierung, s. 7.7 |
+| GRAMET Path-Modus (7.8) | Noch nicht an eine UI angebunden; Sampling-Policy fest (12 Spalten, kein Bezug zur Modellauflösung); `sliceColumnAtTime` rundet auf die nächste Modellstunde statt zu interpolieren; Terrain-Profil geplant, noch nicht gebaut |

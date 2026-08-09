@@ -307,6 +307,51 @@ Vorhersage als spätere Ergänzung, nicht als Vorstufe nötig.
 
 ---
 
+## GRAMET als Web-Komponente (Ort/Zeit + Flugpfad)
+
+**Status:** Grundgerüst für den Path-Modus gebaut, s. METHODIK.md 7.8 ·
+**Motivation:** GRAMET ist inzwischen gut genug, um es auch außerhalb von
+droneforecast einzubetten — als eigenständige Web-Komponente, die entweder
+„Ort über Zeit" (wie heute) oder „Wetter entlang eines Flugpfads" zeigt, damit
+z. B. die Schwester-App `trajectories` (nutzt dieselbe private Modell-Instanz,
+s. `API_BASE` in [config.js](src/config.js)) sie für ihre berechneten
+Trajektorien einsetzen kann.
+
+**Bewusst begrenzter Umfang dieser Iteration:** nur Vorbereitung INNERHALB von
+droneforecast — kein Custom-Element-Wrapper, keine Paket-Extraktion, keine
+Änderungen an `trajectories`. Details/Datenmodell in METHODIK.md 7.8; hier nur
+der Backlog-Blick, was als Nächstes drankäme:
+
+**Gebaut (nachgerüstet):** Oberflächenwerte pro Wegpunkt — `path.js` ruft
+jetzt parallel zur Säule auch `fetchSurface()` je Wegpunkt auf, Böen/Sicht/
+SLP/Wettercode sind im Path-Modus damit genauso befüllt wie im Ort/Zeit-Modus,
+s. METHODIK.md 7.8.
+
+- **Web-Component-Wrapper:** `renderGramet(host, grid, view, state)` nimmt
+  bereits einen Host-Container statt fest ins droneforecast-DOM zu greifen —
+  gute Ausgangsbasis. Offen: eigenes npm-Paket vs. Git-Submodule vs. Copy für
+  die tatsächliche Verteilung an `trajectories`, Shadow-DOM-Kapselung fürs
+  Styling, Custom-Element-Boilerplate (`<gramet-chart>` o. Ä.).
+- **Sampling-Policy für Wegpunkte:** aktuell fester Platzhalter
+  (`path.js` `selectWaypointsToFetch()`, 12 Spalten gleichmäßig verteilt).
+  Eigentlich vorgesehen: Dichte an der Modellauflösung ausrichten (räumlich
+  UND zeitlich) statt an einer festen Zahl — s. METHODIK.md 7.8.
+- **Terrain-Profil (Mapterhorn):** bewusst zurückgestellt, kompletter Recherche-
+  und Umsetzungsplan in METHODIK.md 7.8 — Terrarium-kodierte Kacheln
+  (`tiles.mapterhorn.com`), regional stark unterschiedliche Auflösung
+  (30 m global bis 0,5 m regional), eigenes `src/gramet/terrain.js` geplant.
+- **Gemeinsame Datenschicht mit `trajectories`:** `config.js` (`API_BASE`,
+  `MODELS` inkl. Bbox) ist zwischen droneforecast und `trajectories` bereits
+  identisch dupliziert — sollte langfristig EIN gemeinsames Modul werden,
+  sobald die tatsächliche Extraktion ansteht (bewusst nicht Teil dieser
+  Iteration, s. o.).
+- **Datenquelle bei Einbettung:** GRAMET fetcht weiterhin selbst von der
+  privaten Modell-Instanz (Entscheidung: kein reiner Renderer, der nur fertige
+  Daten entgegennimmt) — das reicht, solange alle einbettenden Apps dieselbe
+  Instanz mit Erlaubnis nutzen dürfen, wie aktuell der Fall.
+
+---
+
 ## Weitere Ideen (Kurzliste)
 
 - **Wind-Höhenwahl im Meteogramm:** optionaler Selektor (z. B. 10 m / 50 /

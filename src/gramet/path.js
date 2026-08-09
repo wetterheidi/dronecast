@@ -8,6 +8,7 @@
 
 import { MODELS } from "../config.js";
 import { fetchColumn } from "../column.js";
+import { fetchSurface } from "../weather.js";
 import { gridFromWaypoints } from "./grid.js";
 import { deriveView } from "./derive.js";
 
@@ -87,12 +88,23 @@ export async function fetchGridForPath(waypoints, modelKey, forecastDays, fetchI
       pathStop = { lat: wp.lat, lon: wp.lon, index: i, reason: BBOX_STOP_REASON };
       break;
     }
-    const col = await fetchColumn(wp.lat, wp.lon, modelKey, forecastDays, fetchImpl);
+    // Säule (Modell-Level, `column.js`, private Instanz) und Oberflächenwerte
+    // (`weather.js`, öffentliche Instanz, s. `SURFACE_API_BASE` in config.js)
+    // sind zwei getrennte Requests an zwei getrennte Instanzen -- parallel,
+    // weil keins vom Ergebnis des anderen abhängt. Ein Ausfall der
+    // Oberflächenwerte bricht den Pfad NICHT ab (nur die ergänzenden
+    // Zahlen-/Wetter-Zeilen bleiben dann für diesen Wegpunkt leer, s.
+    // `grid.js` `buildSurfaceFromWaypoints`) -- anders als die Säule, ohne
+    // die es für diese Spalte gar kein Höhenprofil gäbe.
+    const [col, surface] = await Promise.all([
+      fetchColumn(wp.lat, wp.lon, modelKey, forecastDays, fetchImpl),
+      fetchSurface(wp.lat, wp.lon, modelKey, forecastDays, fetchImpl).catch(() => null),
+    ]);
     if (!col.time.length) {
       pathStop = { lat: wp.lat, lon: wp.lon, index: i, reason: NO_DATA_STOP_REASON };
       break;
     }
-    waypointColumns.push({ lat: wp.lat, lon: wp.lon, t: wp.t, pos: pos[i], col });
+    waypointColumns.push({ lat: wp.lat, lon: wp.lon, t: wp.t, pos: pos[i], col, surface });
   }
 
   if (waypointColumns.length < 2) {
