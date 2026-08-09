@@ -1010,22 +1010,131 @@ Buttons (Pfad im Modellgebiet / Pfad verlässt die Bbox), baut synthetische
 Wegpunkte per Großkreis-Näherung und ruft `fetchGridForPath` + `renderGramet`
 direkt auf, ganz ohne `app.js`/`state`. `npm run dev` → `/debug/gramet-path.html`.
 
-**Bewusst zurückgestellt: Terrain-Profil.** Noch nicht umgesetzt. Geplant:
-[Mapterhorn](https://github.com/mapterhorn/mapterhorn)-Terrain-Kacheln
-(Terrarium-kodiertes WebP, `https://tiles.mapterhorn.com/{z}/{x}/{y}.webp`,
-Decodeformel `elevation = R·256 + G + B/256 − 32768`), weltweit 30 m
-Copernicus GLO-30, regional feiner (z. B. Schweiz swissALTI3D 0,5 m — die
-Auflösung ist damit NICHT einheitlich und sollte im UI erkennbar bleiben,
-statt eine überall gleiche Präzision zu suggerieren). Keine fertige
-Punkt-Elevation-API — die zuständige Kachel muss selbst geholt und der Pixel
-dekodiert werden. Attribution je Region nötig (mapterhorn.com/attribution),
-keine dokumentierten Rate-Limits, aber auch kein SLA → clientseitig cachen.
-Geplante Anbindung: eigenes `src/gramet/terrain.js`, entlang des Pfads
-DICHTER gesampelt als die (spärlicheren) Wetter-Spalten, eigener schmaler
-Streifen unterhalb des Hauptpanels — NICHT der bestehende `GROUND_H`-Streifen
-(`drawGround()`, bleibt unverändert die flache Frost-/Tag-Nacht-Anzeige,
-s. 7.1-Umfeld), `posOfPath()` wiederverwendet für dieselbe X-Achse wie die
-Wetter-Spalten.
+### 7.9 Terrain-Profil (Mapterhorn)
+
+Echtes, deutlich feiner aufgelöstes Gelände entlang des Flugpfads über
+[Mapterhorn](https://github.com/mapterhorn/mapterhorn)-Terrain-Kacheln —
+unabhängig vom Wettermodell (eigene Datei, kein Bezug zu Wetterdaten), aber
+verzahnt mit der Haupttafel (Untergrund-Maskierung, AGL-Deckellinie), nicht
+nur als Bild im Streifen.
+
+**Kachelquelle & Decode** ([src/gramet/terrain.js](src/gramet/terrain.js)):
+`https://tiles.mapterhorn.com/{z}/{x}/{y}.webp`, Terrarium-kodiert, **512×512
+px** (offiziell bestätigt in der Mapterhorn-Migrationsanleitung, nicht die
+sonst üblichen 256). Decodeformel `elevation = R·256 + G + B/256 − 32768`,
+einmal pro Kachel in ein `Float32Array` decodiert (WebP-Blob →
+`createImageBitmap` → Offscreen-Canvas → `getImageData`). Fester
+`TERRAIN_ZOOM = 12` (leicht änderbar) — globale Abdeckung bereits ab Zoom
+0-12 über eine einzige "planet"-Kachelquelle, regional feiner (z13-17, z. B.
+Schweiz) nur für ausgewählte Gebiete; z12 ist weltweit ohne Kachel-Loch-Risiko
+verfügbar und mit wenigen Metern/Pixel deutlich feiner als das
+Wettermodellgitter (~2 km) — die Auflösung ist trotzdem NICHT einheitlich
+(regionale Quellen 1 m Österreich bis 20 m Lettland, s. Attribution).
+
+**Zwei-Ebenen-Cache**: In-Memory (`Map` in `terrain.js`, bereits dekodierte
+Höhenraster, session-lang) vor IndexedDB
+([src/gramet/terrainTileCache.js](src/gramet/terrainTileCache.js), rohe
+WebP-Bytes, persistent über Sessions hinweg — Gelände ändert sich praktisch
+nie, deshalb kein TTL wie bei den stündlichen Wettermodell-Läufen). Fliegt
+man wiederholt in derselben Gegend, entfällt der Netzwerk-Fetch komplett.
+
+**Fehlerbehandlung**: eine nicht ladbare Kachel wirft nicht, sondern liefert
+`null` (`getTerrainTile`) bzw. `NaN` im Höhenprofil, gesammelt als
+zusammenhängende `gaps: [{fromPos, toPos}]`. Anders als der Wetter-Bbox-Stop
+(unabhängige Fehlerquelle) bricht das den Pfad NICHT ab — der betroffene
+Abschnitt bleibt im Streifen grau mit Hinweistext "Geländedaten fehlen"
+(`drawTerrainGapFill`, [src/gramet/render.js](src/gramet/render.js)),
+Untergrund-Maskierung/Deckellinie lassen Lücken ebenfalls aus (lieber nichts
+behaupten als falsch maskieren).
+
+**Sampling**: `fetchTerrainProfile(waypoints, opts)` verdichtet die
+`waypoints`-Liste zunächst per `densifyWaypoints()` auf eine feste, vom
+Aufrufer UNABHÄNGIGE Kadenz (`opts.terrainIntervalSec`, Default
+`DEFAULT_TERRAIN_INTERVAL_SEC = 60` — "etwa minütlich", lineare Lat/Lon/Zeit-
+Zwischenpunkte zwischen den echten Wegpunkten reichen für die Sampling-
+Auflösung). Läuft über diese verdichtete Liste, nicht über die sparsame
+Wetter-Fetch-Policy aus 7.8 — Gelände hat nichts mit der Modellauflösung ODER
+der (evtl. gröberen) Wegpunktdichte des Aufrufers zu tun. `posOfPath()`
+wiederverwendet für dieselbe X-Achse wie die Wetter-Spalten. Wird parallel
+zur Wetterschleife angestoßen (`path.js` `fetchGridForPath`, `opts.terrain:
+true`) und danach auf den tatsächlich genutzten `pos`-Bereich zugeschnitten
+(`trimTerrainToChart`) — Gelände jenseits eines Wetter-Bbox-/No-Data-Stops
+hat im Chart keinen Platz mehr.
+
+**AMSL-Achse im Path-Modus — die zentrale Entscheidung**: der Path-Modus
+plottet die Haupttafel seit dem Umbau in **AMSL** mit der
+**Modell-Orographie als Silhouette direkt im Diagramm** (Ogimet-Konvention),
+der Ort/Zeit-Modus bleibt bei AGL. Vorausgegangen war eine
+geländefolgende AGL-Variante (Modell-Boden = flache Chart-Unterkante,
+Mapterhorn als Maske in "Modell-AGL" umgerechnet) — technisch konsistent,
+aber als Darstellung unintuitiv (s. Feedback mit Ogimet-Vergleich): auf der
+AGL-Achse „wellte" jede horizontal durchgehende Struktur (Isotherme,
+Wolkendecke auf konstantem AMSL-Niveau) gegenläufig zum Gelände.
+
+Umgesetzt als **reine Render-Projektion** ([src/gramet/render.js](src/gramet/render.js),
+`amslGrid()`/`amslViewOf()`): `grid.z` und ALLES in `derive.js`/`hazards/`
+bleibt AGL relativ zur Modell-Orographie — die Physik-Heuristiken
+(Nebel-Tops, Wolkenbasis, Tropopausensuche ab 5000 m AGL, …) hängen an
+dieser Bedeutung, und Abschnitt 5b erklärt, warum eine Umreferenzierung der
+DATEN aufs echte Gelände physikalisch falsch wäre. Erst der Renderer
+verschiebt die Geometrie spaltenweise um `grid.elevation[i]` (WeakMap-Cache,
+weil `texture.js` seine Wolkentextur am Grid-Objekt cached). Konsequenzen:
+- Höhenachse im Path-Modus mit „AMSL"-Tag beschriftet, Default **linear**
+  statt log (der log-Nullpunkt läge auf Meereshöhe, nicht am Boden);
+  `zMin`/`zMax` sind im Path-Modus AMSL-Werte.
+- Bodennahe Schleier folgen dem Gelände: der FG/BR/HZ-Schleier (10–400 m
+  ÜBER GRUND) wird im Path-Modus als Streifenfolge mit je eigenem
+  Vertikalverlauf maskiert (`drawFogHaze` mit `groundAt`), der
+  Niederschlagsvorhang endet am lokalen Modell-Boden statt an der
+  Panelunterkante.
+- Hover zeigt beide Referenzen („Höhe X AMSL · Y über Modellgrund") und
+  meldet unterhalb des Modell-Bodens ehrlich „unter Modell-Grund" statt
+  Werte zu extrapolieren.
+
+**Rendering** — Gelände jetzt IN der Haupttafel, kein separater Streifen
+mehr (der `GROUND_H`-Bodenstreifen bleibt nur im Ort/Zeit-Modus):
+- `drawModelTerrain()` zeichnet die Modell-Orographie (`grid.elevation`) als
+  gefüllte Silhouette von der Chart-Unterkante — genau der Boden, auf dem
+  die Wetterdaten stehen, Wolken/Vorhänge/Level schließen also
+  konstruktionsbedingt sauber an. Eingefärbt mit demselben
+  Tag/Nacht-+Frost-Verlauf wie der Punkt-Modus-Boden (`groundGradient()`),
+  gezeichnet NACH allen Inhaltslayern (ein Fill deckt alle Überstände ab).
+- `drawRealTerrainOverlay()` blendet das ECHTE Gelände (Mapterhorn,
+  `state.terrain`, Toggle `layerToggles.terrain`) als halbtransparente
+  Fläche + gestrichelte Kontur ÜBER die Modell-Silhouette — AMSL auf AMSL,
+  keine Umrechnung mehr nötig. Zweck ist der VERGLEICH: wo real über Modell
+  liegt (unaufgelöster Gipfel, Zugspitze −500 m, s. 5b), steht
+  durchscheinender Fels im „Modell-Himmel"; in Tälern (real unter Modell)
+  läuft die gestrichelte Linie sichtbar durch die Modell-Silhouette.
+  Kachel-Lücken (NaN) bleiben ausgespart.
+- `drawCeiling()` zeichnet `state.maxHeightM` (m AGL über Grund, aus
+  `settings.maxHeight`) als terrainfolgende Deckellinie — sie folgt dem
+  ECHTEN Gelände, wenn es eingeblendet ist (die 120-m-Regel zählt über
+  realem Grund), sonst der Modell-Orographie als bester Näherung. Gleiche
+  Optik wie `crosssection.js` `flightLine`.
+- Kontaktschatten-Linie der Silhouette als weißer Halo + dunkle Linie
+  (`strokeTerrainEdge()`) statt einfacher halbtransparenter Schwarz-Linie —
+  eine reine Schwarz-auf-Schwarz-Linie wäre nachts unsichtbar, da Boden-
+  (`GROUND_NIGHT`) und Himmelfarbe (`NIGHT_COLOR`) beide fast schwarz sind
+  (s. Feedback); der Halo hält den Kontrast unabhängig von der
+  Tag/Nacht-Einfärbung. Die Mapterhorn-Kontur ist zur Unterscheidung
+  gestrichelt.
+
+**Attribution**: keine vorgeschriebene Kurzformel — `mapterhorn.com/attribution`
+bündelt über 130 regionale Quellen mit je eigenem Producer/Lizenz. Ein
+klickbarer DOM-Link (`TERRAIN_ATTRIBUTION`, kein Canvas-Text — muss klickbar
+sein) unter dem Chart verweist auf die volle Liste, statt sie inline
+aufzuzählen.
+
+**CORS**: stichprobenartig geprüft — `access-control-allow-origin: *` auf den
+Kachel-Responses (Cloudflare R2/Workers als Infra-Sponsor), Canvas-Decode
+im Browser sollte also nicht an einem "tainted canvas"-Fehler scheitern;
+in dieser Umgebung ohne Browser-Tool nur per `curl`-Header verifiziert, nicht
+per echtem `getImageData()`-Aufruf.
+
+**Testen ohne UI-Anbindung**: dieselbe Dev-Seite wie 7.8
+([debug/gramet-path.html](debug/gramet-path.html)), alle drei Buttons rufen
+jetzt `{ terrain: true }` mit auf.
 
 ---
 
@@ -1051,4 +1160,5 @@ vereinfachende Annahme steckt:
 | GRAMET Niederschlags-Fallback-Obergrenze (7.4) | 2000 m, grobe Annahme für flachen Niesel-/Sprühregen ohne erkannte Wolkenspur |
 | GRAMET Vereisung (7.6) | `f_T`-Fenster und IPI-Kategorie-Schwellen (0,15/0,30/0,45) unkalibriert; `cloudFrac` statt eigener LWC-Größe |
 | GRAMET Turbulenz (7.7) | `Ri`/Scher-Gate-Schwellen (0,25/1,0 bzw. 0,02/0,05 s⁻¹), Windstärke-Gate (5/10 m/s) und TFI-Kategorie-Schwellen (0,15/0,30/0,60) unkalibriert; sieht KEINE feuchte/konvektive Instabilität (nur trockenes `θ`); Onset-Kriterium weiterhin ohne echte Intensitätsskalierung, s. 7.7 |
-| GRAMET Path-Modus (7.8) | Noch nicht an eine UI angebunden; Resampling interpoliert Oberflächenwerte NICHT (nächster Wegpunkt statt Interpolation, bewusst); Terrain-Profil geplant, noch nicht gebaut |
+| GRAMET Path-Modus (7.8) | Noch nicht an eine UI angebunden; Resampling interpoliert Oberflächenwerte NICHT (nächster Wegpunkt statt Interpolation, bewusst) |
+| GRAMET Terrain-Profil (7.9) | Fester Zoom 12 (kein regionales Feindetail z13-17); Geländesampling per linearer Zwischenpunkte verdichtet (≈ minütlich), keine echte Kurvenfolgung zwischen Wegpunkten; AMSL-Projektion verschiebt nur die Render-Geometrie, die Wetterwerte bleiben relativ zur Modell-Orographie (5b) — das Mapterhorn-Overlay visualisiert die Modell/Real-Differenz, korrigiert sie nicht; Modell-Orographie zwischen den (sparsamen) Wetterspalten nur linear interpoliert; CORS nur per `curl` geprüft, nicht im echten Browser |

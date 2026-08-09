@@ -2,9 +2,15 @@
  * GRAMET-Meteogramm — Canvas-Renderer (anders als die SVG-Cross-Section:
  * Wolkenschraffur mit vielen Einzelstrichen ist auf Canvas günstiger).
  * Einstieg: `renderGramet(host, grid, view, state)`, `state = { zMin, zMax,
- * axis: "log"|"lin", activeRows, layerToggles }`. Höhenumschalter (axis/
- * zMin/zMax) folgt demselben State/Mechanismus wie `crosssection.js`
- * (`settings.xsZoom`) — dieselbe Umschaltfläche bedient beide Ansichten.
+ * axis: "log"|"lin", activeRows, layerToggles, pathStop, terrain, maxHeightM }`.
+ * Höhenumschalter (axis/zMin/zMax) folgt demselben State/Mechanismus wie
+ * `crosssection.js` (`settings.xsZoom`) — dieselbe Umschaltfläche bedient
+ * beide Ansichten. `terrain`/`maxHeightM` sind nur im Path-Modus wirksam.
+ *
+ * HÖHENREFERENZ: Punkt-Modus plottet AGL (wie bisher), der PATH-Modus plottet
+ * AMSL mit der Modell-Orographie als Silhouette in der Haupttafel (Ogimet-
+ * Konvention) — s. Kommentar an `amslGrid()`/`drawModelTerrain()`. `zMin`/
+ * `zMax` sind im Path-Modus entsprechend AMSL-Werte.
  *
  * Vereinfachung ggü. Plan: kein Offscreen-Cache für die Wolkentextur und kein
  * separates Overlay-Canvas fürs Hover-Fadenkreuz — jede State-Änderung baut
@@ -25,6 +31,7 @@ import { CHART_PX_PER_HOUR } from "../windbarb.js";
 import { fmtHeight, fmtWind, fmtTemp, fmtDir, windUnit, windToDisplay, tempUnit, tempToDisplay } from "../units.js";
 import { metarWeather } from "../briefing.js";
 import * as fog from "./hazards/fog.js";
+import { TERRAIN_ATTRIBUTION } from "./terrain.js";
 
 const INK = "#0b0b0b", MUTED = "#52514e", GRID = "#d9d8d3";
 // Rechter Rand: Platz für die Beschriftungskästchen der Isothermen/Isotachen/
@@ -40,13 +47,16 @@ const PANEL_BG = "#fcfcfb";
 // Wolkenschraffur verschwinden) -- näher am Original-GRAMET-Kontrast.
 const NIGHT_COLOR = "#050b1e", DAY_COLOR = "#2b5c93";
 
-// Bodenstreifen unter dem Hauptpanel. GRAMET ist eine reine Punktprognose
-// (ein Ort über die Zeit, nicht eine Route über den Raum) -- ein Geländeprofil
-// wie im Cross-Section-Chart ergibt hier keinen Sinn, die Höhe des einen
+// Bodenstreifen unter dem Hauptpanel. Nur im PUNKT-Modus: GRAMET ist dort
+// eine reine Punktprognose (ein Ort über die Zeit, nicht eine Route über den
+// Raum) -- ein Geländeprofil ergibt dort keinen Sinn, die Höhe des einen
 // Punkts ändert sich ja nicht. Statt einer Silhouette also ein schmaler,
 // horizontaler Streifen im ohnehin leeren GAP zwischen Hauptpanel und
 // Zahlenzeilen -- reine Bodenkontakt-Anzeige, kein Höhenprofil, verdrängt
-// darum auch keine echten Daten (s. Feedback).
+// darum auch keine echten Daten (s. Feedback). Der PATH-Modus hat KEINEN
+// Streifen mehr: das Gelände (Modell-Orographie) sitzt dort als Silhouette
+// direkt in der Haupttafel (`drawModelTerrain`, AMSL-Achse -- Ogimet-
+// Konvention, s. Feedback/Diskussion).
 const GROUND_H = 14;
 // Folgt derselben Tag/Nacht-Kurve wie der Himmel (`view.daylight`), damit
 // Boden und Himmel zur selben Stunde gemeinsam dunkeln/hellen. Deutlich
@@ -172,10 +182,44 @@ export function renderGramet(host, grid, view, state = {}) {
     if (!times || times.length < 2) { host.textContent = "Keine Gitterdaten."; return null; }
 
     const activeRows = (state.activeRows ?? DEFAULT_ROWS).filter((id) => ROW_DEFS[id]);
-    const lin = state.axis === "lin";
-    const hMinData = Math.max(10, grid.z[0] || 10);
-    const hMaxData = grid.z[nk - 1];
+    const isPath = grid.meta.mode === "path";
+    // Path-Modus: AMSL-Projektion NUR fürs Rendering (`grid.z`/`view` bleiben
+    // AGL, s. Kommentar an `amslGrid`) -- alle Zeichenfunktionen unten arbeiten
+    // auf `rgrid`/`rview`, die Physik/Heuristik-Seite (maskFog, Hover-Sampling)
+    // weiter auf dem originalen `grid`.
+    const rgrid = isPath ? amslGrid(grid) : grid;
+    const rview = isPath ? amslViewOf(view, grid) : view;
+    // Modell-Orographie als Funktion der Pfadposition -- Anker für alles, was
+    // "über Grund" gemeint ist (Nebelschleier, Niederschlags-Bodenkontakt).
+    const groundAt = isPath ? (p) => interpAt(grid.pos, grid.elevation, p) : null;
+    // Log-Achse ergibt auf AMSL wenig Sinn (der log-Nullpunkt läge auf
+    // Meereshöhe, nicht am Boden) -- Path-Modus default daher linear wie das
+    // Ogimet-Original; ein explizites `state.axis` gewinnt weiterhin.
+    const lin = state.axis ? state.axis === "lin" : isPath;
+    let hMinData, hMaxData;
+    if (isPath) {
+      // AMSL-Spanne: tiefster Modell-Boden bis höchstes Level über allen
+      // Spalten (die Level-Oberkante variiert mit der Orographie).
+      let eMin = Infinity, topMax = -Infinity;
+      for (let i = 0; i < times.length; i++) {
+        const e = grid.elevation[i];
+        if (Number.isFinite(e) && e < eMin) eMin = e;
+        const t = rgrid.z[i * nk + nk - 1];
+        if (Number.isFinite(t) && t > topMax) topMax = t;
+      }
+      // Kleines Polster unter dem tiefsten Boden: exakt bei eMin begänne die
+      // Silhouette dort mit 0 px Höhe -- ein sichtbares Bodenband soll überall
+      // bleiben (wie im Ogimet-Original). 4 % der Datenspanne, rein optisch.
+      const span = Number.isFinite(topMax) && Number.isFinite(eMin) ? topMax - eMin : 0;
+      hMinData = Math.max(0, (Number.isFinite(eMin) ? eMin : 0) - 0.04 * span);
+      hMaxData = Number.isFinite(topMax) ? topMax : rgrid.z[nk - 1];
+    } else {
+      hMinData = Math.max(10, grid.z[0] || 10);
+      hMaxData = grid.z[nk - 1];
+    }
     const zMin = state.zMin ?? hMinData, zMax = state.zMax ?? hMaxData;
+    // Path-Modus ohne Bodenstreifen -- das Gelände sitzt in der Haupttafel.
+    const stripH = isPath ? 0 : GROUND_H;
 
     // Spannweite in `pos`-Einheiten (Point-Modus: Sekunden = `times`-Spanne,
     // Path-Modus: verstrichene Sekunden seit Pfadbeginn) -- `CHART_PX_PER_HOUR`
@@ -185,10 +229,10 @@ export function renderGramet(host, grid, view, state = {}) {
     const pw = Math.max(hours * CHART_PX_PER_HOUR, containerPw);
 
     const rowsH = activeRows.reduce((s, id) => s + ROW_DEFS[id].height, 0);
-    const mainH = Math.max(240, (host.clientHeight || 560) - TOPAX - GROUND_H - rowsH - GAP * 2 - BOT);
+    const mainH = Math.max(240, (host.clientHeight || 560) - TOPAX - stripH - rowsH - GAP * 2 - BOT);
 
     const W = M.l + pw + M.r;
-    const H = TOPAX + mainH + GROUND_H + GAP + rowsH + GAP + BOT;
+    const H = TOPAX + mainH + stripH + GAP + rowsH + GAP + BOT;
     const dpr = window.devicePixelRatio || 1;
 
     const canvas = document.createElement("canvas");
@@ -208,39 +252,41 @@ export function renderGramet(host, grid, view, state = {}) {
     const y = makeYScale(mainTop, mainBot, zMin, zMax, lin);
 
     const toggles = state.layerToggles ?? {};
-    drawBackground(ctx, grid, view, x, y, mainTop, mainBot);
+    drawBackground(ctx, rgrid, rview, x, y, mainTop, mainBot);
     // FG/BR/HZ gemeinsam als ein Schleier (s. `drawFogHaze`/`hazeColorAlpha`)
     // vor Wolken/Hazards/Niederschlag, damit die auf dem Schleier noch klar
     // lesbar bleiben statt darin zu verschwimmen -- auch VOR den Wolken, damit
     // `drawClouds()` (s. u., mit maskierter cloudFrac) innerhalb der FG-Schicht
     // nichts mehr zu zeichnen hat.
-    drawFogHaze(ctx, grid, view, x, y, mainTop, mainBot);
+    drawFogHaze(ctx, rgrid, rview, x, y, mainTop, mainBot, groundAt);
     // Zellzerlegung einmal ziehen: Schaft, Amboss und Symbol müssen auf demselben
     // Turm sitzen (s. `cbCells`).
-    const cells = toggles.cb !== false ? cbCells(grid, view.cb, x, y) : [];
+    const cells = toggles.cb !== false ? cbCells(rgrid, rview.cb, x, y) : [];
     if (toggles.cb !== false) drawCbShafts(ctx, cells, x, y);
     // FG-Zellen aus der Ellipsentextur ausblenden (s. `maskFog`) -- sonst säße
-    // die "Reiskorn"-Wolkentextur unter dem Nebelschleier.
-    if (toggles.clouds !== false) drawClouds(ctx, grid, maskFog(grid, view.cloudFrac, view.fog), x, y);
+    // die "Reiskorn"-Wolkentextur unter dem Nebelschleier. Die Maske rechnet
+    // auf dem AGL-Grid (`grid.z` vs. AGL-Nebel-Tops), gezeichnet wird auf der
+    // (im Path-Modus AMSL-) Projektion `rgrid`.
+    if (toggles.clouds !== false) drawClouds(ctx, rgrid, maskFog(grid, view.cloudFrac, view.fog), x, y);
     if (toggles.cb !== false) {
       drawCbAnvils(ctx, cells, x, y);
       drawCbGlyphs(ctx, cells);
     }
     const seed = hashSeed(`${grid.meta.lat},${grid.meta.lon},${grid.meta.elevation},${times[0]}`);
-    if (toggles.precip !== false) drawPrecip(ctx, view.precip, pos, x, y, seed);
+    if (toggles.precip !== false) drawPrecip(ctx, rview.precip, pos, x, y, seed, groundAt);
     // Vereisung/Turbulenz bewusst ÜBER Wolken/Niederschlag: beides sind Gefahren-
     // hinweise, die auf der Wolke "aufsitzen" sollen, statt darunter zu verschwinden
     // -- die Kontur-Füllung ist transparent genug (s. `drawHazardArea`), dass die
     // Wolkentextur durchscheint.
     if (toggles.hazards !== false) {
-      drawHazardArea(ctx, grid, view.hazards.icing, ICING_STYLES, x, y);
-      drawIcingSevereGlyphs(ctx, grid, view.hazards.icing, x, y);
-      drawHazardArea(ctx, grid, view.hazards.turbulence, TURB_STYLES, x, y);
-      drawTurbulenceSevereGlyphs(ctx, grid, view.hazards.turbulence, x, y);
+      drawHazardArea(ctx, rgrid, rview.hazards.icing, ICING_STYLES, x, y);
+      drawIcingSevereGlyphs(ctx, rgrid, rview.hazards.icing, x, y);
+      drawHazardArea(ctx, rgrid, rview.hazards.turbulence, TURB_STYLES, x, y);
+      drawTurbulenceSevereGlyphs(ctx, rgrid, rview.hazards.turbulence, x, y);
     }
-    if (toggles.isotherms !== false) drawIsotherms(ctx, view.isotherms, x, y);
-    if (toggles.isotachs !== false) drawIsotachs(ctx, view.isotachs, x, y);
-    if (toggles.tropopause !== false) drawTropopause(ctx, view.tropopause, x, y);
+    if (toggles.isotherms !== false) drawIsotherms(ctx, rview.isotherms, x, y);
+    if (toggles.isotachs !== false) drawIsotachs(ctx, rview.isotachs, x, y);
+    if (toggles.tropopause !== false) drawTropopause(ctx, rview.tropopause, x, y);
 
     // Windfiedern: opt-in (Default aus, s. settings.js), weil sie die ohnehin
     // volle Hauptfläche (Wolken/Hazards/Niederschlag) zusätzlich belasten --
@@ -252,21 +298,37 @@ export function renderGramet(host, grid, view, state = {}) {
     if (toggles.windbarbs) {
       ctx.fillStyle = "rgba(255,255,255,0.6)";
       ctx.fillRect(x.left, mainTop, x.right - x.left, mainBot - mainTop);
-      drawWindBarbOverlay(ctx, grid, x, y, { nRows: 14 });
+      drawWindBarbOverlay(ctx, rgrid, x, y, { nRows: 14 });
+    }
+
+    // Path-Modus: Modell-Orographie als Silhouette in der Haupttafel (Ogimet-
+    // Konvention) -- deckt ALLE bisherigen Inhaltslayer unterhalb des Modell-
+    // Bodens ab (v. a. Niederschlagsvorhang-Überstand), deshalb erst hier,
+    // nicht pro Layer einzeln geclippt. Darauf optional das ECHTE Gelände
+    // (Mapterhorn, `state.terrain`) als Vergleichs-Overlay -- macht die
+    // Modell/Real-Differenz (METHODIK 5b) sichtbar, ohne die Wetterdaten
+    // anzufassen. Die Max-Flughöhen-Linie folgt dem echten Gelände, wenn es
+    // eingeblendet ist (die 120-m-Regel zählt über REALEM Grund), sonst der
+    // Modell-Orographie.
+    const showRealTerrain = isPath && state.terrain && toggles.terrain !== false;
+    if (isPath) drawModelTerrain(ctx, grid, rview, x, y, mainBot);
+    if (showRealTerrain) drawRealTerrainOverlay(ctx, state.terrain, x, y, mainBot);
+    if (isPath && state.maxHeightM) {
+      drawCeiling(ctx, grid, showRealTerrain ? state.terrain : null, state.maxHeightM, x, y);
     }
 
     ctx.strokeStyle = MUTED; ctx.lineWidth = 1;
     ctx.strokeRect(x.left + 0.5, mainTop + 0.5, pw - 1, mainH - 1);
-    drawHeightAxis(ctx, y, zMin, zMax, x, lin);
-    if (grid.meta.mode === "path") pathGridLines(ctx, grid, x, mainTop, mainBot);
+    drawHeightAxis(ctx, y, zMin, zMax, x, lin, isPath);
+    if (isPath) pathGridLines(ctx, grid, x, mainTop, mainBot);
     else timeGridLines(ctx, times, x, mainTop, mainBot);
     // Path-Modus: sichtbares Ende, wenn der Pfad die Modell-Bbox verlassen hat
     // (s. `path.js` `fetchGridForPath`) -- kein stiller Abbruch. Point-Modus
     // übergibt `state.pathStop` nie, hier also ohne Wirkung.
     if (state.pathStop) drawPathStopMarker(ctx, x, mainTop, mainBot, state.pathStop.reason);
-    drawGround(ctx, grid, view, x, mainBot, GROUND_H);
+    if (!isPath) drawGround(ctx, grid, view, x, mainBot, stripH);
 
-    let rowTop = mainBot + GROUND_H + GAP;
+    let rowTop = mainBot + stripH + GAP;
     for (const id of activeRows) {
       const def = ROW_DEFS[id];
       ctx.save();
@@ -292,7 +354,20 @@ export function renderGramet(host, grid, view, state = {}) {
     plot.append(axis, canvas);
 
     host.append(plot);
-    setupHover(host, canvas, axis, grid, { x, y, mainTop, mainBot, view });
+    // Attribution als DOM-Link (nicht Canvas-Text -- muss klickbar sein, s.
+    // Mapterhorn-Lizenzbedingungen). Kein fester Einzelsatz möglich (die
+    // Kacheln bündeln >130 regionale Quellen mit je eigener Lizenz), deshalb
+    // Kurz-Credit mit Link auf die volle Liste statt Aufzählung inline.
+    if (showRealTerrain) {
+      const attribution = document.createElement("a");
+      attribution.href = TERRAIN_ATTRIBUTION.url;
+      attribution.target = "_blank";
+      attribution.rel = "noopener noreferrer";
+      attribution.textContent = TERRAIN_ATTRIBUTION.label;
+      attribution.style.cssText = "display:block;font:10px system-ui,sans-serif;color:#8a8a86;text-decoration:none;padding:2px 4px;";
+      host.append(attribution);
+    }
+    setupHover(host, canvas, axis, grid, { x, y, mainTop, mainBot, view, isPath });
     state.onRedraw?.(canvas);
     return canvas;
   }
@@ -482,7 +557,10 @@ function hazeColorAlpha(entry, visM, rh0) {
   return null;
 }
 
-function drawFogHaze(ctx, grid, view, x, y, top, bot) {
+// `groundAt` (nur Path-Modus, sonst null): Modell-Geländehöhe in Achsen-
+// Einheiten (AMSL) als Funktion der Pfadposition -- der Schleier ist an der
+// Höhe ÜBER GRUND festgemacht (HAZE_REF_*) und muss dem Gelände folgen.
+function drawFogHaze(ctx, grid, view, x, y, top, bot, groundAt = null) {
   const { pos, nk } = grid;
   const span = x.right - x.left, h = bot - top;
   if (span <= 0 || h <= 0 || !view.fog) return;
@@ -512,17 +590,53 @@ function drawFogHaze(ctx, grid, view, x, y, top, bot) {
   octx.fillRect(x.left, top, span, h);
 
   // Senkrecht: Form als Maske, an der tatsächlichen Höhe festgemacht (s. o.).
-  const shape = octx.createLinearGradient(0, top, 0, bot);
   const HAZE_SHAPE_STEPS = 24;
-  for (let s = 0; s <= HAZE_SHAPE_STEPS; s++) {
-    const py = top + h * s / HAZE_SHAPE_STEPS;
-    const z = y.inv(py);
-    const a = clamp(1 - (z - HAZE_REF_MIN) / (HAZE_REF_MAX - HAZE_REF_MIN), 0, 1);
-    shape.addColorStop(s / HAZE_SHAPE_STEPS, `rgba(0,0,0,${a})`);
+  if (!groundAt) {
+    // Punkt-Modus (AGL-Achse): ein Verlauf über die volle Breite reicht, der
+    // Boden liegt überall auf derselben Achsenhöhe.
+    const shape = octx.createLinearGradient(0, top, 0, bot);
+    for (let s = 0; s <= HAZE_SHAPE_STEPS; s++) {
+      const py = top + h * s / HAZE_SHAPE_STEPS;
+      const z = y.inv(py);
+      const a = clamp(1 - (z - HAZE_REF_MIN) / (HAZE_REF_MAX - HAZE_REF_MIN), 0, 1);
+      shape.addColorStop(s / HAZE_SHAPE_STEPS, `rgba(0,0,0,${a})`);
+    }
+    octx.globalCompositeOperation = "destination-in";
+    octx.fillStyle = shape;
+    octx.fillRect(x.left, top, span, h);
+  } else {
+    // Path-Modus (AMSL-Achse): die Maske muss dem Gelände folgen -- ein
+    // einzelner Vertikalverlauf kann das nicht. Stattdessen schmale Streifen
+    // mit je eigenem Verlauf in ein ZWEITES Offscreen (source-over) malen und
+    // das einmal als Ganzes per destination-in anwenden -- destination-in
+    // direkt je Streifen würde bei jedem Fill alles AUSSERHALB des Streifens
+    // löschen (Compositing wirkt canvasweit).
+    const STRIP_PX = 8;
+    const maskCanvas = document.createElement("canvas");
+    maskCanvas.width = offCanvas.width;
+    maskCanvas.height = offCanvas.height;
+    const mctx = maskCanvas.getContext("2d");
+    mctx.scale(dpr, dpr);
+    mctx.translate(-x.left, -top);
+    for (let sx = x.left; sx < x.right; sx += STRIP_PX) {
+      const w = Math.min(STRIP_PX, x.right - sx);
+      const p = pos[0] + (sx + w / 2 - x.left) / span * (pos[pos.length - 1] - pos[0]);
+      const g = groundAt(p);
+      const shape = mctx.createLinearGradient(0, top, 0, bot);
+      for (let s = 0; s <= HAZE_SHAPE_STEPS; s++) {
+        const py = top + h * s / HAZE_SHAPE_STEPS;
+        const a = clamp(1 - (y.inv(py) - g - HAZE_REF_MIN) / (HAZE_REF_MAX - HAZE_REF_MIN), 0, 1);
+        shape.addColorStop(s / HAZE_SHAPE_STEPS, `rgba(0,0,0,${a})`);
+      }
+      mctx.fillStyle = shape;
+      mctx.fillRect(sx, top, w, h);
+    }
+    octx.globalCompositeOperation = "destination-in";
+    octx.save();
+    octx.setTransform(1, 0, 0, 1, 0, 0);
+    octx.drawImage(maskCanvas, 0, 0);
+    octx.restore();
   }
-  octx.globalCompositeOperation = "destination-in";
-  octx.fillStyle = shape;
-  octx.fillRect(x.left, top, span, h);
 
   ctx.save();
   ctx.globalCompositeOperation = "screen";
@@ -584,7 +698,11 @@ function maskFog(grid, cloudFrac, fogCols) {
 // an oder unter dem Gefrierpunkt liegt -- linear ausgereizt bis -5 °C, damit ein
 // Streifen mit nur -0.5 °C nicht schon voll bereift wirkt.
 const GROUND_FROST_SPAN = 5;
-function drawGround(ctx, grid, view, x, top, h) {
+
+// Horizontaler Tag/Nacht-+Frost-Verlauf des Bodens -- gemeinsam für den
+// Punkt-Modus-Streifen (`drawGround`) und die Path-Modus-Silhouette
+// (`drawModelTerrain`), damit beide Modi denselben Bodenton sprechen.
+function groundGradient(ctx, grid, view, x) {
   const { pos, surface } = grid;
   const span = x.right - x.left;
   const grad = ctx.createLinearGradient(x.left, 0, x.right, 0);
@@ -598,7 +716,12 @@ function drawGround(ctx, grid, view, x, top, h) {
     grad.addColorStop(off, rgbStr(blendRGB(dayNight, hex(GROUND_FROST), frostT)));
     lastOff = off;
   }
-  ctx.fillStyle = grad;
+  return grad;
+}
+
+function drawGround(ctx, grid, view, x, top, h) {
+  const span = x.right - x.left;
+  ctx.fillStyle = groundGradient(ctx, grid, view, x);
   ctx.fillRect(x.left, top, span, h);
 
   // Horizontlinie: dunkler Kontaktschatten, wo der Himmel auf den Boden trifft.
@@ -606,8 +729,295 @@ function drawGround(ctx, grid, view, x, top, h) {
   ctx.beginPath(); ctx.moveTo(x.left, top + 0.5); ctx.lineTo(x.right, top + 0.5); ctx.stroke();
 }
 
+// --- AMSL-Projektion + Terrain (Path-Modus) ----------------------------------
+//
+// Der Path-Modus plottet die Haupttafel in AMSL (Ogimet-Konvention: Gelände
+// als Silhouette im Diagramm), der Punkt-Modus weiterhin in AGL. WICHTIG:
+// `grid.z` und alles in `derive.js`/`hazards/` BLEIBT AGL relativ zur
+// Modell-Orographie -- die Physik-Heuristiken (Nebel-Tops, Wolkenbasis,
+// Tropopausensuche ab 5000 m AGL, ...) hängen an dieser Bedeutung, und
+// METHODIK 5b erklärt, warum eine Umreferenzierung der DATEN aufs echte
+// Gelände physikalisch falsch wäre. Umgerechnet wird ausschließlich die
+// RENDER-Geometrie: eine Zelle bei AGL h an Spalte i liegt bei
+// AMSL h + grid.elevation[i] (Modell-Orographie der Spalte).
+
+// Stützwert an Position `p`, linear zwischen `xs`-Stützstellen; außerhalb
+// konstant. Zustandslos (anders als der frühere Cursor-Interpolator) -- wird
+// auch für nicht-aufsteigende Abfolgen gebraucht (Polylinien-Konvertierung).
+function interpAt(xs, ys, p) {
+  if (!(xs.length > 1) || p <= xs[0]) return ys[0];
+  for (let i = 1; i < xs.length; i++) {
+    if (xs[i] >= p) {
+      const f = xs[i] > xs[i - 1] ? (p - xs[i - 1]) / (xs[i] - xs[i - 1]) : 0;
+      return ys[i - 1] + f * (ys[i] - ys[i - 1]);
+    }
+  }
+  return ys[xs.length - 1];
+}
+
+// AMSL-Kopie des Grids (nur `z` verschoben, alles andere per Referenz).
+// WeakMap-Cache statt Neubau je draw(): `texture.js` cached die (teure)
+// Wolkentextur am Grid-OBJEKT -- ein bei jedem Redraw neues Objekt würde
+// diesen Cache wirkungslos machen.
+const amslGridCache = new WeakMap();
+function amslGrid(grid) {
+  let g = amslGridCache.get(grid);
+  if (g) return g;
+  const { nk } = grid, nt = grid.times.length;
+  const z = new Float32Array(grid.z.length);
+  for (let i = 0; i < nt; i++) {
+    for (let k = 0; k < nk; k++) z[i * nk + k] = grid.z[i * nk + k] + grid.elevation[i];
+  }
+  g = { ...grid, z };
+  amslGridCache.set(grid, g);
+  return g;
+}
+
+// AMSL-Kopie der View-Geometrie: alle Höhenangaben, die der Renderer direkt
+// auf `y` legt (Polylinien, Niederschlags-Tops, Cb-Basis/-Oberrand), um die
+// Modell-Orographie an ihrer Pfadposition verschieben. Indexbasierte Felder
+// (daylight, cloudFrac, fog, hazards) bleiben unverändert per Referenz --
+// die Hazard-Konturen entstehen erst im Renderer via `contour(rgrid, ...)`
+// und erben die AMSL-Höhen von dort.
+const amslViewCache = new WeakMap();
+function amslViewOf(view, grid) {
+  let v = amslViewCache.get(view);
+  if (v) return v;
+  const eAt = (p) => interpAt(grid.pos, grid.elevation, p);
+  const cvtPl = (pl) => pl.map((pt) => ({ ...pt, z: pt.z + eAt(pt.t) }));
+  v = {
+    ...view,
+    isotherms: view.isotherms.map(({ tempC, polylines }) => ({ tempC, polylines: polylines.map(cvtPl) })),
+    isotachs: view.isotachs.map(({ kt, polylines }) => ({ kt, polylines: polylines.map(cvtPl) })),
+    tropopause: cvtPl(view.tropopause),
+    precip: view.precip.map((e) => ({
+      ...e,
+      zTop: e.zTop + eAt(e.t),
+      freezingZ: Number.isFinite(e.freezingZ) ? e.freezingZ + eAt(e.t) : e.freezingZ,
+    })),
+    cb: view.cb.map((c, i) => (c
+      ? { ...c, base: c.base + grid.elevation[i], top: c.top + grid.elevation[i] }
+      : null)),
+  };
+  amslViewCache.set(view, v);
+  return v;
+}
+
+// Ruft `cb(i0, i1)` für jeden zusammenhängenden Abschnitt endlicher Werte auf
+// -- Kachel-Lücken (`NaN`, s. `terrain.js`) unterbrechen Fläche/Linie, statt
+// falsch durchgezogen zu werden.
+function forEachFiniteRun(values, cb) {
+  let start = null;
+  for (let i = 0; i < values.length; i++) {
+    if (Number.isFinite(values[i])) {
+      if (start == null) start = i;
+    } else if (start != null) {
+      cb(start, i - 1);
+      start = null;
+    }
+  }
+  if (start != null) cb(start, values.length - 1);
+}
+
+function lastFiniteIndex(values) {
+  for (let i = values.length - 1; i >= 0; i--) if (Number.isFinite(values[i])) return i;
+  return null;
+}
+
+// Kontaktschatten-Linie zwischen Terrain und Atmosphäre als weißer Halo +
+// dunkle Linie (statt eines einfachen halbtransparenten Schwarz) -- MUSS
+// auch nachts sichtbar bleiben, wo Boden- (`GROUND_NIGHT`) und Himmelfarbe
+// (`NIGHT_COLOR`) beide fast schwarz sind und eine reine Schwarz-auf-Schwarz-
+// Linie darin verschwindet (s. Feedback). Gleiche Technik wie die AGL-
+// Deckellinie unten.
+function terrainEdgePath(pos, i0, i1, yOf, x) {
+  const path = new Path2D();
+  path.moveTo(x(pos[i0]), yOf(i0));
+  for (let i = i0 + 1; i <= i1; i++) path.lineTo(x(pos[i]), yOf(i));
+  return path;
+}
+function strokeTerrainEdge(ctx, path) {
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(255,255,255,0.65)"; ctx.lineWidth = 2.5; ctx.stroke(path);
+  ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.lineWidth = 1; ctx.stroke(path);
+}
+
+// Modell-Orographie als Silhouette in der Haupttafel (nur Path-Modus, AMSL-
+// Achse): `grid.elevation` ist genau der Boden, auf dem die Wetterdaten
+// stehen (`height_agl_level*` zählt von hier, s. METHODIK 5b) -- Wolken,
+// Vorhänge und Level schließen also konstruktionsbedingt sauber an die
+// Silhouette an. Eingefärbt mit demselben Tag/Nacht-+Frost-Verlauf wie der
+// Punkt-Modus-Bodenstreifen (`groundGradient`). Läuft NACH allen Inhalts-
+// layern (s. Aufrufstelle) -- ein Fill-Aufruf deckt alle Überstände ab,
+// statt jeden Layer einzeln zu clippen.
+function drawModelTerrain(ctx, grid, view, x, y, mainBot) {
+  const { pos, elevation } = grid;
+  ctx.fillStyle = groundGradient(ctx, grid, view, x);
+  ctx.beginPath();
+  ctx.moveTo(x(pos[0]), mainBot);
+  for (let i = 0; i < pos.length; i++) ctx.lineTo(x(pos[i]), y(elevation[i]));
+  ctx.lineTo(x(pos[pos.length - 1]), mainBot);
+  ctx.closePath();
+  ctx.fill();
+  strokeTerrainEdge(ctx, terrainEdgePath(pos, 0, pos.length - 1, (i) => y(elevation[i]), x));
+}
+
+// Echtes Gelände (Mapterhorn, `terrain.js`) als VERGLEICHS-Overlay über der
+// Modell-Silhouette -- AMSL auf AMSL, keine Umrechnung mehr nötig. Bewusst
+// halbtransparent + gestrichelt statt deckend: es soll die Modell/Real-
+// Differenz (METHODIK 5b, z. B. Zugspitze −500 m) sichtbar machen, nicht die
+// Modellwelt ersetzen -- die Wetterdaten gelten weiterhin relativ zur
+// Modell-Orographie. Wo das echte Gelände ÜBER der Modellkante liegt, steht
+// die Füllung als durchscheinender Fels im "Modell-Himmel"; in Tälern
+// (real unter Modell) läuft die gestrichelte Linie sichtbar durch die
+// Modell-Silhouette. Kachel-Lücken (NaN) bleiben ausgespart -- lieber nichts
+// behaupten als falsch zeichnen.
+const REAL_TERRAIN_FILL = "rgba(46,36,24,0.35)";
+function drawRealTerrainOverlay(ctx, terrain, x, y, mainBot) {
+  const { pos, elevation } = terrain;
+  forEachFiniteRun(elevation, (i0, i1) => {
+    if (i1 === i0) return;
+    ctx.beginPath();
+    ctx.moveTo(x(pos[i0]), mainBot);
+    for (let i = i0; i <= i1; i++) ctx.lineTo(x(pos[i]), y(elevation[i]));
+    ctx.lineTo(x(pos[i1]), mainBot);
+    ctx.closePath();
+    ctx.fillStyle = REAL_TERRAIN_FILL;
+    ctx.fill();
+
+    // Gestrichelt (anders als die durchgezogene Modellkante), mit Halo --
+    // muss auch nachts auf fast schwarzem Boden/Himmel lesbar bleiben.
+    const path = terrainEdgePath(pos, i0, i1, (i) => y(elevation[i]), x);
+    ctx.save();
+    ctx.lineJoin = "round";
+    ctx.setLineDash([5, 3]);
+    ctx.strokeStyle = "rgba(255,255,255,0.65)"; ctx.lineWidth = 2.5; ctx.stroke(path);
+    ctx.strokeStyle = "rgba(20,14,8,0.85)"; ctx.lineWidth = 1.2; ctx.stroke(path);
+    ctx.restore();
+  });
+  const last = lastFiniteIndex(elevation);
+  if (last != null) {
+    ctx.fillStyle = "#d8d2c6"; ctx.font = "600 9px system-ui, sans-serif";
+    ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+    ctx.fillText("Gelände real", x(pos[last]) - 4, y(elevation[last]) - 3);
+  }
+}
+
+// Max-Flughöhen-Deckellinie, terrainfolgend: dieselbe Optik wie
+// `crosssection.js`s `flightLine` (weißer Halo + `#b5179e` gestrichelt).
+// `maxHeightM` ist eine AGL-Angabe (`settings.maxHeight`) und zählt legal
+// über REALEM Grund -- deshalb folgt die Linie dem Mapterhorn-Gelände, wenn
+// es eingeblendet ist (`terrain`), sonst der Modell-Orographie als bester
+// verfügbarer Näherung. Beides ist auf der AMSL-Achse eine simple Addition.
+function drawCeiling(ctx, grid, terrain, maxHeightM, x, y) {
+  const pos = terrain ? terrain.pos : grid.pos;
+  const ground = terrain ? terrain.elevation : grid.elevation;
+  ctx.save();
+  ctx.lineJoin = "round";
+  forEachFiniteRun(ground, (i0, i1) => {
+    if (i1 === i0) return;
+    const path = new Path2D();
+    path.moveTo(x(pos[i0]), y(ground[i0] + maxHeightM));
+    for (let i = i0 + 1; i <= i1; i++) path.lineTo(x(pos[i]), y(ground[i] + maxHeightM));
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.setLineDash([]); ctx.stroke(path);
+    ctx.strokeStyle = "#b5179e"; ctx.lineWidth = 1.4; ctx.setLineDash([6, 3]); ctx.stroke(path);
+  });
+  ctx.setLineDash([]);
+  const last = lastFiniteIndex(ground);
+  if (last != null) {
+    ctx.fillStyle = "#b5179e"; ctx.font = "600 10px system-ui, sans-serif";
+    ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+    ctx.fillText(`Max. Flughöhe ${fmtH(maxHeightM)} AGL`, x(pos[last]) - 4, y(ground[last] + maxHeightM) - 4);
+  }
+  ctx.restore();
+}
+
 // --- Hazard-Flächen (Vereisung berechnet, s. hazards/icing.js; Turbulenz noch
 // Stub -> zeichnet nichts) -----------------------------------------------------
+
+// --- Höhen-Clipping (statt Klemmen) -------------------------------------------
+//
+// `y()` klemmt jeden Wert außerhalb [zMin, zMax] auf den jeweiligen Panelrand
+// (s. `makeYScale`) -- für die Gelände-SILHOUETTE ist das genau richtig (ein
+// Gipfel über der aktuellen Fensterobergrenze soll die Fläche bis zum Rand
+// ausfüllen, s. `drawModelTerrain`). Für dünne LINIEN mit Randlabel
+// (Isothermen/Isotachen/Tropopause) und für Hazard-Symbole wäre eine
+// geklemmte Darstellung dagegen FALSCH: eine reale Isotherme bei 5000 m
+// erschiene bei auf 300 m gezoomter Ansicht als waagerechte Linie MIT Label
+// exakt am oberen Rand -- eine erfundene Information, kein Cutoff (s.
+// Feedback: genau das passierte beim Testen des Path-Modus-Zooms). Diese
+// Elemente werden deshalb VOR dem Zeichnen auf den sichtbaren Höhenbereich
+// geschnitten (Liang-Barsky-artig für offene Linien, Sutherland-Hodgman für
+// geschlossene Hazard-Flächen) -- ein Element, das ganz außerhalb liegt,
+// verschwindet komplett, statt als Phantomlinie am Rand zu kleben.
+
+// Offene {t,z}-Polylinie auf [zMin, zMax] zuschneiden. Kann in mehrere
+// Teilstücke zerfallen (z. B. eine Isotherme, die den sichtbaren Bereich
+// zweimal durchläuft) -- deshalb Array-von-Polylinien zurück, nicht eine.
+function clipPolylineZ(pl, zMin, zMax) {
+  if (pl.length < 2) return [];
+  const inRange = (z) => z >= zMin && z <= zMax;
+  const cross = (a, b, zb) => {
+    const f = (zb - a.z) / (b.z - a.z);
+    return { t: a.t + f * (b.t - a.t), z: zb };
+  };
+  // "Außerhalb" NICHT über ein striktes `<` gegen die jeweilige Grenze
+  // bestimmen, sondern exakt komplementär zu `inRange` (inklusive Grenzen) --
+  // sonst erkennt ein Punkt GENAU AUF der Grenze fälschlich eine Kreuzung
+  // (er ist ja bereits inRange, "kreuzt" also nichts) und erzeugt ein
+  // Nullstrecken-Phantomsegment.
+  const belowMin = (z) => z < zMin, aboveMax = (z) => z > zMax;
+  const out = [];
+  let cur = inRange(pl[0].z) ? [pl[0]] : [];
+  for (let i = 1; i < pl.length; i++) {
+    const a = pl[i - 1], b = pl[i];
+    // Schnittpunkte mit BEIDEN Grenzen prüfen und entlang der Strecke sortiert
+    // abarbeiten -- deckt auch den (bei sehr engem Zoom mögliche) Fall ab, dass
+    // eine einzelne Strecke den ganzen sichtbaren Bereich in einem Schritt
+    // durchquert (a über zMax, b unter zMin oder umgekehrt).
+    const crossings = [];
+    if (belowMin(a.z) !== belowMin(b.z)) crossings.push({ f: (zMin - a.z) / (b.z - a.z), pt: cross(a, b, zMin) });
+    if (aboveMax(a.z) !== aboveMax(b.z)) crossings.push({ f: (zMax - a.z) / (b.z - a.z), pt: cross(a, b, zMax) });
+    crossings.sort((p, q) => p.f - q.f);
+    for (const { pt } of crossings) {
+      cur.push(pt);
+      if (cur.length >= 2) out.push(cur);
+      cur = [pt];
+    }
+    if (inRange(b.z)) cur.push(b); else cur = crossings.length ? [] : cur;
+  }
+  if (cur.length >= 2) out.push(cur);
+  return out;
+}
+
+// Sutherland-Hodgman-Clipping einer (implizit geschlossenen) Kontur-Polylinie
+// gegen [zMin, zMax] -- zweimal gegen je eine Halbebene. Anders als bei einer
+// offenen Linie zerfällt eine Fläche beim Clippen nicht in mehrere Stücke
+// (konvex genug für unsere Zwecke: eine einzelne Höhenspanne pro Spalte).
+function clipPolygonZ(poly, zMin, zMax) {
+  const half = (pts, keep, zb) => {
+    if (pts.length < 2) return [];
+    const out = [];
+    for (let i = 0; i < pts.length; i++) {
+      const cur = pts[i], prev = pts[(i - 1 + pts.length) % pts.length];
+      const curIn = keep(cur.z, zb), prevIn = keep(prev.z, zb);
+      if (curIn) {
+        if (!prevIn) {
+          const f = (zb - prev.z) / (cur.z - prev.z);
+          out.push({ t: prev.t + f * (cur.t - prev.t), z: zb });
+        }
+        out.push(cur);
+      } else if (prevIn) {
+        const f = (zb - prev.z) / (cur.z - prev.z);
+        out.push({ t: prev.t + f * (cur.t - prev.t), z: zb });
+      }
+    }
+    return out;
+  };
+  let p = half(poly, (z, zb) => z >= zb, zMin);
+  p = half(p, (z, zb) => z <= zb, zMax);
+  return p;
+}
 
 // Kontur-Umriss statt Zellraster: reicht die Schweregrad-Zeichenkette (none/
 // light/moderate/severe) als Zahlenfeld an `contour()` (marching squares,
@@ -622,13 +1032,18 @@ function drawHazardArea(ctx, grid, hazardArr, styles, x, y) {
   const n = grid.times.length * grid.nk;
   const field = new Float32Array(n);
   for (let ix = 0; ix < n; ix++) field[ix] = HAZARD_LEVELS[hazardArr[ix]] || 0;
+  const zMin = y.inv(y.bot), zMax = y.inv(y.top);
 
   for (const [level, key] of [[1, "light"], [2, "moderate"], [3, "severe"]]) {
-    const polylines = contour(grid, field, level - 0.5);
+    // Auf den sichtbaren Höhenbereich geschnitten (s. `clipPolygonZ`) -- eine
+    // Fläche, die ganz außerhalb des aktuellen Zooms liegt, verschwindet damit
+    // komplett, statt am Rand geklemmt eine Phantomfläche zu zeigen.
+    const polylines = contour(grid, field, level - 0.5)
+      .map((pl) => clipPolygonZ(pl, zMin, zMax))
+      .filter((pl) => pl.length >= 3);
     if (!polylines.length) continue;
     const color = styles[key];
     for (const pl of polylines) {
-      if (pl.length < 2) continue;
       ctx.beginPath();
       pl.forEach((p, i) => {
         const px = x(p.t), py = y(p.z);
@@ -656,10 +1071,16 @@ function drawIcingSevereGlyphs(ctx, grid, hazardArr, x, y) {
   const n = grid.times.length * grid.nk;
   const field = new Float32Array(n);
   for (let ix = 0; ix < n; ix++) field[ix] = hazardArr[ix] === "severe" ? 1 : 0;
-  const polylines = contour(grid, field, 0.5);
+  const zMin = y.inv(y.bot), zMax = y.inv(y.top);
+  // Geclippter Schwerpunkt statt roher Kontur -- eine Fläche, die ganz
+  // außerhalb des Zooms liegt, bekommt kein Symbol (nichts sichtbar, wofür
+  // eins stehen könnte); eine teilweise sichtbare bekommt eins innerhalb
+  // des sichtbaren Ausschnitts statt am geklemmten Rand.
+  const polylines = contour(grid, field, 0.5)
+    .map((pl) => clipPolygonZ(pl, zMin, zMax))
+    .filter((pl) => pl.length >= 3);
   const size = 20;
   const centers = polylines
-    .filter((pl) => pl.length >= 2)
     .map((pl) => ({
       cx: pl.reduce((s, p) => s + x(p.t), 0) / pl.length,
       cy: pl.reduce((s, p) => s + y(p.z), 0) / pl.length,
@@ -714,10 +1135,12 @@ function drawTurbulenceSevereGlyphs(ctx, grid, hazardArr, x, y) {
   const n = grid.times.length * grid.nk;
   const field = new Float32Array(n);
   for (let ix = 0; ix < n; ix++) field[ix] = hazardArr[ix] === "severe" ? 1 : 0;
-  const polylines = contour(grid, field, 0.5);
+  const zMin = y.inv(y.bot), zMax = y.inv(y.top);
+  const polylines = contour(grid, field, 0.5)
+    .map((pl) => clipPolygonZ(pl, zMin, zMax))
+    .filter((pl) => pl.length >= 3);
   const size = 20;
   const centers = polylines
-    .filter((pl) => pl.length >= 2)
     .map((pl) => ({
       cx: pl.reduce((s, p) => s + x(p.t), 0) / pl.length,
       cy: pl.reduce((s, p) => s + y(p.z), 0) / pl.length,
@@ -918,7 +1341,10 @@ const PRECIP_SIZE_MIN = 0.80, PRECIP_SIZE_SPAN = 0.45;
 // Behandlung würde die Vorhänge benachbarter Stunden ungleich verteilen.
 const PRECIP_TIME_SHIFT = 0.5;
 
-function drawPrecip(ctx, entries, pos, x, y, seed) {
+// `groundAt` (nur Path-Modus, sonst null): der Vorhang endet dann am lokalen
+// Modell-Boden (AMSL-Achse) statt an der Panelunterkante -- der Überstand
+// unter die Geländelinie wird zusätzlich von `drawModelTerrain` abgedeckt.
+function drawPrecip(ctx, entries, pos, x, y, seed, groundAt = null) {
   const dt = pos.length > 1 ? pos[1] - pos[0] : 3600;
   const colW = Math.max(1, x(pos[0] + dt) - x(pos[0]));
   ctx.save();
@@ -926,7 +1352,8 @@ function drawPrecip(ctx, entries, pos, x, y, seed) {
     // Auf den Rahmen begrenzen: die erste Stunde rutscht sonst mit ihrem
     // halben Versatz links aus dem Chart in die Höhenachse.
     const cx = clamp(x(e.t - PRECIP_TIME_SHIFT * dt), x.left, x.right);
-    const pyBot = y.bot - 4; // knapp innerhalb des Rahmens: Vorhang endet am Boden
+    // Punkt-Modus: knapp innerhalb des Rahmens (Vorhang endet am Boden).
+    const pyBot = groundAt ? y(groundAt(e.t)) - 1 : y.bot - 4;
     const pyTop = Math.max(y.top, y(Math.max(0, e.zTop)));
     const span = pyBot - pyTop;
     // Abstand auf die Spanne einrasten, damit der Vorhang exakt von der
@@ -1036,7 +1463,12 @@ function rightmost(polylines) {
 }
 
 function drawIsotherms(ctx, isotherms, x, y) {
-  for (const { tempC, polylines } of isotherms) {
+  const zMin = y.inv(y.bot), zMax = y.inv(y.top);
+  for (const { tempC, polylines: raw } of isotherms) {
+    // Auf den sichtbaren Höhenbereich geschnitten (s. `clipPolylineZ`) --
+    // sonst klebt eine Isotherme weit außerhalb des Zooms als Phantomlinie +
+    // Label am Panelrand (s. Feedback).
+    const polylines = raw.flatMap((pl) => clipPolylineZ(pl, zMin, zMax));
     if (!polylines.length) continue;
     const color = tempC === 0 ? "#1d4c8c" : "#7a1414";
     for (const pl of polylines) drawPolyline(ctx, pl, x, y, color, [5, 3]);
@@ -1046,7 +1478,9 @@ function drawIsotherms(ctx, isotherms, x, y) {
   }
 }
 function drawIsotachs(ctx, isotachs, x, y) {
-  for (const { kt, polylines } of isotachs) {
+  const zMin = y.inv(y.bot), zMax = y.inv(y.top);
+  for (const { kt, polylines: raw } of isotachs) {
+    const polylines = raw.flatMap((pl) => clipPolylineZ(pl, zMin, zMax));
     if (!polylines.length) continue;
     for (const pl of polylines) drawPolyline(ctx, pl, x, y, ISOTACH_COLOR, ISOTACH_DASH, 1.7);
     const last = rightmost(polylines);
@@ -1055,15 +1489,18 @@ function drawIsotachs(ctx, isotachs, x, y) {
   }
 }
 function drawTropopause(ctx, line, x, y) {
-  if (line.length < 2) return;
-  drawPolyline(ctx, line, x, y, "#cc0000", []);
-  const p = line[line.length - 1];
+  const zMin = y.inv(y.bot), zMax = y.inv(y.top);
+  const polylines = clipPolylineZ(line, zMin, zMax);
+  if (!polylines.length) return;
+  for (const pl of polylines) drawPolyline(ctx, pl, x, y, "#cc0000", []);
+  const last = rightmost(polylines);
+  const p = last[last.length - 1];
   labelBox(ctx, x(p.t), y(p.z), "Trop", "#cc0000", x.right + M.r);
 }
 
 // --- Achsen --------------------------------------------------------------------
 
-function drawHeightAxis(ctx, y, hMin, hMax, x, lin) {
+function drawHeightAxis(ctx, y, hMin, hMax, x, lin, amsl = false) {
   const ticks = lin ? niceTicks(hMin, hMax, 6) : niceLogHeights(hMin, hMax);
   ctx.font = "10px system-ui, sans-serif"; ctx.textBaseline = "middle";
   for (const hM of ticks) {
@@ -1074,6 +1511,10 @@ function drawHeightAxis(ctx, y, hMin, hMax, x, lin) {
     ctx.fillStyle = MUTED; ctx.textAlign = "right";
     ctx.fillText(fmtH(hM), x.left - 4, py);
   }
+  // Referenzniveau explizit ausweisen -- Path-Modus plottet AMSL, Punkt-Modus
+  // AGL (s. Kopfkommentar); ohne Tag wäre die Achse mehrdeutig.
+  ctx.fillStyle = MUTED; ctx.font = "600 8px system-ui, sans-serif"; ctx.textAlign = "right";
+  ctx.fillText(amsl ? "AMSL" : "AGL", x.left - 4, y.top - 7);
 }
 
 // Zeilenbeschriftung im linken Randfeld (gleiche Spalte wie die Höhenachse),
@@ -1188,7 +1629,7 @@ function drawPathStopMarker(ctx, x, top, bot, reason) {
 // --- Hover (DOM-Overlay) -------------------------------------------------------
 
 function setupHover(host, canvas, axis, grid, info) {
-  const { x, y, mainTop, mainBot, view } = info;
+  const { x, y, mainTop, mainBot, view, isPath } = info;
   host.style.position = host.style.position || "relative";
   const tip = document.createElement("div");
   tip.className = "gm-tip";
@@ -1211,8 +1652,24 @@ function setupHover(host, canvas, axis, grid, info) {
       const d = Math.abs(grid.pos[j] - pGuess);
       if (d < best) { best = d; i = j; }
     }
+    // Achsenwert ist im Path-Modus AMSL (s. `amslGrid`); gesampelt wird auf
+    // dem AGL-Grid, also vorher die Modell-Orographie der Spalte abziehen.
     const h = y.inv(py);
-    const s = sampleAt(grid, i, h);
+    const hAgl = isPath ? h - grid.elevation[i] : h;
+    if (isPath && hAgl < 0) {
+      // Unterhalb des Modell-Bodens gibt es keine Wetterdaten -- ehrlich
+      // sagen statt den untersten Levelwert als "Fels-Temperatur" anzuzeigen.
+      tip.style.display = "block";
+      tip.style.left = `${px + 12}px`;
+      tip.style.top = `${py + 12}px`;
+      tip.innerHTML = [
+        `<b>${new Date(grid.times[i] * 1000).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" })}</b>`,
+        `Höhe ${fmtHeight(h)} AMSL`,
+        "unter Modell-Grund",
+      ].join("<br>");
+      return;
+    }
+    const s = sampleAt(grid, i, hAgl);
     const dir = (Math.atan2(-s.u, -s.v) * 180 / Math.PI + 360) % 360;
     // WW gilt für den Boden (weather_code ist ein Oberflächenfeld), nicht für
     // die gehoverte Höhe -- daher explizit gekennzeichnet.
@@ -1236,7 +1693,9 @@ function setupHover(host, canvas, axis, grid, info) {
     tip.style.top = `${py + 12}px`;
     tip.innerHTML = [
       `<b>${new Date(grid.times[i] * 1000).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" })}</b>`,
-      `Höhe ${fmtHeight(h)}`,
+      isPath
+        ? `Höhe ${fmtHeight(h)} AMSL · ${fmtHeight(hAgl)} über Modellgrund`
+        : `Höhe ${fmtHeight(h)}`,
       `Temp ${fmtTemp(s.T - 273.15)}`,
       `Wind ${fmtDir(dir)} ${fmtWind(Math.hypot(s.u, s.v))}`,
       `Wolken ${Math.round((s.cloudFrac || 0) * 100)} %`,

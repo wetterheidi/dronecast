@@ -339,18 +339,23 @@ der Backlog-Blick, was als Nächstes drankäme:
 - `sliceColumnAtTime()` interpoliert jetzt echt zwischen den Modellstunden
   statt nur zu runden — Nebeneffekt der Resampling-Arbeit, kommt auch den
   normalen Anker-Spalten zugute.
+- Terrain-Profil (Mapterhorn) — [src/gramet/terrain.js](src/gramet/terrain.js)
+  + [src/gramet/terrainTileCache.js](src/gramet/terrainTileCache.js), echtes
+  Gelände entlang des Pfads (fester Zoom 12), IndexedDB-Kachelcache,
+  Untergrund-Maskierung + terrainfolgende AGL-Deckellinie in der Haupttafel.
+  Alle Details in METHODIK.md 7.9.
 
-Alle Details in METHODIK.md 7.8.
+Alle Details in METHODIK.md 7.8/7.9.
 
 - **Web-Component-Wrapper:** `renderGramet(host, grid, view, state)` nimmt
   bereits einen Host-Container statt fest ins droneforecast-DOM zu greifen —
   gute Ausgangsbasis. Offen: eigenes npm-Paket vs. Git-Submodule vs. Copy für
   die tatsächliche Verteilung an `trajectories`, Shadow-DOM-Kapselung fürs
   Styling, Custom-Element-Boilerplate (`<gramet-chart>` o. Ä.).
-- **Terrain-Profil (Mapterhorn):** bewusst zurückgestellt, kompletter Recherche-
-  und Umsetzungsplan in METHODIK.md 7.8 — Terrarium-kodierte Kacheln
-  (`tiles.mapterhorn.com`), regional stark unterschiedliche Auflösung
-  (30 m global bis 0,5 m regional), eigenes `src/gramet/terrain.js` geplant.
+- **Terrain: regionale Feinauflösung (z13-17):** aktuell fester Zoom 12
+  (weltweit verfügbar, s. METHODIK.md 7.9); Mapterhorn bietet für ausgewählte
+  Gebiete deutlich feinere Kacheln (z. B. Schweiz swissALTI3D 0,5 m) — bei
+  Bedarf später als adaptiver Zoom je nach Abdeckung nachrüstbar.
 - **Gemeinsame Datenschicht mit `trajectories`:** `config.js` (`API_BASE`,
   `MODELS` inkl. Bbox) ist zwischen droneforecast und `trajectories` bereits
   identisch dupliziert — sollte langfristig EIN gemeinsames Modul werden,

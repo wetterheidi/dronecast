@@ -12,6 +12,7 @@ import { fetchSurface } from "../weather.js";
 import { gridFromWaypoints } from "./grid.js";
 import { deriveView } from "./derive.js";
 import { resamplePath } from "./resample.js";
+import { fetchTerrainProfile } from "./terrain.js";
 
 // Bbox-Verlassen VOR dem Fetch prüfen, nicht danach: `fetchColumn` nutzt
 // `cell_selection: "nearest"` (s. column.js) -- ein Punkt außerhalb der Bbox
@@ -112,8 +113,14 @@ function selectWaypointsToFetch(waypoints, model, opts = {}) {
  *   resampleIntervalSec (optional -- wenn gesetzt, wird das gefetchte,
  *   sparsame Gitter per `resample.js` `resamplePath()` auf diese Kadenz in
  *   Sekunden interpoliert, z. B. 600 für alle 10 min; ohne diese Option
- *   bleibt es bei einer Spalte pro tatsächlich gefetchtem Wegpunkt) }
- * @returns { grid, view, pathStop: { lat, lon, index, reason } | null }
+ *   bleibt es bei einer Spalte pro tatsächlich gefetchtem Wegpunkt),
+ *   terrain (optional -- wenn true, wird zusätzlich ein Geländeprofil per
+ *   `terrain.js` `fetchTerrainProfile()` geholt, unabhängig von der
+ *   Wetter-Fetch-Policy und parallel zur Wetterschleife),
+ *   terrainIntervalSec (optional, an `fetchTerrainProfile` durchgereicht --
+ *   Geländesampling-Kadenz, Default dort "etwa minütlich") }
+ * @returns { grid, view, pathStop: { lat, lon, index, reason } | null,
+ *   terrain: { pos, elevation, gaps } | null }
  */
 export async function fetchGridForPath(waypoints, modelKey, forecastDays, fetchImpl, opts = {}) {
   const model = MODELS[modelKey];
@@ -122,6 +129,12 @@ export async function fetchGridForPath(waypoints, modelKey, forecastDays, fetchI
 
   const pos = posOfPath(waypoints);
   const indices = selectWaypointsToFetch(waypoints, model, opts);
+  // Läuft unabhängig von der Wetterschleife unten durch -- Gelände hat nichts
+  // mit der Modell-Bbox/-Auflösung zu tun, deshalb über die volle dichte
+  // `waypoints`-Liste statt über die (sparsame) Fetch-Policy-Auswahl.
+  const terrainPromise = opts.terrain
+    ? fetchTerrainProfile(waypoints, { fetchImpl, terrainIntervalSec: opts.terrainIntervalSec })
+    : null;
 
   const waypointColumns = [];
   let pathStop = null;
@@ -160,5 +173,22 @@ export async function fetchGridForPath(waypoints, modelKey, forecastDays, fetchI
   const dense = opts.resampleIntervalSec ? resamplePath(waypointColumns, opts.resampleIntervalSec) : waypointColumns;
   const grid = gridFromWaypoints(dense);
   const view = deriveView(grid);
-  return { grid, view, pathStop };
+
+  let terrain = terrainPromise ? await terrainPromise : null;
+  if (terrain) terrain = trimTerrainToChart(terrain, grid.pos[grid.pos.length - 1]);
+
+  return { grid, view, pathStop, terrain };
+}
+
+// Gelände jenseits des tatsächlich genutzten Wetter-Bereichs (Bbox-/No-Data-
+// Stop, s. `pathStop` oben) hat im Chart keinen Platz mehr -- `x.right`
+// endet dort (s. `render.js`), ein weiter reichendes Geländeprofil würde
+// nirgends gezeichnet.
+function trimTerrainToChart(terrain, maxPos) {
+  let n = terrain.pos.length;
+  while (n > 0 && terrain.pos[n - 1] > maxPos) n--;
+  const gaps = terrain.gaps
+    .filter((g) => g.fromPos <= maxPos)
+    .map((g) => ({ fromPos: g.fromPos, toPos: Math.min(g.toPos, maxPos) }));
+  return { pos: terrain.pos.subarray(0, n), elevation: terrain.elevation.subarray(0, n), gaps };
 }

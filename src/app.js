@@ -652,6 +652,11 @@ function renderGm() {
   }
   state.data.gmCanvas = renderGramet(el("gm-body"), state.data.gmGrid, state.data.gmView, {
     axis: settings.xsZoom ? "lin" : "log", zMin, zMax,
+    // Für die terrainfolgende Max-Flughöhen-Linie im Path-Modus (s. render.js
+    // `drawCeiling`) -- unabhängig vom `xsZoom`-Toggle, anders als `zMax`
+    // oben. Im Punkt-Modus (hier immer der Fall) ohne Wirkung,
+    // `gmGrid.meta.mode` ist nie "path".
+    maxHeightM: settings.maxHeight,
     layerToggles: {
       isotherms: settings.gmIsothermsOn,
       isotachs: settings.gmIsotachsOn,

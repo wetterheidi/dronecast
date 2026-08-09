@@ -26,6 +26,14 @@
     <button id="run-inside" type="button">Pfad im Modellgebiet</button>
     <button id="run-exit" type="button">Pfad verlässt die Modell-Bbox</button>
     <button id="run-resampled" type="button">Alle 10 min (resampled)</button>
+    <label>Max. Flughöhe (m AGL) <input id="max-height" type="number" value="300" min="10" step="10" style="width:70px"></label>
+    <label>Höhenbereich
+      <select id="height-range">
+        <option value="full">Voll (Modelldeckel)</option>
+        <option value="zoom">Gezoomt (bis Flughöhe)</option>
+      </select>
+    </label>
+    <label><input id="show-terrain" type="checkbox" checked> Mapterhorn-Overlay</label>
     <span id="status"></span>
   </div>
   <div id="gm-body"></div>
