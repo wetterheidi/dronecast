@@ -17,7 +17,7 @@
  */
 
 import { cloudFraction } from "../clouds.js";
-import { fetchColumn } from "../column.js";
+import { fetchColumn, sliceColumnAtTime } from "../column.js";
 import { nearestIndex } from "../weather.js";
 
 const KELVIN = 273.15;
@@ -60,8 +60,17 @@ export function gridFromColumn(col, surface, lat, lon) {
   }
 
   return {
-    meta: { lat, lon, elevation: col.elevation, model: col.model, dt: nt > 1 ? times[1] - times[0] : 3600 },
+    meta: { lat, lon, elevation: col.elevation, model: col.model, dt: nt > 1 ? times[1] - times[0] : 3600, mode: "point" },
     times, nk,
+    // X-Achsen-Positionswert getrennt von `times` (Kalenderzeit) gehalten:
+    // im Point-Modus identisch zu `times`, im Path-Modus (s. `gridFromWaypoints`)
+    // verstrichene Sekunden seit Pfadbeginn -- nur der Renderer liest `pos` für
+    // die X-Position, alles Kalenderbezogene (Tageslicht, Achsenbeschriftung,
+    // Tooltips) bleibt auf `times`.
+    pos: Float64Array.from(times),
+    lat: new Float64Array(nt).fill(lat),
+    lon: new Float64Array(nt).fill(lon),
+    elevation: new Float32Array(nt).fill(col.elevation),
     z, T, u, v, w, qv, qw, qi, clc, rh, p,
     surface: buildSurface(surface, times, col),
     derived: null,
@@ -103,6 +112,102 @@ function buildSurface(surface, times, col) {
   pick("cape", cape);
   pick("weather_code", wcode);
   pick("visibility", visibility);
+  return { t2m, td2m, ws10, wd10, gust, precip, snow, cape, wcode, visibility, pmsl };
+}
+
+/**
+ * Gitter aus einer Liste bereits geladener Wegpunkt-Säulen (Path-Modus) --
+ * jede Spalte hat ihren eigenen Ort UND Zeitpunkt, statt (wie `gridFromColumn`)
+ * einen festen Ort über eine gemeinsame Zeitreihe zu teilen. Nimmt EIN Modell
+ * für den gesamten Pfad an (`nk` konstant über alle Wegpunkte) -- das
+ * Verlassen der Modell-Bbox wird schon vor dem Fetch abgefangen (s. `path.js`),
+ * hier wird nur noch zusammengesetzt.
+ * @param waypointColumns Array<{ lat, lon, t (Unixsekunden, echte Ankunftszeit),
+ *   pos (X-Achsen-Positionswert, von `path.js` vorberechnet), col (vollständiges
+ *   `fetchColumn()`-Ergebnis für DIESEN Wegpunkt), surface (optional, wie
+ *   `fetchSurface()` an diesem Wegpunkt) }>
+ */
+export function gridFromWaypoints(waypointColumns) {
+  const nt = waypointColumns.length;
+  const nk = waypointColumns[0].col.nLevels;
+  const z = new Float32Array(nt * nk), T = new Float32Array(nt * nk),
+    u = new Float32Array(nt * nk), v = new Float32Array(nt * nk),
+    w = new Float32Array(nt * nk), qv = new Float32Array(nt * nk),
+    qw = new Float32Array(nt * nk), qi = new Float32Array(nt * nk),
+    clc = new Float32Array(nt * nk), rh = new Float32Array(nt * nk),
+    p = new Float32Array(nt * nk);
+
+  const times = new Float64Array(nt), pos = new Float64Array(nt),
+    lat = new Float64Array(nt), lon = new Float64Array(nt), elevation = new Float32Array(nt);
+
+  for (let i = 0; i < nt; i++) {
+    const wp = waypointColumns[i];
+    const slice = sliceColumnAtTime(wp.col, wp.t);
+    times[i] = wp.t; pos[i] = wp.pos; lat[i] = wp.lat; lon[i] = wp.lon;
+    elevation[i] = wp.col.elevation;
+    for (let k = 0; k < nk; k++) {
+      const ix = i * nk + k;
+      z[ix] = slice.h[k];
+      T[ix] = slice.t[k] + KELVIN;
+      u[ix] = slice.u[k];
+      v[ix] = slice.v[k];
+      w[ix] = slice.w ? slice.w[k] : NaN;
+      qv[ix] = slice.q ? slice.q[k] : NaN;
+      qw[ix] = slice.qw ? slice.qw[k] : NaN;
+      qi[ix] = slice.qi ? slice.qi[k] : NaN;
+      clc[ix] = slice.clc ? slice.clc[k] : NaN;
+      rh[ix] = slice.rh ? slice.rh[k] : NaN;
+      p[ix] = slice.p ? slice.p[k] * 100 : NaN; // hPa -> Pa
+    }
+  }
+
+  return {
+    meta: {
+      lat: lat[0], lon: lon[0], elevation: elevation[0], model: waypointColumns[0].col.model,
+      dt: nt > 1 ? pos[1] - pos[0] : 3600, mode: "path",
+    },
+    times, nk, pos, lat, lon, elevation,
+    z, T, u, v, w, qv, qw, qi, clc, rh, p,
+    surface: buildSurfaceFromWaypoints(waypointColumns, times),
+    derived: null,
+  };
+}
+
+// Wie `buildSurface`, aber pro Wegpunkt aus dessen EIGENER (optionaler)
+// Oberflächen-Serie und der eigenen Säule (für `pmsl`) -- nicht aus einer
+// gemeinsamen Zeitreihe an einem festen Ort.
+function buildSurfaceFromWaypoints(waypointColumns, times) {
+  const nt = times.length;
+  const t2m = new Float32Array(nt).fill(NaN), td2m = new Float32Array(nt).fill(NaN),
+    ws10 = new Float32Array(nt).fill(NaN), wd10 = new Float32Array(nt).fill(NaN),
+    gust = new Float32Array(nt).fill(NaN), precip = new Float32Array(nt).fill(NaN),
+    snow = new Float32Array(nt).fill(NaN), cape = new Float32Array(nt).fill(NaN),
+    wcode = new Float32Array(nt).fill(NaN), visibility = new Float32Array(nt).fill(NaN),
+    pmsl = new Float32Array(nt).fill(NaN);
+
+  const FIELDS = [
+    ["temperature_2m", t2m, 1], ["dew_point_2m", td2m, 1],
+    ["wind_speed_10m", ws10, 1 / 3.6], ["wind_direction_10m", wd10, 1], // km/h -> m/s
+    ["wind_gusts_10m", gust, 1 / 3.6], ["precipitation", precip, 1],
+    ["snowfall", snow, 1], ["cape", cape, 1],
+    ["weather_code", wcode, 1], ["visibility", visibility, 1],
+  ];
+
+  for (let i = 0; i < nt; i++) {
+    const wp = waypointColumns[i];
+    const tMs = wp.t * 1000;
+    const pIdx = wp.col ? nearestIndex(wp.col.time, tMs) : -1;
+    if (pIdx >= 0 && wp.col.pmsl) pmsl[i] = wp.col.pmsl[pIdx];
+
+    if (!wp.surface?.time?.length) continue;
+    const V = wp.surface.vars || {};
+    const j = nearestIndex(wp.surface.time, tMs);
+    if (j < 0 || Math.abs(wp.surface.time[j] - wp.t) > 1800) continue;
+    for (const [name, out, factor] of FIELDS) {
+      const src = V[name];
+      if (src?.[j] != null) out[i] = src[j] * factor;
+    }
+  }
   return { t2m, td2m, ws10, wd10, gust, precip, snow, cape, wcode, visibility, pmsl };
 }
 

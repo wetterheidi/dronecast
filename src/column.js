@@ -7,7 +7,7 @@
 
 import { API_BASE, MODELS } from "./config.js";
 import { cloudFraction } from "./clouds.js";
-import { lastFiniteIndex } from "./weather.js";
+import { lastFiniteIndex, nearestIndex } from "./weather.js";
 
 const KMH_TO_MS = 1 / 3.6;
 
@@ -169,6 +169,30 @@ export function sampleColumnAtHeight(col, i, ht) {
   return {
     h: ht, u: val(col.u), v: val(col.v), t: val(col.t), rh: val(col.rh), p, w: val(col.w), q: val(col.q),
     qw: val(col.qw), qi: val(col.qi), clc: val(col.clc), model: col.model,
+  };
+}
+
+/**
+ * Säule (mehrere Tage, ein Ort) auf einen einzelnen Levelquerschnitt zur
+ * nächstgelegenen Modellstunde reduziert -- für den GRAMET-Path-Modus
+ * (`grid.js` `gridFromWaypoints`), wo pro Wegpunkt eine eigene Säule geholt,
+ * aber nur die Ankunftsstunde daraus gebraucht wird. Rundung auf die
+ * nächste Stunde (dieselbe Konvention wie `grid.js` `buildSurface`), keine
+ * echte Zeitinterpolation -- v1, s. Plan.
+ */
+export function sliceColumnAtTime(col, tTargetSec) {
+  const i = nearestIndex(col.time, tTargetSec * 1000);
+  if (i < 0) return null;
+  const nk = col.nLevels;
+  const pick = (byLevel) => {
+    if (!byLevel) return null;
+    const out = new Float64Array(nk);
+    for (let k = 0; k < nk; k++) out[k] = byLevel[k][i];
+    return out;
+  };
+  return {
+    h: pick(col.h), u: pick(col.u), v: pick(col.v), t: pick(col.t), rh: pick(col.rh),
+    p: pick(col.p), w: pick(col.w), q: pick(col.q), qw: pick(col.qw), qi: pick(col.qi), clc: pick(col.clc),
   };
 }
 

@@ -118,26 +118,26 @@ const ROW_DEFS = {
   // umschaltbar ist (Einstellungen) und `ROW_DEFS` nur einmal gebaut wird.
   tempdew: {
     height: NUMBER_ROW_HEIGHT, label: () => ["T / Td", tempUnit()],
-    draw: (ctx, grid, view, x, top, h) => drawNumberRow(ctx, grid.times, x, top, h, [
+    draw: (ctx, grid, view, x, top, h) => drawNumberRow(ctx, grid.pos, x, top, h, [
       { values: grid.surface.t2m, fmt: (v) => String(Math.round(tempToDisplay(v))), color: "#c0392b" },
       { values: grid.surface.td2m, fmt: (v) => String(Math.round(tempToDisplay(v))), color: "#2980b9" },
     ]),
   },
   gust: {
     height: NUMBER_ROW_HEIGHT * 0.7, label: () => ["Böen 10 m", windUnit()],
-    draw: (ctx, grid, view, x, top, h) => drawNumberRow(ctx, grid.times, x, top, h, [
+    draw: (ctx, grid, view, x, top, h) => drawNumberRow(ctx, grid.pos, x, top, h, [
       { values: grid.surface.gust, fmt: (v) => String(Math.round(windToDisplay(v))), color: "#6a3d9a" },
     ]),
   },
   visibility: {
     height: NUMBER_ROW_HEIGHT * 0.7, label: ["Sicht", "km"],
-    draw: (ctx, grid, view, x, top, h) => drawNumberRow(ctx, grid.times, x, top, h, [
+    draw: (ctx, grid, view, x, top, h) => drawNumberRow(ctx, grid.pos, x, top, h, [
       { values: grid.surface.visibility, fmt: (v) => fmtVisKm(v), color: "#546e7a" },
     ]),
   },
   pressure: {
     height: NUMBER_ROW_HEIGHT * 0.7, label: ["SLP", "hPa"],
-    draw: (ctx, grid, view, x, top, h) => drawNumberRow(ctx, grid.times, x, top, h, [
+    draw: (ctx, grid, view, x, top, h) => drawNumberRow(ctx, grid.pos, x, top, h, [
       { values: grid.surface.pmsl, fmt: (v) => String(Math.round(v)), color: "#1a6b4a" },
     ]),
   },
@@ -152,124 +152,161 @@ const ROW_DEFS = {
 // Luftdruck (s. Feedback).
 const DEFAULT_ROWS = ["wind", "gust", "visibility", "weather", "tempdew", "pressure"];
 
+// Resize-Redraw: von GRAMET selbst besessener `ResizeObserver` auf `host`,
+// statt (wie vorher) an einen globalen `window.resize`-Listener der
+// App gekoppelt zu sein -- nötig, damit ein in eine fremde App eingebettetes
+// GRAMET auch auf Container-Größenänderungen reagiert, die das Browserfenster
+// selbst nicht betreffen (Sidebar-Toggle, Split-View o. Ä.). Guard gegen
+// mehrfache Observer auf demselben Host: `renderGramet` wird schon heute
+// wiederholt auf demselben `host` aufgerufen (Zoom-/Toggle-Änderungen in
+// `app.js`s `renderGm()`) -- ohne Disconnect würden sich die Observer dabei
+// aufsummieren und jede Größenänderung mehrfach neu zeichnen.
+const RESIZE_DEBOUNCE_MS = 150;
+
 export function renderGramet(host, grid, view, state = {}) {
-  host.innerHTML = "";
-  const { times, nk } = grid;
-  if (!times || times.length < 2) { host.textContent = "Keine Gitterdaten."; return null; }
+  host.__gmObserver?.disconnect();
 
-  const activeRows = (state.activeRows ?? DEFAULT_ROWS).filter((id) => ROW_DEFS[id]);
-  const lin = state.axis === "lin";
-  const hMinData = Math.max(10, grid.z[0] || 10);
-  const hMaxData = grid.z[nk - 1];
-  const zMin = state.zMin ?? hMinData, zMax = state.zMax ?? hMaxData;
+  function draw() {
+    host.innerHTML = "";
+    const { times, pos, nk } = grid;
+    if (!times || times.length < 2) { host.textContent = "Keine Gitterdaten."; return null; }
 
-  const hours = Math.max(1, (times[times.length - 1] - times[0]) / 3600);
-  const containerPw = Math.max(host.clientWidth || 0, 360) - M.l - M.r;
-  const pw = Math.max(hours * CHART_PX_PER_HOUR, containerPw);
+    const activeRows = (state.activeRows ?? DEFAULT_ROWS).filter((id) => ROW_DEFS[id]);
+    const lin = state.axis === "lin";
+    const hMinData = Math.max(10, grid.z[0] || 10);
+    const hMaxData = grid.z[nk - 1];
+    const zMin = state.zMin ?? hMinData, zMax = state.zMax ?? hMaxData;
 
-  const rowsH = activeRows.reduce((s, id) => s + ROW_DEFS[id].height, 0);
-  const mainH = Math.max(240, (host.clientHeight || 560) - TOPAX - GROUND_H - rowsH - GAP * 2 - BOT);
+    // Spannweite in `pos`-Einheiten (Point-Modus: Sekunden = `times`-Spanne,
+    // Path-Modus: verstrichene Sekunden seit Pfadbeginn) -- `CHART_PX_PER_HOUR`
+    // bleibt der gemeinsame Dichte-Maßstab für beide Modi.
+    const hours = Math.max(1, (pos[pos.length - 1] - pos[0]) / 3600);
+    const containerPw = Math.max(host.clientWidth || 0, 360) - M.l - M.r;
+    const pw = Math.max(hours * CHART_PX_PER_HOUR, containerPw);
 
-  const W = M.l + pw + M.r;
-  const H = TOPAX + mainH + GROUND_H + GAP + rowsH + GAP + BOT;
-  const dpr = window.devicePixelRatio || 1;
+    const rowsH = activeRows.reduce((s, id) => s + ROW_DEFS[id].height, 0);
+    const mainH = Math.max(240, (host.clientHeight || 560) - TOPAX - GROUND_H - rowsH - GAP * 2 - BOT);
 
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(W * dpr);
-  canvas.height = Math.round(H * dpr);
-  canvas.style.width = `${W}px`;
-  canvas.style.height = `${H}px`;
-  canvas.className = "gm-canvas";
-  const ctx = canvas.getContext("2d");
-  ctx.scale(dpr, dpr);
+    const W = M.l + pw + M.r;
+    const H = TOPAX + mainH + GROUND_H + GAP + rowsH + GAP + BOT;
+    const dpr = window.devicePixelRatio || 1;
 
-  const t0 = times[0], t1 = times[times.length - 1];
-  const x = (t) => M.l + (t - t0) / (t1 - t0) * pw;
-  x.left = M.l; x.right = M.l + pw;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    canvas.style.width = `${W}px`;
+    canvas.style.height = `${H}px`;
+    canvas.className = "gm-canvas";
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
 
-  const mainTop = TOPAX, mainBot = TOPAX + mainH;
-  const y = makeYScale(mainTop, mainBot, zMin, zMax, lin);
+    const p0 = pos[0], p1 = pos[pos.length - 1];
+    const x = (p) => M.l + (p - p0) / (p1 - p0) * pw;
+    x.left = M.l; x.right = M.l + pw;
 
-  const toggles = state.layerToggles ?? {};
-  drawBackground(ctx, grid, view, x, y, mainTop, mainBot);
-  // FG/BR/HZ gemeinsam als ein Schleier (s. `drawFogHaze`/`hazeColorAlpha`)
-  // vor Wolken/Hazards/Niederschlag, damit die auf dem Schleier noch klar
-  // lesbar bleiben statt darin zu verschwimmen -- auch VOR den Wolken, damit
-  // `drawClouds()` (s. u., mit maskierter cloudFrac) innerhalb der FG-Schicht
-  // nichts mehr zu zeichnen hat.
-  drawFogHaze(ctx, grid, view, x, y, mainTop, mainBot);
-  // Zellzerlegung einmal ziehen: Schaft, Amboss und Symbol müssen auf demselben
-  // Turm sitzen (s. `cbCells`).
-  const cells = toggles.cb !== false ? cbCells(grid, view.cb, x, y) : [];
-  if (toggles.cb !== false) drawCbShafts(ctx, cells, x, y);
-  // FG-Zellen aus der Ellipsentextur ausblenden (s. `maskFog`) -- sonst säße
-  // die "Reiskorn"-Wolkentextur unter dem Nebelschleier.
-  if (toggles.clouds !== false) drawClouds(ctx, grid, maskFog(grid, view.cloudFrac, view.fog), x, y);
-  if (toggles.cb !== false) {
-    drawCbAnvils(ctx, cells, x, y);
-    drawCbGlyphs(ctx, cells);
+    const mainTop = TOPAX, mainBot = TOPAX + mainH;
+    const y = makeYScale(mainTop, mainBot, zMin, zMax, lin);
+
+    const toggles = state.layerToggles ?? {};
+    drawBackground(ctx, grid, view, x, y, mainTop, mainBot);
+    // FG/BR/HZ gemeinsam als ein Schleier (s. `drawFogHaze`/`hazeColorAlpha`)
+    // vor Wolken/Hazards/Niederschlag, damit die auf dem Schleier noch klar
+    // lesbar bleiben statt darin zu verschwimmen -- auch VOR den Wolken, damit
+    // `drawClouds()` (s. u., mit maskierter cloudFrac) innerhalb der FG-Schicht
+    // nichts mehr zu zeichnen hat.
+    drawFogHaze(ctx, grid, view, x, y, mainTop, mainBot);
+    // Zellzerlegung einmal ziehen: Schaft, Amboss und Symbol müssen auf demselben
+    // Turm sitzen (s. `cbCells`).
+    const cells = toggles.cb !== false ? cbCells(grid, view.cb, x, y) : [];
+    if (toggles.cb !== false) drawCbShafts(ctx, cells, x, y);
+    // FG-Zellen aus der Ellipsentextur ausblenden (s. `maskFog`) -- sonst säße
+    // die "Reiskorn"-Wolkentextur unter dem Nebelschleier.
+    if (toggles.clouds !== false) drawClouds(ctx, grid, maskFog(grid, view.cloudFrac, view.fog), x, y);
+    if (toggles.cb !== false) {
+      drawCbAnvils(ctx, cells, x, y);
+      drawCbGlyphs(ctx, cells);
+    }
+    const seed = hashSeed(`${grid.meta.lat},${grid.meta.lon},${grid.meta.elevation},${times[0]}`);
+    if (toggles.precip !== false) drawPrecip(ctx, view.precip, pos, x, y, seed);
+    // Vereisung/Turbulenz bewusst ÜBER Wolken/Niederschlag: beides sind Gefahren-
+    // hinweise, die auf der Wolke "aufsitzen" sollen, statt darunter zu verschwinden
+    // -- die Kontur-Füllung ist transparent genug (s. `drawHazardArea`), dass die
+    // Wolkentextur durchscheint.
+    if (toggles.hazards !== false) {
+      drawHazardArea(ctx, grid, view.hazards.icing, ICING_STYLES, x, y);
+      drawIcingSevereGlyphs(ctx, grid, view.hazards.icing, x, y);
+      drawHazardArea(ctx, grid, view.hazards.turbulence, TURB_STYLES, x, y);
+      drawTurbulenceSevereGlyphs(ctx, grid, view.hazards.turbulence, x, y);
+    }
+    if (toggles.isotherms !== false) drawIsotherms(ctx, view.isotherms, x, y);
+    if (toggles.isotachs !== false) drawIsotachs(ctx, view.isotachs, x, y);
+    if (toggles.tropopause !== false) drawTropopause(ctx, view.tropopause, x, y);
+
+    // Windfiedern: opt-in (Default aus, s. settings.js), weil sie die ohnehin
+    // volle Hauptfläche (Wolken/Hazards/Niederschlag) zusätzlich belasten --
+    // deshalb das dämpfende Fade darunter, statt jedem Fähnchen einen eigenen
+    // Halo zu geben (Test auf Wunsch, s. Feedback).
+    // nRows=14 statt der Cross-Section-Vorgabe (7): GRAMETs Hauptfläche ist
+    // ohne die feste Panelhöhe der Cross-Section i. d. R. deutlich höher,
+    // doppelte Zeilenzahl bleibt darin noch überlappungsfrei (s. Feedback).
+    if (toggles.windbarbs) {
+      ctx.fillStyle = "rgba(255,255,255,0.6)";
+      ctx.fillRect(x.left, mainTop, x.right - x.left, mainBot - mainTop);
+      drawWindBarbOverlay(ctx, grid, x, y, { nRows: 14 });
+    }
+
+    ctx.strokeStyle = MUTED; ctx.lineWidth = 1;
+    ctx.strokeRect(x.left + 0.5, mainTop + 0.5, pw - 1, mainH - 1);
+    drawHeightAxis(ctx, y, zMin, zMax, x, lin);
+    if (grid.meta.mode === "path") pathGridLines(ctx, grid, x, mainTop, mainBot);
+    else timeGridLines(ctx, times, x, mainTop, mainBot);
+    // Path-Modus: sichtbares Ende, wenn der Pfad die Modell-Bbox verlassen hat
+    // (s. `path.js` `fetchGridForPath`) -- kein stiller Abbruch. Point-Modus
+    // übergibt `state.pathStop` nie, hier also ohne Wirkung.
+    if (state.pathStop) drawPathStopMarker(ctx, x, mainTop, mainBot, state.pathStop.reason);
+    drawGround(ctx, grid, view, x, mainBot, GROUND_H);
+
+    let rowTop = mainBot + GROUND_H + GAP;
+    for (const id of activeRows) {
+      const def = ROW_DEFS[id];
+      ctx.save();
+      ctx.beginPath(); ctx.rect(x.left, rowTop, pw, def.height); ctx.clip();
+      def.draw(ctx, grid, view, x, rowTop, def.height);
+      ctx.restore();
+      ctx.strokeStyle = GRID; ctx.lineWidth = 1;
+      ctx.strokeRect(x.left + 0.5, rowTop + 0.5, pw - 1, def.height - 1);
+      // Beschriftung im linken Randfeld (wie die Höhenachse), nicht über den
+      // Werten -- dort war sie kaum lesbar (überlagert von Fiedern/Zahlen).
+      drawRowLabel(ctx, typeof def.label === "function" ? def.label() : def.label, x.left - 4, rowTop, def.height);
+      rowTop += def.height;
+    }
+
+    if (grid.meta.mode === "path") drawPathAxis(ctx, grid, x, mainTop, rowTop);
+    else drawTimeAxis(ctx, times, x, mainTop, rowTop);
+    ctx.fillStyle = INK; ctx.font = "bold 12px system-ui, sans-serif"; ctx.textAlign = "left";
+    ctx.fillText("GRAMET", x.left, 13);
+
+    const axis = makeStickyAxis(canvas, W, H, dpr);
+    const plot = document.createElement("div");
+    plot.className = "gm-plot";
+    plot.append(axis, canvas);
+
+    host.append(plot);
+    setupHover(host, canvas, axis, grid, { x, y, mainTop, mainBot, view });
+    state.onRedraw?.(canvas);
+    return canvas;
   }
-  const seed = hashSeed(`${grid.meta.lat},${grid.meta.lon},${grid.meta.elevation},${times[0]}`);
-  if (toggles.precip !== false) drawPrecip(ctx, view.precip, times, x, y, seed);
-  // Vereisung/Turbulenz bewusst ÜBER Wolken/Niederschlag: beides sind Gefahren-
-  // hinweise, die auf der Wolke "aufsitzen" sollen, statt darunter zu verschwinden
-  // -- die Kontur-Füllung ist transparent genug (s. `drawHazardArea`), dass die
-  // Wolkentextur durchscheint.
-  if (toggles.hazards !== false) {
-    drawHazardArea(ctx, grid, view.hazards.icing, ICING_STYLES, x, y);
-    drawIcingSevereGlyphs(ctx, grid, view.hazards.icing, x, y);
-    drawHazardArea(ctx, grid, view.hazards.turbulence, TURB_STYLES, x, y);
-    drawTurbulenceSevereGlyphs(ctx, grid, view.hazards.turbulence, x, y);
-  }
-  if (toggles.isotherms !== false) drawIsotherms(ctx, view.isotherms, x, y);
-  if (toggles.isotachs !== false) drawIsotachs(ctx, view.isotachs, x, y);
-  if (toggles.tropopause !== false) drawTropopause(ctx, view.tropopause, x, y);
 
-  // Windfiedern: opt-in (Default aus, s. settings.js), weil sie die ohnehin
-  // volle Hauptfläche (Wolken/Hazards/Niederschlag) zusätzlich belasten --
-  // deshalb das dämpfende Fade darunter, statt jedem Fähnchen einen eigenen
-  // Halo zu geben (Test auf Wunsch, s. Feedback).
-  // nRows=14 statt der Cross-Section-Vorgabe (7): GRAMETs Hauptfläche ist
-  // ohne die feste Panelhöhe der Cross-Section i. d. R. deutlich höher,
-  // doppelte Zeilenzahl bleibt darin noch überlappungsfrei (s. Feedback).
-  if (toggles.windbarbs) {
-    ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.fillRect(x.left, mainTop, x.right - x.left, mainBot - mainTop);
-    drawWindBarbOverlay(ctx, grid, x, y, { nRows: 14 });
-  }
+  const canvas = draw();
 
-  ctx.strokeStyle = MUTED; ctx.lineWidth = 1;
-  ctx.strokeRect(x.left + 0.5, mainTop + 0.5, pw - 1, mainH - 1);
-  drawHeightAxis(ctx, y, zMin, zMax, x, lin);
-  timeGridLines(ctx, times, x, mainTop, mainBot);
-  drawGround(ctx, grid, view, x, mainBot, GROUND_H);
+  let resizeTimer = null;
+  const ro = new ResizeObserver(() => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(draw, RESIZE_DEBOUNCE_MS);
+  });
+  ro.observe(host);
+  host.__gmObserver = ro;
 
-  let rowTop = mainBot + GROUND_H + GAP;
-  for (const id of activeRows) {
-    const def = ROW_DEFS[id];
-    ctx.save();
-    ctx.beginPath(); ctx.rect(x.left, rowTop, pw, def.height); ctx.clip();
-    def.draw(ctx, grid, view, x, rowTop, def.height);
-    ctx.restore();
-    ctx.strokeStyle = GRID; ctx.lineWidth = 1;
-    ctx.strokeRect(x.left + 0.5, rowTop + 0.5, pw - 1, def.height - 1);
-    // Beschriftung im linken Randfeld (wie die Höhenachse), nicht über den
-    // Werten -- dort war sie kaum lesbar (überlagert von Fiedern/Zahlen).
-    drawRowLabel(ctx, typeof def.label === "function" ? def.label() : def.label, x.left - 4, rowTop, def.height);
-    rowTop += def.height;
-  }
-
-  drawTimeAxis(ctx, times, x, mainTop, rowTop);
-  ctx.fillStyle = INK; ctx.font = "bold 12px system-ui, sans-serif"; ctx.textAlign = "left";
-  ctx.fillText("GRAMET", x.left, 13);
-
-  const axis = makeStickyAxis(canvas, W, H, dpr);
-  const plot = document.createElement("div");
-  plot.className = "gm-plot";
-  plot.append(axis, canvas);
-
-  host.append(plot);
-  setupHover(host, canvas, axis, grid, { x, y, mainTop, mainBot, view });
   return canvas;
 }
 
@@ -330,14 +367,14 @@ function makeYScale(top, bot, hMin, hMax, lin) {
 // --- Hintergrund (Tag/Nacht) --------------------------------------------------
 
 function drawBackground(ctx, grid, view, x, y, top, bot) {
-  const { times } = grid;
+  const { pos } = grid;
   const span = x.right - x.left, h = bot - top;
 
   // Grundverlauf Tag/Nacht -- waagerecht, unverändert.
   const grad = ctx.createLinearGradient(x.left, 0, x.right, 0);
   let lastOff = -1;
-  for (let i = 0; i < times.length; i++) {
-    let off = clamp((x(times[i]) - x.left) / span, 0, 1);
+  for (let i = 0; i < pos.length; i++) {
+    let off = clamp((x(pos[i]) - x.left) / span, 0, 1);
     if (off <= lastOff) off = Math.min(1, lastOff + 1e-4);
     grad.addColorStop(off, mixHex(NIGHT_COLOR, DAY_COLOR, view.daylight[i]));
     lastOff = off;
@@ -446,15 +483,15 @@ function hazeColorAlpha(entry, visM, rh0) {
 }
 
 function drawFogHaze(ctx, grid, view, x, y, top, bot) {
-  const { times, nk } = grid;
+  const { pos, nk } = grid;
   const span = x.right - x.left, h = bot - top;
   if (span <= 0 || h <= 0 || !view.fog) return;
 
   // Waagerecht: Farbe+Stärke je Stunde, wie der Tag/Nacht-Grundverlauf.
   const colorGrad = ctx.createLinearGradient(x.left, 0, x.right, 0);
   let lastOff = -1, anyHaze = false;
-  for (let i = 0; i < times.length; i++) {
-    let off = clamp((x(times[i]) - x.left) / span, 0, 1);
+  for (let i = 0; i < pos.length; i++) {
+    let off = clamp((x(pos[i]) - x.left) / span, 0, 1);
     if (off <= lastOff) off = Math.min(1, lastOff + 1e-4);
     const ca = hazeColorAlpha(view.fog[i], grid.surface?.visibility?.[i], grid.rh[i * nk]);
     if (ca) anyHaze = true;
@@ -548,12 +585,12 @@ function maskFog(grid, cloudFrac, fogCols) {
 // Streifen mit nur -0.5 °C nicht schon voll bereift wirkt.
 const GROUND_FROST_SPAN = 5;
 function drawGround(ctx, grid, view, x, top, h) {
-  const { times, surface } = grid;
+  const { pos, surface } = grid;
   const span = x.right - x.left;
   const grad = ctx.createLinearGradient(x.left, 0, x.right, 0);
   let lastOff = -1;
-  for (let i = 0; i < times.length; i++) {
-    let off = clamp((x(times[i]) - x.left) / span, 0, 1);
+  for (let i = 0; i < pos.length; i++) {
+    let off = clamp((x(pos[i]) - x.left) / span, 0, 1);
     if (off <= lastOff) off = Math.min(1, lastOff + 1e-4);
     const dayNight = blend3(GROUND_NIGHT, GROUND_DAY, view.daylight[i]);
     const t2m = surface?.t2m?.[i];
@@ -881,9 +918,9 @@ const PRECIP_SIZE_MIN = 0.80, PRECIP_SIZE_SPAN = 0.45;
 // Behandlung würde die Vorhänge benachbarter Stunden ungleich verteilen.
 const PRECIP_TIME_SHIFT = 0.5;
 
-function drawPrecip(ctx, entries, times, x, y, seed) {
-  const dt = times.length > 1 ? times[1] - times[0] : 3600;
-  const colW = Math.max(1, x(times[0] + dt) - x(times[0]));
+function drawPrecip(ctx, entries, pos, x, y, seed) {
+  const dt = pos.length > 1 ? pos[1] - pos[0] : 3600;
+  const colW = Math.max(1, x(pos[0] + dt) - x(pos[0]));
   ctx.save();
   for (const e of entries) {
     // Auf den Rahmen begrenzen: die erste Stunde rutscht sonst mit ihrem
@@ -904,7 +941,7 @@ function drawPrecip(ctx, entries, times, x, y, seed) {
     // Symbolzahl (Höhenumschalter), verschöbe sich der ganze Rest mit.
     // Die Symbolzahl je Vorhang hängt weiterhin an der Höhenachse, ein
     // umgeschalteter Vorhang sieht also anders aus -- aber nur er.
-    const col = Math.round((e.t - times[0]) / dt);
+    const col = Math.round((e.t - pos[0]) / dt);
     for (let s = 0; s <= steps; s++) {
       // Erstes und letztes Symbol NICHT vertikal versetzen: der Vorhang soll
       // weiterhin exakt an der Wolkenoberkante ansetzen und den Boden
@@ -1094,6 +1131,60 @@ function drawTimeAxis(ctx, times, x, yTop, yBot) {
   }
 }
 
+// --- Path-Achse (verstrichene Zeit seit Pfadbeginn, Path-Modus) -------------
+//
+// `grid.pos` ist im Path-Modus keine Kalenderzeit mehr (s. `path.js`
+// `posOfPath`), sondern verstrichene Sekunden seit dem ersten Wegpunkt --
+// `timeGridLines`/`drawTimeAxis` (Tages-/Stundengrenzen per `Date`) wären
+// hier bedeutungslos. `niceTicks` (aus `crosssection.js`, dort für die
+// Höhenachse) liefert stattdessen einfach runde Werte über die Spannweite.
+const PATH_TICK_COUNT = 8;
+
+function pathGridLines(ctx, grid, x, top, bot) {
+  const { pos } = grid;
+  const ticks = niceTicks(pos[0], pos[pos.length - 1], PATH_TICK_COUNT);
+  ctx.strokeStyle = "#c9c8c2"; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+  for (const t of ticks) {
+    ctx.beginPath(); ctx.moveTo(x(t), top); ctx.lineTo(x(t), bot); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+}
+
+function drawPathAxis(ctx, grid, x, yTop, yBot) {
+  const { pos } = grid;
+  const ticks = niceTicks(pos[0], pos[pos.length - 1], PATH_TICK_COUNT);
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = INK; ctx.font = "600 10px system-ui, sans-serif"; ctx.textAlign = "center";
+  for (const t of ticks) {
+    ctx.fillText(fmtElapsed(t), x(t), yBot + 12);
+  }
+}
+
+// "+45 min" / "+2:15 h" -- verstrichene Zeit seit Pfadbeginn.
+function fmtElapsed(sec) {
+  const s = Math.round(sec);
+  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  if (h <= 0) return `+${m} min`;
+  return m === 0 ? `+${h} h` : `+${h}:${String(m).padStart(2, "0")} h`;
+}
+
+// Path-Modus: sichtbares Ende am rechten Chartrand, wenn der Pfad die
+// Modell-Bbox verlassen hat und `fetchGridForPath` (path.js) deshalb keine
+// weiteren Spalten mehr geholt hat -- `x.right` liegt exakt auf der letzten
+// tatsächlich geplotteten Spalte (s. `x()`-Konstruktion: `p1 = pos[pos.length-1]`
+// ist die letzte VOR dem Abbruch gefetchte Position).
+function drawPathStopMarker(ctx, x, top, bot, reason) {
+  const px = x.right;
+  ctx.save();
+  ctx.strokeStyle = "#b71c1c"; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+  ctx.beginPath(); ctx.moveTo(px, top); ctx.lineTo(px, bot); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#b71c1c"; ctx.font = "600 10px system-ui, sans-serif"; ctx.textAlign = "right";
+  ctx.textBaseline = "top";
+  ctx.fillText(reason, px - 3, top + 3);
+  ctx.restore();
+}
+
 // --- Hover (DOM-Overlay) -------------------------------------------------------
 
 function setupHover(host, canvas, axis, grid, info) {
@@ -1112,12 +1203,12 @@ function setupHover(host, canvas, axis, grid, info) {
     const r = canvas.getBoundingClientRect();
     const px = e.clientX - r.left, py = e.clientY - r.top;
     if (py < mainTop || py > mainBot || px < x.left || px > x.right) { tip.style.display = "none"; return; }
-    const t0 = grid.times[0], t1 = grid.times[grid.times.length - 1];
+    const p0 = grid.pos[0], p1 = grid.pos[grid.pos.length - 1];
     const frac = (px - x.left) / (x.right - x.left);
-    const tGuess = t0 + frac * (t1 - t0);
+    const pGuess = p0 + frac * (p1 - p0);
     let i = 0, best = Infinity;
-    for (let j = 0; j < grid.times.length; j++) {
-      const d = Math.abs(grid.times[j] - tGuess);
+    for (let j = 0; j < grid.pos.length; j++) {
+      const d = Math.abs(grid.pos[j] - pGuess);
       if (d < best) { best = d; i = j; }
     }
     const h = y.inv(py);
@@ -1161,7 +1252,7 @@ function setupHover(host, canvas, axis, grid, info) {
 // weather_code als METAR-nahes Kürzel (dieselbe Tabelle wie im Briefing) --
 // "NSW"/"N/A" (kein signifikantes Wetter) wird wie im echten METAR weggelassen.
 function drawWeatherRow(ctx, grid, view, x, top, height) {
-  const { times, surface } = grid;
+  const { pos, surface } = grid;
   if (!surface?.wcode) return;
   ctx.font = "10px system-ui, sans-serif";
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -1171,13 +1262,13 @@ function drawWeatherRow(ctx, grid, view, x, top, height) {
   // enger als lange wie "FZFG", statt beide gleich zu behandeln (s. Feedback
   // zu den Zahlenzeilen, hier dieselbe Idee).
   let lastRight = -Infinity;
-  for (let i = 0; i < times.length; i++) {
+  for (let i = 0; i < pos.length; i++) {
     const code = surface.wcode[i];
     if (!Number.isFinite(code)) continue;
     const entry = view?.fog?.[i];
     const label = metarWeather(code, fog.toPhenomenon(entry));
     if (label === "NSW" || label === "N/A") continue;
-    const px = x(times[i]);
+    const px = x(pos[i]);
     const w = ctx.measureText(label).width;
     if (px - w / 2 < lastRight + 4) continue;
     // Unsichere Befunde (RH-Fallback statt CLC/Kondensat, s. hazards/fog.js)

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GRAMET Path-Modus (Debug)</title>
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; background: #fff; color: #0b0b0b; }
+    #controls {
+      padding: 10px 14px; border-bottom: 1px solid #d9d8d3;
+      display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    }
+    #status { color: #52514e; font-size: 13px; }
+    #gm-body { height: 640px; overflow: auto; position: relative; }
+    button { cursor: pointer; }
+  </style>
+</head>
+<body>
+  <!--
+    Reine Entwicklungsseite für den GRAMET-Path-Modus -- kein Teil der
+    ausgelieferten App (Vite build fasst nur index.html), ruft `path.js`/
+    `render.js` direkt auf, ganz ohne app.js/state. S. Plan "GRAMET:
+    Vorbereitung für Path-Modus", Stufe 6.
+  -->
+  <div id="controls">
+    <button id="run-inside" type="button">Pfad im Modellgebiet</button>
+    <button id="run-exit" type="button">Pfad verlässt die Modell-Bbox</button>
+    <span id="status"></span>
+  </div>
+  <div id="gm-body"></div>
+  <script type="module" src="./gramet-path.js"></script>
+</body>
+</html>

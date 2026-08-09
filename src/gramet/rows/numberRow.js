@@ -17,7 +17,7 @@ export const NUMBER_ROW_HEIGHT = 34;
  * Kurzem einheitenlosen Zellen (Einheit steht im Zeilenlabel), lässt die
  * meisten Zeilen jede Stunde statt nur jede zweite zeigen (s. Feedback).
  */
-export function drawNumberRow(ctx, times, x, top, height, series, opts = {}) {
+export function drawNumberRow(ctx, pos, x, top, height, series, opts = {}) {
   const padPx = opts.padPx ?? 4; // Mindestabstand zwischen benachbarten Labels
   const lineH = height / (series.length + 1);
   ctx.font = opts.font ?? "11px system-ui, sans-serif";
@@ -25,8 +25,8 @@ export function drawNumberRow(ctx, times, x, top, height, series, opts = {}) {
   ctx.textBaseline = "middle";
 
   let lastRight = -Infinity;
-  for (let i = 0; i < times.length; i++) {
-    const px = x(times[i]);
+  for (let i = 0; i < pos.length; i++) {
+    const px = x(pos[i]);
     // Mehrere gestapelte Werte teilen sich dieselbe Spalte (horizontal) --
     // für die Kollision zählt nur die breiteste der (vorhandenen) Zeilen.
     const texts = series.map((s) => {

@@ -410,16 +410,16 @@ function cellLayout(seed, X0, X1, hourPx) {
  */
 export function cbCells(grid, cb, x, y) {
   if (!cb) return [];
-  const { meta, times } = grid;
-  const dt = times.length > 1 ? times[1] - times[0] : 3600;
+  const { meta, times, pos } = grid;
+  const dt = pos.length > 1 ? pos[1] - pos[0] : 3600;
   const cells = [];
 
   for (const [i, j] of runsOf(cb, (c) => !!c)) {
     const pts = [];
     for (let k = i; k <= j; k++) {
-      pts.push({ cx: x(times[k]), yT: y(cb[k].top), yB: y(Math.max(0, cb[k].base)) });
+      pts.push({ cx: x(pos[k]), yT: y(cb[k].top), yB: y(Math.max(0, cb[k].base)) });
     }
-    const X0 = x(times[i] - dt / 2), X1 = x(times[j] + dt / 2);
+    const X0 = x(pos[i] - dt / 2), X1 = x(pos[j] + dt / 2);
     const hourPx = pts.length > 1 ? (pts[1].cx - pts[0].cx) : (X1 - X0);
     const runSeed = hashSeed(`cb:${meta.lat},${meta.lon},${times[i]}`);
 
@@ -446,7 +446,7 @@ export function cbCells(grid, cb, x, y) {
       // dieselbe Kuppelform und dasselbe Randrauschen.
       const seed = hashSeed(`cbcell:${meta.lat},${meta.lon},${times[i]}:${Math.round(cx)}`);
       cells.push({
-        hour, t: times[hour], kind: cb[hour].kind,
+        hour, t: pos[hour], kind: cb[hour].kind,
         cx, hw, x0, x1, yTop, yBot, hourPx, seed,
         top: cellTopEdge(seed, yTop, cx, hw),
         bot,

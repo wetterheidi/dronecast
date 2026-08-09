@@ -658,6 +658,12 @@ function renderGm() {
       hazards: settings.gmHazardsOn,
       windbarbs: settings.gmWindbarbsOn,
     },
+    // GRAMET zeichnet bei Container-Resize jetzt intern über seinen eigenen
+    // ResizeObserver neu (s. render.js) -- ohne diesen Callback bliebe
+    // `gmCanvas` nach so einem Redraw auf dem alten, dann aus dem DOM
+    // entfernten Canvas stehen und der PNG-Export exportierte einen
+    // veralteten Stand.
+    onRedraw: (canvas) => { state.data.gmCanvas = canvas; },
   });
 }
 
@@ -1119,13 +1125,15 @@ el("brf-close").addEventListener("click", () => { el("briefing").hidden = true; 
 el("brf-print").addEventListener("click", printBriefing);
 
 // Bei Größenänderung offenes Overlay neu zeichnen (SVG an Container gebunden).
+// GRAMET zeichnet sich seit dem Path-Modus-Umbau selbst über einen eigenen
+// ResizeObserver auf seinem Host-Element neu (render.js) -- hier also bewusst
+// nicht mehr mitbedient.
 let resizeTimer = null;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
     if (!el("meteogram").hidden) openMeteogram();
     if (!el("crosssection").hidden) renderXs();
-    if (!el("gramet").hidden) renderGm();
   }, 150);
 });
 

@@ -14,7 +14,7 @@ const KT_PER_MS = 1.94384;
 export const WIND_ROW_HEIGHT = 34;
 
 export function drawWindRow(ctx, grid, x, top, height, opts = {}) {
-  const { surface, times } = grid;
+  const { surface, pos } = grid;
   if (!surface) return;
   const size = opts.size ?? 22;
   const color = opts.color ?? "#0b1220";
@@ -22,8 +22,8 @@ export function drawWindRow(ctx, grid, x, top, height, opts = {}) {
   const cy = top + height / 2;
 
   let lastX = -Infinity;
-  for (let i = 0; i < times.length; i++) {
-    const px = x(times[i]);
+  for (let i = 0; i < pos.length; i++) {
+    const px = x(pos[i]);
     if (px - lastX < minGapPx) continue;
     const spd = surface.ws10[i], dir = surface.wd10[i];
     if (!Number.isFinite(spd) || !Number.isFinite(dir)) continue;
@@ -48,7 +48,7 @@ export function drawWindRow(ctx, grid, x, top, height, opts = {}) {
  * dadurch by construction ohne Überlappung, exakt wie in der Cross-Section.
  */
 export function drawWindBarbOverlay(ctx, grid, x, y, opts = {}) {
-  const { times } = grid;
+  const { pos } = grid;
   const nRows = opts.nRows ?? 7;
   const size = opts.size ?? 20;
   const color = opts.color ?? "#0b1220";
@@ -56,12 +56,12 @@ export function drawWindBarbOverlay(ctx, grid, x, y, opts = {}) {
   for (let r = 0; r < nRows; r++) {
     const py = y.top + (y.bot - y.top) * (r + 0.5) / nRows;
     const h = y.inv(py);
-    for (let i = 0; i < times.length; i++) {
+    for (let i = 0; i < pos.length; i++) {
       const s = sampleAt(grid, i, h);
       if (!Number.isFinite(s.u) || !Number.isFinite(s.v)) continue;
       const spdKt = Math.hypot(s.u, s.v) * KT_PER_MS;
       const dirDeg = (Math.atan2(-s.u, -s.v) * 180 / Math.PI + 360) % 360;
-      drawBarb(ctx, x(times[i]), py, spdKt, dirDeg, { size, color });
+      drawBarb(ctx, x(pos[i]), py, spdKt, dirDeg, { size, color });
     }
   }
 }

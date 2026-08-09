@@ -108,7 +108,7 @@ export function deriveView(grid) {
 
 function isothermPolylines(grid, thresholdC) {
   const thrK = thresholdC + KELVIN;
-  const { nk, times } = grid, nt = times.length;
+  const { nk, pos } = grid, nt = pos.length;
   const active = []; // { line:[{t,z}], lastZ, lastI }
   const finished = [];
 
@@ -126,14 +126,14 @@ function isothermPolylines(grid, thresholdC) {
       }
       if (bestJ >= 0 && bestD < ISOTHERM_MAX_JUMP_M) {
         usedZ[bestJ] = true;
-        a.line.push({ t: times[i], z: zs[bestJ] });
+        a.line.push({ t: pos[i], z: zs[bestJ] });
         a.lastZ = zs[bestJ]; a.lastI = i;
       }
     }
     for (const a of active) if (a.lastI < i && a.line.length > 1) finished.push(a.line);
     for (let ai = active.length - 1; ai >= 0; ai--) if (active[ai].lastI < i) active.splice(ai, 1);
     for (let j = 0; j < zs.length; j++) {
-      if (!usedZ[j]) active.push({ line: [{ t: times[i], z: zs[j] }], lastZ: zs[j], lastI: i });
+      if (!usedZ[j]) active.push({ line: [{ t: pos[i], z: zs[j] }], lastZ: zs[j], lastI: i });
     }
   }
   for (const a of active) if (a.line.length > 1) finished.push(a.line);
@@ -182,13 +182,13 @@ const OUTSIDE_FIELD = -1e6;
  * sich sauber am Rand statt quer durchs Bild.
  */
 export function contour(grid, field, threshold) {
-  const { nk, times } = grid, nt = times.length;
+  const { nk, pos: posArr } = grid, nt = posArr.length;
   const segments = [];
 
   const val = (i, k) => (i < 0 || i >= nt || k < 0 || k >= nk) ? OUTSIDE_FIELD : field[i * nk + k];
   const pos = (i, k) => {
     const ci = clampIdx(i, nt), ck = clampIdx(k, nk);
-    return { t: times[ci], z: grid.z[ci * nk + ck] };
+    return { t: posArr[ci], z: grid.z[ci * nk + ck] };
   };
 
   for (let i = -1; i < nt; i++) {
@@ -269,7 +269,7 @@ function chainSegments(segments) {
 // --- Tropopause (WMO-Kriterium) ----------------------------------------------
 
 function tropopause(grid) {
-  const { nk, times } = grid, nt = times.length;
+  const { nk, pos } = grid, nt = pos.length;
   const line = [];
   for (let i = 0; i < nt; i++) {
     let foundZ = NaN;
@@ -294,7 +294,7 @@ function tropopause(grid) {
       // Domänendeckel.
       if (ok && reachedLimit) { foundZ = z; break; }
     }
-    if (Number.isFinite(foundZ)) line.push({ t: times[i], z: foundZ });
+    if (Number.isFinite(foundZ)) line.push({ t: pos[i], z: foundZ });
   }
   return smooth3(line);
 }
@@ -314,10 +314,10 @@ function smooth3(line) {
 // Kontinuierlicher Faktor: 1 oberhalb 0° Sonnenhöhe, 0 unterhalb -12°
 // (nautische Dämmerung), dazwischen linear.
 function daylight(grid) {
-  const { times, meta } = grid;
+  const { times, lat, lon } = grid;
   const out = new Float32Array(times.length);
   for (let i = 0; i < times.length; i++) {
-    const alt = sunAltitude(times[i] * 1000, meta.lat, meta.lon);
+    const alt = sunAltitude(times[i] * 1000, lat[i], lon[i]);
     out[i] = alt >= 0 ? 1 : alt <= -12 ? 0 : (alt + 12) / 12;
   }
   return out;
@@ -407,7 +407,7 @@ function freezingHeightAt(grid, i) {
  */
 function precipEntries(grid, cloudBase, fogCols) {
   const out = [];
-  const { times, surface } = grid;
+  const { times, pos, surface } = grid;
   if (!surface) return out;
   const cloudFrac = deriveGrid(grid).cloudFrac;
   for (let i = 0; i < times.length; i++) {
@@ -442,7 +442,7 @@ function precipEntries(grid, cloudBase, fogCols) {
     // Nominale Mindestrate, wenn nur weather_code (nicht die Menge) den
     // Niederschlag anzeigt -- sonst bliebe der Vorhang trotz "-RA" unsichtbar.
     const rate = hasAmount ? amt : 0.3;
-    out.push({ t: times[i], zTop, freezingZ, type: isSnow ? "sn" : "ra", rate });
+    out.push({ t: pos[i], zTop, freezingZ, type: isSnow ? "sn" : "ra", rate });
   }
   return out;
 }
@@ -478,7 +478,7 @@ function precipEntries(grid, cloudBase, fogCols) {
  * Cb-Signal: Schauerintensität allein belegt keinen vergletscherten Oberrand.
  */
 function cbColumns(grid, cloudFrac, cloudBase, tropopauseLine, fogCols) {
-  const { nk, times, surface } = grid;
+  const { nk, times, pos, surface } = grid;
   const conv = convection.computeColumns(grid);
   const out = [];
   for (let i = 0; i < times.length; i++) {
@@ -532,7 +532,7 @@ function cbColumns(grid, cloudFrac, cloudBase, tropopauseLine, fogCols) {
 
     const topTC = tempAtHeight(grid, i, top);
     const glaciated = Number.isFinite(topTC) && topTC <= CB_GLACIATION_C;
-    const tropZ = tropAt(tropopauseLine, times[i]);
+    const tropZ = tropAt(tropopauseLine, pos[i]);
     const nearTropopause = Number.isFinite(tropZ) && tropZ - top < CB_TROPOPAUSE_GAP_M;
     const kind = wxThunder || (glaciated && nearTropopause) ? "cb" : "tcu";
     out.push({ base, top, kind });
