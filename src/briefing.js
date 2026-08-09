@@ -209,8 +209,9 @@ function metarDir(deg) {
   return String(r).padStart(3, "0");
 }
 
-/** Sicht (m) mit METAR-Rundung. */
-function metarVis(m) {
+/** Sicht (m) mit METAR-Rundung -- auch von der GRAMET-Sicht-Zeile genutzt
+ *  (s. render.js), damit beide Darstellungen dieselbe Rundung zeigen. */
+export function metarVis(m) {
   const v = parseFloat(m);
   if (Number.isNaN(v)) return "N/A";
   if (v >= 10000) return ">10000";

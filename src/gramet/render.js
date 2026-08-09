@@ -22,7 +22,7 @@ import { drawWindRow, WIND_ROW_HEIGHT, drawWindBarbOverlay } from "./rows/wind.j
 import { drawNumberRow, NUMBER_ROW_HEIGHT } from "./rows/numberRow.js";
 import { niceLogHeights, niceTicks, fmtH } from "../crosssection.js";
 import { CHART_PX_PER_HOUR } from "../windbarb.js";
-import { fmtHeight, fmtWind, fmtTemp, fmtDir } from "../units.js";
+import { fmtHeight, fmtWind, fmtTemp, fmtDir, windUnit, windToDisplay, tempUnit, tempToDisplay } from "../units.js";
 import { metarWeather } from "../briefing.js";
 import * as fog from "./hazards/fog.js";
 
@@ -94,22 +94,45 @@ const TURB_SYMBOL_INK = "#c62828";
 const ISOTACH_COLOR = "#7b2fbf";
 const ISOTACH_DASH = [7, 3, 1, 3];
 
+/** Sicht fürs GRAMET, knapper als `metarVis` im Briefing (Meter, feste
+ *  METAR-Rundung) -- hier ist die Spaltenbreite pro Stunde eng, daher km statt
+ *  m und Dezimalstelle nur unterhalb 5 km, wo die Präzision für die
+ *  VLOS-Einschätzung zählt (s. Feedback); ab 5 km reicht der volle km, ab
+ *  10 km nur noch ">10". */
+function fmtVisKm(m) {
+  if (!Number.isFinite(m)) return "";
+  if (m >= 10000) return ">10";
+  const km = m / 1000;
+  return km >= 5 ? String(Math.round(km)) : km.toFixed(1);
+}
+
 const ROW_DEFS = {
   wind: {
     height: WIND_ROW_HEIGHT, label: ["Wind", "10 m"],
     draw: (ctx, grid, view, x, top, h) => drawWindRow(ctx, grid, x, top, h),
   },
+  // Zellen zeigen nur noch die nackte Zahl (kein " °C"/" km/h" pro Wert) --
+  // die Einheit steht wie bei SLP schon im Zeilenlabel; erst das macht die
+  // Werte schmal genug, um jede Stunde statt nur jede zweite zu plotten
+  // (s. Feedback). `label` als Funktion, weil die Einheit vom Nutzer
+  // umschaltbar ist (Einstellungen) und `ROW_DEFS` nur einmal gebaut wird.
   tempdew: {
-    height: NUMBER_ROW_HEIGHT, label: ["T /", "Taupunkt"],
+    height: NUMBER_ROW_HEIGHT, label: () => ["T / Td", tempUnit()],
     draw: (ctx, grid, view, x, top, h) => drawNumberRow(ctx, grid.times, x, top, h, [
-      { values: grid.surface.t2m, fmt: (v) => fmtTemp(v), color: "#c0392b" },
-      { values: grid.surface.td2m, fmt: (v) => fmtTemp(v), color: "#2980b9" },
+      { values: grid.surface.t2m, fmt: (v) => String(Math.round(tempToDisplay(v))), color: "#c0392b" },
+      { values: grid.surface.td2m, fmt: (v) => String(Math.round(tempToDisplay(v))), color: "#2980b9" },
     ]),
   },
   gust: {
-    height: NUMBER_ROW_HEIGHT * 0.7, label: ["Böen", "10 m"],
+    height: NUMBER_ROW_HEIGHT * 0.7, label: () => ["Böen 10 m", windUnit()],
     draw: (ctx, grid, view, x, top, h) => drawNumberRow(ctx, grid.times, x, top, h, [
-      { values: grid.surface.gust, fmt: (v) => fmtWind(v), color: "#6a3d9a" },
+      { values: grid.surface.gust, fmt: (v) => String(Math.round(windToDisplay(v))), color: "#6a3d9a" },
+    ]),
+  },
+  visibility: {
+    height: NUMBER_ROW_HEIGHT * 0.7, label: ["Sicht", "km"],
+    draw: (ctx, grid, view, x, top, h) => drawNumberRow(ctx, grid.times, x, top, h, [
+      { values: grid.surface.visibility, fmt: (v) => fmtVisKm(v), color: "#546e7a" },
     ]),
   },
   pressure: {
@@ -124,7 +147,10 @@ const ROW_DEFS = {
   },
 };
 
-const DEFAULT_ROWS = ["wind", "gust", "tempdew", "pressure", "weather"];
+// Reihenfolge wie im METAR-Meldungskopf: Wind/Böen, Sicht, WW (Wolken laufen
+// nicht als eigene Zeile, sondern schon in der Hauptfläche mit), Temp/Taupunkt,
+// Luftdruck (s. Feedback).
+const DEFAULT_ROWS = ["wind", "gust", "visibility", "weather", "tempdew", "pressure"];
 
 export function renderGramet(host, grid, view, state = {}) {
   host.innerHTML = "";
@@ -229,7 +255,7 @@ export function renderGramet(host, grid, view, state = {}) {
     ctx.strokeRect(x.left + 0.5, rowTop + 0.5, pw - 1, def.height - 1);
     // Beschriftung im linken Randfeld (wie die Höhenachse), nicht über den
     // Werten -- dort war sie kaum lesbar (überlagert von Fiedern/Zahlen).
-    drawRowLabel(ctx, def.label, x.left - 4, rowTop, def.height);
+    drawRowLabel(ctx, typeof def.label === "function" ? def.label() : def.label, x.left - 4, rowTop, def.height);
     rowTop += def.height;
   }
 
@@ -380,14 +406,22 @@ const HAZE_REF_MIN = 10, HAZE_REF_MAX = 400; // m AGL -- gemeinsame Reichweite d
 // Kräftiger als im ersten Entwurf (0.5/gedämpfte Baseline) -- BR/HZ waren
 // dort kaum vom normalen Himmel zu unterscheiden (s. Feedback).
 const HAZE_MAX_ALPHA = 0.7;
-const BR_COLOR = "225,235,238"; // weißlich -- BR ist feucht (Diesigkeit)
+// BR/FG waren als fast identisches Weißlich-Grau (225,235,238 / 210,212,214)
+// nur noch über die Opazität zu unterscheiden -- bei schwacher BR-Stärke
+// (t nahe 0, s. u.) kaum von echtem FG zu trennen (s. Feedback). Jetzt zwei
+// eigene Farbfamilien: BR bleibt beim kühlen, leicht bläulichen Diesig-Ton
+// (feuchter Dunst), FG rückt Richtung neutrales, dichtes Grau (fast farblos,
+// wie eine geschlossene Nebelwand) -- der Farbabstand bleibt so auch bei
+// schwacher BR-Stärke sichtbar, nicht erst am Opazitätsunterschied.
+const BR_COLOR = "195,215,232"; // kühles Blaugrau -- BR ist feucht (Diesigkeit)
 const HZ_COLOR = "196,155,74";  // ockerfarben -- HZ simuliert trockenen Staubdunst
 // FG läuft über denselben Schleier wie BR/HZ (gleiche Reichweite/Verlaufsform
 // statt eines eigenen scharf konturierten Blocks, s. Feedback: der harte
 // Umriss mit fixem 100-m-Fallback-Top passte weder farblich noch in der Höhe
-// zum weichen 400-m-Verlauf von BR/HZ), nur mit deutlich höherer Opazität --
-// "man sieht buchstäblich nichts mehr" statt eines durchscheinenden Schleiers.
-const FG_COLOR = "210,212,214"; // selbe (weißliche) Familie wie BR, Richtung Grau
+// zum weichen 400-m-Verlauf von BR/HZ), zusätzlich zur eigenen Farbfamilie
+// (s. o.) weiterhin mit deutlich höherer Opazität -- "man sieht buchstäblich
+// nichts mehr" statt eines durchscheinenden Schleiers.
+const FG_COLOR = "196,197,199"; // neutrales, dichtes Grau -- bewusst blaustichfrei, Gegenteil von BR
 const FG_ALPHA = 0.92;
 
 /** Schleierfarbe+-stärke einer Stunde. Sicht ist jetzt das primäre Kriterium
@@ -1029,9 +1063,19 @@ function timeGridLines(ctx, times, x, top, bot) {
   }
 }
 
+// Seit die Datenzeilen (Böen/Sicht/SLP/...) jede Stunde statt nur jede zweite
+// zeigen (s. Feedback), sollte die Zeitachse mitziehen -- sonst lässt sich
+// eine Zwischenstunde nicht mehr genau ablesen. Drei Stufen statt der
+// bisherigen zwei (Datum/6-Stunden-Marken), damit 00/06/12/18 weiterhin das
+// Auge führen und die neuen Zwischenstunden nicht gleichrangig konkurrieren:
+// Datum (fett, am größten) > Hauptstunden 06/12/18 (fett, normal) >
+// Zwischenstunden (dünn, klein, gedämpfte Farbe). Kollisionsschutz per
+// Messung wie bei den Zahlenzeilen bräuchte es hier nicht -- die zweistelligen
+// Stunden sind immer gleich breit und passen bei der aktuellen Stundenbreite
+// (`CHART_PX_PER_HOUR`) auch im Kleinschriftgrad problemlos nebeneinander.
 function drawTimeAxis(ctx, times, x, yTop, yBot) {
   let lastDay = null;
-  ctx.font = "10px system-ui, sans-serif"; ctx.textBaseline = "alphabetic";
+  ctx.textBaseline = "alphabetic";
   for (let i = 0; i < times.length; i++) {
     const d = new Date(times[i] * 1000);
     if (d.getMinutes() !== 0) continue;
@@ -1040,10 +1084,12 @@ function drawTimeAxis(ctx, times, x, yTop, yBot) {
       lastDay = dayKey;
       ctx.fillStyle = INK; ctx.font = "600 11px system-ui, sans-serif"; ctx.textAlign = "left";
       ctx.fillText(d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }), x(times[i]) + 3, yBot + 12);
-      ctx.font = "10px system-ui, sans-serif";
     } else if (h === 6 || h === 12 || h === 18) {
-      ctx.fillStyle = MUTED; ctx.textAlign = "center";
+      ctx.fillStyle = INK; ctx.font = "600 10px system-ui, sans-serif"; ctx.textAlign = "center";
       ctx.fillText(String(h).padStart(2, "0"), x(times[i]), yBot + 12);
+    } else {
+      ctx.fillStyle = MUTED; ctx.font = "8px system-ui, sans-serif"; ctx.textAlign = "center";
+      ctx.fillText(String(h).padStart(2, "0"), x(times[i]), yBot + 11);
     }
   }
 }
@@ -1120,7 +1166,11 @@ function drawWeatherRow(ctx, grid, view, x, top, height) {
   ctx.font = "10px system-ui, sans-serif";
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
   const cy = top + height / 2;
-  let lastX = -Infinity;
+  // Kollisionsschutz an der gemessenen Labelbreite statt einer geschätzten
+  // Fixbreite (vorher 30 px pauschal) -- kurze Kürzel wie "RA" passen so
+  // enger als lange wie "FZFG", statt beide gleich zu behandeln (s. Feedback
+  // zu den Zahlenzeilen, hier dieselbe Idee).
+  let lastRight = -Infinity;
   for (let i = 0; i < times.length; i++) {
     const code = surface.wcode[i];
     if (!Number.isFinite(code)) continue;
@@ -1128,7 +1178,8 @@ function drawWeatherRow(ctx, grid, view, x, top, height) {
     const label = metarWeather(code, fog.toPhenomenon(entry));
     if (label === "NSW" || label === "N/A") continue;
     const px = x(times[i]);
-    if (px - lastX < 30) continue;
+    const w = ctx.measureText(label).width;
+    if (px - w / 2 < lastRight + 4) continue;
     // Unsichere Befunde (RH-Fallback statt CLC/Kondensat, s. hazards/fog.js)
     // gedämpft statt in der vollen Warnfarbe -- Konfidenz-Konvention wie bei
     // der Wolkenbasislinie im Meteogramm (dort gestrichelt statt Farbe, hier
@@ -1137,7 +1188,7 @@ function drawWeatherRow(ctx, grid, view, x, top, height) {
     ctx.fillStyle = weatherColor(label);
     ctx.fillText(label, px, cy);
     ctx.globalAlpha = 1;
-    lastX = px;
+    lastRight = px + w / 2;
   }
 }
 function weatherColor(label) {

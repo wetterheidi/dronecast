@@ -361,6 +361,11 @@ async function loadForecast() {
     if (!el("crosssection").hidden) openCrossSection();
     if (!el("gramet").hidden) openGramet();
     if (!el("gonogo").hidden) openGoNoGo();
+    // Briefing fehlte hier bisher (s. Nutzerfeedback): stand nach einem
+    // Koordinatenwechsel bei geöffnetem Panel weiter mit den Daten des ALTEN
+    // Punkts da -- ein Preflight-Briefing mit falschem Standort ist gefährlich,
+    // nicht nur veraltet.
+    if (!el("briefing").hidden) openBriefing();
   } catch (err) {
     setStatus(err.message || String(err), "error");
   } finally {
