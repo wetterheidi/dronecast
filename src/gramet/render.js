@@ -885,14 +885,16 @@ function drawRealTerrainOverlay(ctx, terrain, x, y, mainBot) {
     ctx.fillStyle = REAL_TERRAIN_FILL;
     ctx.fill();
 
-    // Gestrichelt (anders als die durchgezogene Modellkante), mit Halo --
-    // muss auch nachts auf fast schwarzem Boden/Himmel lesbar bleiben.
+    // Gestrichelt (anders als die durchgezogene Modellkante), EIN Strich statt
+    // Halo+Kernlinie -- ein Vergleichs-Overlay soll zurückhaltender wirken als
+    // die Modellkante selbst (s. Feedback), der Halo machte die Linie zu
+    // präsent. Heller, halbtransparenter Ton statt dunkler Kernfarbe: bleibt
+    // so auf fast schwarzem Nachthimmel/-boden noch ablesbar, ganz ohne Halo.
     const path = terrainEdgePath(pos, i0, i1, (i) => y(elevation[i]), x);
     ctx.save();
     ctx.lineJoin = "round";
     ctx.setLineDash([5, 3]);
-    ctx.strokeStyle = "rgba(255,255,255,0.65)"; ctx.lineWidth = 2.5; ctx.stroke(path);
-    ctx.strokeStyle = "rgba(20,14,8,0.85)"; ctx.lineWidth = 1.2; ctx.stroke(path);
+    ctx.strokeStyle = "rgba(216,210,198,0.2)"; ctx.lineWidth = 1.3; ctx.stroke(path);
     ctx.restore();
   });
   const last = lastFiniteIndex(elevation);
