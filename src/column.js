@@ -5,7 +5,7 @@
  * in °C geführt (Anzeige-Einheiten via units.js im Renderer).
  */
 
-import { API_BASE, MODELS } from "./config.js";
+import { MODELS } from "./config.js";
 import { cloudFraction } from "./clouds.js";
 import { lastFiniteIndex } from "./weather.js";
 
@@ -39,7 +39,7 @@ async function tryFetchColumn(lat, lon, model, forecastDays, vars, fetchImpl) {
     timeformat: "unixtime", forecast_days: String(forecastDays),
     cell_selection: "nearest",
   });
-  const resp = await fetchImpl(`${API_BASE}/v1/forecast?${params}`);
+  const resp = await fetchImpl(`${model.apiBase}/v1/forecast?${params}`);
   const body = await resp.text();
   let data;
   try { data = JSON.parse(body); } catch { return { error: `Serverfehler: ${body.slice(0, 150)}` }; }

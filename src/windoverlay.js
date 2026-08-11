@@ -3,8 +3,8 @@
  * per Höhenschieber wählbar) als flächige Darstellung — WMO-Windfiedern an
  * Gitterpunkten plus interpolierte, halbtransparente Farbfläche der
  * Windgeschwindigkeit. Datenquelle wie windfield.js/column.js:
- * Michaels Instanz (Modell-Level-Daten, siehe config.js `API_BASE`), hier
- * aber gitterweise statt punktweise abgefragt — es gibt keinen eigenen
+ * Michaels Instanz(en) (Modell-Level-Daten, siehe config.js `model.apiBase`),
+ * hier aber gitterweise statt punktweise abgefragt — es gibt keinen eigenen
  * Gitter-/Tile-Endpunkt, nur die normale Multi-Punkt-`/v1/forecast`-API
  * (komma-getrennte lat/lon-Listen).
  *
@@ -62,7 +62,7 @@
  */
 
 import {
-  API_BASE, MODELS,
+  MODELS,
   WIND_OVERLAY_MIN_ZOOM, WIND_OVERLAY_POINTS_PER_REQUEST,
   WIND_OVERLAY_DENSITY_OPTIONS, WIND_OVERLAY_PROBE_LEVELS,
   WIND_OVERLAY_MAX_CONCURRENCY, WIND_OVERLAY_CHUNK_RETRIES,
@@ -239,7 +239,7 @@ export function initWindOverlay(map) {
       forecast_days: String(settings.forecastDays),
       cell_selection: "nearest",
     });
-    const resp = await fetch(`${API_BASE}/v1/forecast?${params}`, { signal });
+    const resp = await fetch(`${model.apiBase}/v1/forecast?${params}`, { signal });
     const body = await resp.text();
     let data;
     try {
@@ -349,7 +349,7 @@ export function initWindOverlay(map) {
       forecast_days: "1",
       cell_selection: "nearest",
     });
-    const resp = await fetch(`${API_BASE}/v1/forecast?${params}`, { signal });
+    const resp = await fetch(`${model.apiBase}/v1/forecast?${params}`, { signal });
     const body = await resp.text();
     let data;
     try {

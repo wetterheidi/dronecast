@@ -33,7 +33,7 @@
  */
 
 import {
-  API_BASE, MODELS,
+  MODELS,
   WIND_OVERLAY_MIN_ZOOM, WIND_OVERLAY_DENSITY_OPTIONS,
   CLOUD_OVERLAY_CAP_M, CLOUD_OVERLAY_MAX_POINTS,
   CLOUD_OVERLAY_POINTS_PER_REQUEST, CLOUD_OVERLAY_MAX_CONCURRENCY,
@@ -161,7 +161,7 @@ export function initCloudOverlay(map) {
       forecast_days: String(settings.forecastDays),
       cell_selection: "nearest",
     });
-    const resp = await fetch(`${API_BASE}/v1/forecast?${params}`, { signal });
+    const resp = await fetch(`${model.apiBase}/v1/forecast?${params}`, { signal });
     const body = await resp.text();
     let data;
     try {
@@ -256,7 +256,7 @@ export function initCloudOverlay(map) {
       forecast_days: "1",
       cell_selection: "nearest",
     });
-    const resp = await fetch(`${API_BASE}/v1/forecast?${params}`, { signal });
+    const resp = await fetch(`${model.apiBase}/v1/forecast?${params}`, { signal });
     const body = await resp.text();
     let data;
     try {

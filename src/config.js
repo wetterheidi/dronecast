@@ -1,5 +1,11 @@
 // Modell-Level-Daten (u/v/T/RH/… auf nativen ICON-Leveln): Michaels Instanz.
 export const API_BASE = "https://open-meteo.mah.priv.at";
+// ICON Global (Modelllevel) läuft seit 2026-08 auf einem eigenen Server
+// (Absprache mit Michael): die dwd_icon-Ingestion auf API_BASE ist kaputt
+// (meta.json liefert 500, Modelllevel-Felder kommen durchgehend null zurück).
+// ICON-D2/ICON-EU bleiben unverändert auf API_BASE. Siehe MODELS.icon_global
+// unten sowie dasselbe Vorgehen im TLogPViewer (fetch_sounding_openmeteo.py).
+export const API_BASE_ICON_GLOBAL = "https://open-meteo-temp.mah.priv.at";
 
 // Oberflächen-/Single-Level-Felder (Niederschlag, Böen, CAPE, Bewölkung, …):
 // `weather.js` (fetchSurface, Basis des "Jetzt"-Blocks/Meteogramms) holt
@@ -17,11 +23,14 @@ export const API_BASE = "https://open-meteo.mah.priv.at";
 export const SURFACE_API_BASE = "https://api.open-meteo.com";
 
 // Levelzählung der API: N=1 oberstes, N=nLevels unterstes Modelllevel (~10 m AGL).
+// `apiBase` je Modell (statt eines globalen API_BASE), weil ICON Global auf
+// einem anderen Server liegt als ICON-D2/ICON-EU (s. API_BASE_ICON_GLOBAL).
 export const MODELS = {
   icon_d2: {
     apiModel: "icon_d2",
     dataset: "dwd_icon_d2",
     label: "ICON-D2 (~2,2 km, Mitteleuropa)",
+    apiBase: API_BASE,
     grid: 0.02,
     gridMeters: 2200,
     nLevels: 65,
@@ -31,10 +40,25 @@ export const MODELS = {
     apiModel: "icon_eu",
     dataset: "dwd_icon_eu",
     label: "ICON-EU (~6,5 km, Europa)",
+    apiBase: API_BASE,
     grid: 0.0625,
     gridMeters: 6500,
     nLevels: 74,
     bbox: { latMin: 29.5, latMax: 70.5, lonMin: -23.5, lonMax: 62.5 },
+  },
+  // Grid per Stichprobe ermittelt (nearest-neighbor-Sprünge alle 0,125° in
+  // lat/lon, ausgerichtet auf Vielfache von 0,125 ab 0) — Open-Meteo regridded
+  // das native icosahedrische ICON-Global-Gitter (~13 km) auf dieses reguläre
+  // 0,125°-Raster. bbox global, da kein Ausschnitt wie bei D2/EU.
+  icon_global: {
+    apiModel: "icon_global",
+    dataset: "dwd_icon",
+    label: "ICON (~13 km, global)",
+    apiBase: API_BASE_ICON_GLOBAL,
+    grid: 0.125,
+    gridMeters: 13915,
+    nLevels: 120,
+    bbox: { latMin: -90, latMax: 90, lonMin: -180, lonMax: 180 },
   },
 };
 

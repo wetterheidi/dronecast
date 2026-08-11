@@ -1,4 +1,4 @@
-import { API_BASE, MODELS } from "./config.js";
+import { MODELS } from "./config.js";
 
 const KMH_TO_MS = 1 / 3.6;
 const MAX_POINTS_PER_REQUEST = 10;
@@ -41,7 +41,7 @@ export class WindField {
     for (const prefix of ["wind_w", "vertical_velocity", "w"]) {
       try {
         const varName = `${prefix}_level${model.nLevels - 5}`;
-        const url = `${API_BASE}/v1/forecast?latitude=50&longitude=10` +
+        const url = `${model.apiBase}/v1/forecast?latitude=50&longitude=10` +
           `&hourly=${varName}&models=${model.apiModel}&forecast_days=1`;
         const resp = await fetchImpl(url);
         if (!resp.ok) continue;
@@ -228,7 +228,7 @@ export class WindField {
       end_date: this.endDate,
       cell_selection: "nearest",
     });
-    const url = `${API_BASE}/v1/forecast?${params}`;
+    const url = `${this.model.apiBase}/v1/forecast?${params}`;
     const resp = await this.fetch(url);
     const body = await resp.text();
     let data;
