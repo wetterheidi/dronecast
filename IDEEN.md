@@ -375,4 +375,14 @@ Alle Details in METHODIK.md 7.8/7.9.
 - **Echte Windbarbs** als Alternative zu den Richtungspfeilen.
 - **Südhalbkugel:** Sichel-Orientierung der Mondscheibe spiegeln
   (aktuell NH-Konvention: zunehmend = rechts beleuchtet).
-- **Andere Satellitenbildquelle weltweit:** Alternative: NASA GIBS  Falls du doch einmal eine globale Abdeckung benötigst, bietet die NASA mit den Global Imagery Browse Services (GIBS) ebenfalls einen hervorragenden, kostenfreien WMS/WMTS. NASA GIBS integriert die europäischen Meteosat-Daten in ihre globalen Karten. Die Latenz ist dort mit ca. 30 Minuten minimal höher als direkt bei EUMETSAT, dafür lassen sich die Kacheln besonders performant als standardmäßiges WMTS-Overlay laden.  
+- **Andere Satellitenbildquelle weltweit:** Alternative: NASA GIBS  Falls du doch einmal eine globale Abdeckung benötigst, bietet die NASA mit den Global Imagery Browse Services (GIBS) ebenfalls einen hervorragenden, kostenfreien WMS/WMTS. NASA GIBS integriert die europäischen Meteosat-Daten in ihre globalen Karten. Die Latenz ist dort mit ca. 30 Minuten minimal höher als direkt bei EUMETSAT, dafür lassen sich die Kacheln besonders performant als standardmäßiges WMTS-Overlay laden.
+- **Terrain-Alternativquelle geprüft: AWS Open Data Terrain Tiles**
+  (`registry.opendata.aws/terrain-tiles`, ehem. Mapzen/Joerd) — statischer
+  S3-Bucket, kein Auth/Rate-Limit, sehr robust (AWS-S3-Grade), aber Datenstand
+  seit ~2018 eingefroren (kein aktives Fixing mehr) und im Kern nur SRTM
+  30 m mit bekannten Voids im Hochgebirge — genau dort, wo unsere
+  GRAMET-Pfade meist liegen. Ergebnis: **Mapterhorn bleibt Primärquelle**
+  (aktueller gepflegt, regional viel höhere Auflösung, s. o. „Terrain:
+  regionale Feinauflösung"); AWS/Joerd höchstens als Fallback bei
+  Mapterhorn-Ausfall denkbar, dann mit Hinweis auf spürbar gröbere Auflösung
+  im UI (analog [[feedback_document_derived_values]]).  
