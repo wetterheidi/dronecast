@@ -1,6 +1,6 @@
 import { MODELS, PREVIEW_HEIGHTS } from "./config.js";
 import { WindField } from "./windfield.js";
-import { fetchSurface, fetchModelRunInit, nearestIndex } from "./weather.js";
+import { fetchSurface, fetchModelRunInit, nearestIndex, nearestIndexOrNull } from "./weather.js";
 import { initTimeControls, setRange, getMasterMs, subscribe as subscribeTime } from "./timeController.js";
 import { renderMeteogram } from "./meteogram.js";
 import { fetchColumn, buildField } from "./column.js";
@@ -524,14 +524,23 @@ async function openMeteogram() {
   // Höhe im ganzen Profil, auch wenn eine tiefere FEW/SCT-Schicht darunter
   // liegt; für die Meteogramm-Linie soll aber die tatsächliche unterste
   // Wolke inkl. ihrer eigenen Kategorie erscheinen).
+  // Pro Stunde eigenständig auf die Säule gemappt (nicht per Array-Längen-
+  // vergleich): bei ICON Global enden die Modell-Level-Daten real bei +36 h,
+  // die Oberflächenreihe läuft weiter. Jenseits davon liefert
+  // `nearestIndexOrNull` `null` -> `mgFog[i]` wird `undefined` (keine
+  // Säulendaten mehr, fogWwCat() unten fällt dort auf den rohen weather_code
+  // zurück) statt `null` (Säule vorhanden, aber kein Nebel diagnostiziert).
   let lowestLayer = null, mgFog = null;
   try {
     const col = await ensureColumn();
-    if (col.time.length === surface.time.length) {
-      lowestLayer = surface.time.map((_, i) => cloudLayers(col, i, { maxLayers: 1 })[0] ?? null);
-      mgFog = surface.time.map((_, i) =>
-        classifyFog(col, i, surface.vars.visibility?.[i], surface.vars.weather_code?.[i]));
-    }
+    lowestLayer = surface.time.map((tSec) => {
+      const j = nearestIndexOrNull(col.time, tSec * 1000);
+      return j == null ? null : (cloudLayers(col, j, { maxLayers: 1 })[0] ?? null);
+    });
+    mgFog = surface.time.map((tSec, i) => {
+      const j = nearestIndexOrNull(col.time, tSec * 1000);
+      return j == null ? undefined : classifyFog(col, j, surface.vars.visibility?.[i], surface.vars.weather_code?.[i]);
+    });
   } catch { /* Säule nicht verfügbar -> Meteogramm bleibt bei reiner LCL-Schätzung */ }
 
   renderMeteogram(el("mg-body"), {
@@ -709,13 +718,18 @@ async function openGoNoGo() {
       const col = await ensureColumn();
       const ccLow = state.data.surface.vars.cloud_cover_low;
       const visArr = state.data.surface.vars.visibility, wcArr = state.data.surface.vars.weather_code;
-      const sameLength = col.time.length === state.data.surface.time.length;
-      state.data.cloudCeiling = sameLength
-        ? state.data.surface.time.map((_, i) => cloudCeiling(col, i, { ccLowPct: ccLow?.[i] })?.baseM ?? null)
-        : null;
-      state.data.fog = sameLength
-        ? state.data.surface.time.map((_, i) => classifyFog(col, i, visArr?.[i], wcArr?.[i]))
-        : null;
+      // Pro Stunde auf die Säule gemappt statt per Array-Längenvergleich (s.
+      // openMeteogram) -- `undefined` = Säule endet hier (Zeile fällt in
+      // gonogo.js auf die LCL-/weather_code-Heuristik zurück), `null` = Säule
+      // vorhanden, aber kein Ceiling/Nebel diagnostiziert (bleibt so stehen).
+      state.data.cloudCeiling = state.data.surface.time.map((tSec, i) => {
+        const j = nearestIndexOrNull(col.time, tSec * 1000);
+        return j == null ? undefined : (cloudCeiling(col, j, { ccLowPct: ccLow?.[i] })?.baseM ?? null);
+      });
+      state.data.fog = state.data.surface.time.map((tSec, i) => {
+        const j = nearestIndexOrNull(col.time, tSec * 1000);
+        return j == null ? undefined : classifyFog(col, j, visArr?.[i], wcArr?.[i]);
+      });
     } catch { state.data.cloudCeiling = null; state.data.fog = null; }
   }
   // Vereisung: IPI-Bandmaximum aus derselben Säule, kein eigener Request
@@ -727,10 +741,13 @@ async function openGoNoGo() {
       const { lat, lon } = state.point;
       if (!state.data.gmGrid) state.data.gmGrid = gridFromColumn(col, state.data.surface, lat, lon);
       const grid = state.data.gmGrid;
-      const sameLength = grid.times.length === state.data.surface.time.length;
-      state.data.icingBandMax = sameLength
-        ? state.data.surface.time.map((_, i) => icingBandMaxAt(grid, i, 10, settings.maxHeight))
-        : null;
+      // Pro Stunde auf die Säule gemappt (s. cloudCeiling oben) -- ohne
+      // Einzel-Level-Fallback bleibt eine Stunde jenseits des Säulenhorizonts
+      // schlicht `null` (icingRow() zeigt dafür "na").
+      state.data.icingBandMax = state.data.surface.time.map((tSec) => {
+        const j = nearestIndexOrNull(grid.times, tSec * 1000);
+        return j == null ? null : icingBandMaxAt(grid, j, 10, settings.maxHeight);
+      });
     } catch { state.data.icingBandMax = null; }
   }
   // Turbulenz: TFI-Bandmaximum aus derselben Säule/demselben Gitter wie
@@ -743,10 +760,11 @@ async function openGoNoGo() {
       const { lat, lon } = state.point;
       if (!state.data.gmGrid) state.data.gmGrid = gridFromColumn(col, state.data.surface, lat, lon);
       const grid = state.data.gmGrid;
-      const sameLength = grid.times.length === state.data.surface.time.length;
-      state.data.turbulenceBandMax = sameLength
-        ? state.data.surface.time.map((_, i) => turbulenceBandMaxAt(grid, i, 10, settings.maxHeight))
-        : null;
+      // Pro Stunde auf die Säule gemappt (s. icingBandMax oben).
+      state.data.turbulenceBandMax = state.data.surface.time.map((tSec) => {
+        const j = nearestIndexOrNull(grid.times, tSec * 1000);
+        return j == null ? null : turbulenceBandMaxAt(grid, j, 10, settings.maxHeight);
+      });
     } catch { state.data.turbulenceBandMax = null; }
   }
   renderGoNoGoTable(el("gng-body"), evaluateGoNoGo(

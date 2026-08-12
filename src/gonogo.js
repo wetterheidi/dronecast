@@ -27,16 +27,25 @@ const KMH_TO_MS = 1 / 3.6;
  *                     Wolkenbasis muss darüber liegen, Bandmaximum bis dorthin
  * @param cloudCeilingArr Optionales Array parallel zu surface.time: Wolken-
  *                     untergrenze (m AGL) aus dem Modell-RH-Profil
- *                     (clouds.js `cloudCeiling`), null wo keine tiefe BKN-
- *                     Schicht liegt. Fehlt es ganz (Säule nicht geladen),
- *                     fällt die Wolkenbasis-Zeile auf die LCL-Schätzung zurück.
+ *                     (clouds.js `cloudCeiling`) je Stunde -- `null`, wo die
+ *                     Säule vorliegt, aber keine tiefe BKN-Schicht diagnos-
+ *                     tiziert wurde (bleibt so), `undefined`, wo die Säule
+ *                     an dieser Stunde real endet (z. B. ICON Global: Modell-
+ *                     Level nur bis +36 h, Oberflächenreihe länger) -- dort
+ *                     fällt die Zeile auf die LCL-Schätzung zurück. Fehlt das
+ *                     Array ganz (Säule nicht geladen), gilt dasselbe für
+ *                     jede Stunde.
  * @param fogArr       Optionales Array parallel zu surface.time:
- *                     `{type, certain, freezing} | null` aus der Säule
- *                     (clouds.js `classifyFog`) — sichtbasierte Nebel/Dunst-
- *                     Diagnose, dieselbe Priorität wie GRAMETs
+ *                     `{type, certain, freezing} | null | undefined` je Stunde
+ *                     aus der Säule (clouds.js `classifyFog`) — sichtbasierte
+ *                     Nebel/Dunst-Diagnose, dieselbe Priorität wie GRAMETs
  *                     `hazards/fog.js`, ERSETZT (nicht mehr additiv zu) die
  *                     reine `weather_code`-Erkennung, damit die "Sonstige
  *                     Hazards"-Zeile nicht der GRAMET-Diagnose widerspricht.
+ *                     `undefined` markiert Stunden jenseits des Säulen-
+ *                     horizonts (s. cloudCeilingArr) -- dort bleibt roher
+ *                     `weather_code` die einzige Nebelquelle, wie wenn das
+ *                     Array ganz fehlt.
  * @param icingBandMaxArr Optionales Array parallel zu surface.time:
  *                     `{ipi, bandBottomM, bandTopM}` (Maximum des
  *                     Icing-Potential-Index, 0..1, `hazards/icing.js` `ipiAt`,
@@ -75,7 +84,10 @@ export function evaluate(
     numericRow("windBandMax", `Wind Maximum (10 m–${fmtHeight(opHeightM)})`, "wind", L.windBandMax, profile.marginPct,
       time.map((_, i) => windBandMax?.[i] ?? null)),
     numericRow("cloudBase", "Wolkenbasis", "height", scaledMinLimit(L.cloudBase, opHeightM), profile.marginPct,
-      time.map((_, i) => (cloudCeilingArr ? cloudCeilingArr[i] : cloudBaseAgl(T?.[i], Td?.[i], ccLow?.[i]))),
+      time.map((_, i) => {
+        const cc = cloudCeilingArr ? cloudCeilingArr[i] : undefined;
+        return cc !== undefined ? cc : cloudBaseAgl(T?.[i], Td?.[i], ccLow?.[i]);
+      }),
       { nullIsGreen: true }),
     numericRow("visibility", "Sicht", "vis", L.visibility, profile.marginPct,
       time.map((_, i) => (visArr ? visArr[i] ?? null : null))),
@@ -181,11 +193,14 @@ function hazardRow(time, wc, visArr, fogArr) {
     const code = wc?.[i];
     if (code === 95 || code === 96 || code === 99) return { status: "red", text: "Gewitter" };
     if (code === 56 || code === 57 || code === 66 || code === 67) return { status: "red", text: "gefr. Niederschlag" };
-    const fog = fogArr ? fogArr[i] : null;
-    const isFog = fogArr ? fog?.type === "FG" : (code === 45 || code === 48);
+    const fog = fogArr ? fogArr[i] : undefined;
+    // `undefined` = Säule endet hier (s. Doc oben) -> wie fehlendes Array
+    // auf den rohen weather_code zurückfallen, statt fälschlich "kein Nebel".
+    const fogKnown = fogArr && fog !== undefined;
+    const isFog = fogKnown ? fog?.type === "FG" : (code === 45 || code === 48);
     if (isFog) {
       const visKnown = visArr ? visArr[i] != null : false;
-      const freezing = fogArr ? fog?.freezing : code === 48;
+      const freezing = fogKnown ? fog?.freezing : code === 48;
       return { status: visKnown ? "green" : "yellow", text: freezing ? "Gefr. Nebel" : "Nebel" };
     }
     return { status: "green", text: "–" };

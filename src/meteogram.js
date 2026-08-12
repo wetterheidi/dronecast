@@ -15,11 +15,14 @@
  *       Okta-Kategorie FEW/SCT/BKN/OVC), verfeinert die LCL-Schätzung der
  *       Wolkenbasis — optional, fehlt z. B. wenn die Säule (noch) nicht
  *       geladen ist (dann reine LCL-Schätzung).
- *     fog?: ({type:"FG"|"BR"|"HZ", certain, freezing}|null)[] }  // sichtbasierte
- *       Nebel/Dunst-Diagnose je Stunde (clouds.js `classifyFog`, dieselbe
- *       Priorität wie GRAMETs `hazards/fog.js` `classifyColumn`) — optional,
- *       ERSETZT die reine `weather_code`-Nebelerkennung im Bewölkungs-Panel
- *       (vorher ODER-verknüpft, konnte GRAMET widersprechen, s. Feedback).
+ *     fog?: ({type:"FG"|"BR"|"HZ", certain, freezing}|null|undefined)[] }  // sicht-
+ *       basierte Nebel/Dunst-Diagnose je Stunde (clouds.js `classifyFog`,
+ *       dieselbe Priorität wie GRAMETs `hazards/fog.js` `classifyColumn`) —
+ *       optional, ERSETZT die reine `weather_code`-Nebelerkennung im
+ *       Bewölkungs-Panel (vorher ODER-verknüpft, konnte GRAMET widersprechen,
+ *       s. Feedback). `undefined` je Stunde markiert, dass die Säule dort
+ *       real endet (z. B. ICON Global: Modell-Level nur bis +36 h) — dort
+ *       bleibt roher `weather_code` die Nebelquelle, wie wenn `fog` ganz fehlt.
  * Wind wird aus den 10-m-Bodenfeldern gezeichnet (Höhenwinde -> Cross-Section).
  */
 
@@ -552,11 +555,14 @@ function wwCat(code) {
 // `classifyFog` (Sicht > HAZE_VIS_MAX_M) keinen Nebel sieht (sonst genau der
 // Widerspruch zu GRAMET, der hier behoben werden soll, s. Feedback). Andere
 // ww-Codes (Regen, Schnee, Gewitter, ...) bleiben unberührt. Fehlt `fogArr`
-// ganz (Säule nicht geladen), bleibt `wwCat()`s roher weather_code-Trigger
-// der einzige verfügbare Nebel-Hinweis.
+// ganz (Säule nicht geladen) ODER endet die Säule an dieser Stunde real
+// (ICON Global: Modell-Level nur bis +36 h -- `fogArr[i]` dann `undefined`,
+// s. app.js openMeteogram), bleibt `wwCat()`s roher weather_code-Trigger der
+// einzige verfügbare Nebel-Hinweis.
 function fogWwCat(fogArr, i, code) {
-  if (!fogArr) return wwCat(code);
-  if (fogArr[i]?.type === "FG") return WW_TYPES.find((w) => w.key === "fog");
+  const fog = fogArr ? fogArr[i] : undefined;
+  if (!fogArr || fog === undefined) return wwCat(code);
+  if (fog?.type === "FG") return WW_TYPES.find((w) => w.key === "fog");
   if (code === 45 || code === 48) return null; // von classifyFog widerlegt
   return wwCat(code);
 }

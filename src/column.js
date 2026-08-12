@@ -88,10 +88,15 @@ export async function fetchColumn(lat, lon, modelKey, forecastDays, fetchImpl = 
   // `time` reicht immer bis zum angefragten forecast_days-Horizont, auch wenn
   // das Modell (z. B. ICON-D2, ~48 h) real kürzer vorhersagt — die Level-
   // Variablen werden für die überzähligen Stunden nur mit null aufgefüllt statt
-  // das Array zu kürzen. Auf den tatsächlichen Modellhorizont zurückschneiden
-  // (unterstes Level + SLP als Indikator), sonst zeigen GRAMET/Cross-Section
-  // eine "leere" Verlängerung bis zum gewählten Zeithorizont.
-  const cut = lastFiniteIndex(t[0], pmsl) + 1;
+  // das Array zu kürzen. Auf den tatsächlichen LEVEL-Horizont zurückschneiden,
+  // sonst zeigen GRAMET/Cross-Section eine "leere" Verlängerung bis zum
+  // gewählten Zeithorizont. NUR das unterste Level als Indikator -- `pmsl`
+  // (SLP) ist bei ICON Global KEIN verlässlicher Indikator: Michaels
+  // Level-Server führt es (per Stichprobe 2026-08) über die volle
+  // Modelllaufzeit weiter, während die eigentlichen Level-Variablen
+  // (Temperatur/Druck/Wind) schon bei +36 h auf null springen -- mit `pmsl`
+  // im Indikator würde der Cut fälschlich bis zum SLP-Horizont reichen.
+  const cut = lastFiniteIndex(t[0]) + 1;
   const trim = (arr) => (cut < arr.length ? arr.slice(0, cut) : arr);
   const trimLevels = (byLevel) => (cut < T ? byLevel.map(trim) : byLevel);
 

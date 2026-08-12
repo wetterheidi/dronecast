@@ -132,6 +132,18 @@ export function nearestIndex(timeSec, tMs) {
   return best;
 }
 
+/** Wie `nearestIndex`, aber liefert `null` statt eines (ggf. weit entfernten)
+ *  Index, wenn keine Zeit innerhalb `toleranceSec` liegt. Zum robusten
+ *  Abgleichen zweier unabhängig auf ihren jeweils echten Horizont getrimmter
+ *  Zeitreihen (z. B. Modell-Level-Säule `column.js` vs. Oberflächenreihe
+ *  hier) — bei ICON Global enden die Level-Daten real bei +36 h, die
+ *  Oberflächenwerte laufen über die volle Modelllaufzeit weiter. */
+export function nearestIndexOrNull(timeSec, tMs, toleranceSec = 1800) {
+  if (!timeSec.length) return null;
+  const i = nearestIndex(timeSec, tMs);
+  return i >= 0 && Math.abs(timeSec[i] - tMs / 1000) <= toleranceSec ? i : null;
+}
+
 function round5(x) {
   return Math.round(x * 1e5) / 1e5;
 }
