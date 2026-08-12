@@ -37,7 +37,7 @@ import { throttle } from "./overlayshared.js";
 /* global L */
 
 const el = (id) => document.getElementById(id);
-const state = { point: null, marker: null, data: null, coordInputDirty: false };
+const state = { point: null, marker: null, data: null, coordInputDirty: false, briefingDay: null };
 
 // Einstellungen vor Karteninit laden, damit Startposition/Basiskarte bereitstehen.
 loadSettings();
@@ -1070,12 +1070,45 @@ async function openBriefing() {
   el("brf-body").innerHTML = "<p style='padding:8px'>Erstelle Briefing …</p>";
   try {
     await ensureColumn();
+    // Jedes (Wieder-)Öffnen -- auch nach einem Neuladen (Punkt/Modell/Horizont)
+    // -- setzt die Tagesauswahl auf den Default "heute" zurück; das hält den
+    // gewählten Tag automatisch gültig, statt auf einen nach dem Reload evtl.
+    // nicht mehr geladenen Tag zu zeigen (s. Nutzerwunsch: Default = heute).
+    state.briefingDay = null;
+    populateBriefingDaySelect();
     el("brf-body").innerHTML = buildBriefingContent(briefingOpts());
   } catch (e) {
     el("brf-body").innerHTML = "<p style='padding:8px'>Briefing fehlgeschlagen: "
       + (e.message || e) + "</p>";
   }
 }
+
+// Befüllt die Tagesauswahl im Briefing-Kopf aus den tatsächlich geladenen
+// Stunden (state.data.surface.time) -- zeigt also genau so viele Tage, wie
+// aktuell über die Einstellung "Horizont" geladen sind.
+function populateBriefingDaySelect() {
+  const todayYmd = new Date(state.data.loadedAt).toISOString().slice(0, 10);
+  const days = [...new Set(state.data.surface.time.map(
+    (s) => new Date(s * 1000).toISOString().slice(0, 10),
+  ))];
+  el("brf-day").innerHTML = days.map(
+    (d) => `<option value="${d}">${briefingDaySelectLabel(d, todayYmd)}</option>`,
+  ).join("");
+  el("brf-day").value = state.briefingDay || todayYmd;
+}
+
+function briefingDaySelectLabel(ymd, todayYmd) {
+  const diffDays = Math.round((Date.parse(ymd) - Date.parse(todayYmd)) / 86400000);
+  const dm = `${ymd.slice(8, 10)}.${ymd.slice(5, 7)}.`;
+  if (diffDays === 0) return `Heute (${dm})`;
+  if (diffDays === 1) return `Morgen (${dm})`;
+  return dm;
+}
+
+el("brf-day").addEventListener("change", (e) => {
+  state.briefingDay = e.target.value;
+  el("brf-body").innerHTML = buildBriefingContent(briefingOpts());
+});
 
 // Opts für Briefing aus dem aktuellen Zustand (Säule muss gecacht sein).
 function briefingOpts() {
@@ -1086,6 +1119,7 @@ function briefingOpts() {
     modelLabel: MODELS[settings.model].label,
     maxHeightM: settings.maxHeight,
     loadedAt: state.data.loadedAt,
+    selectedDate: state.briefingDay,
   };
 }
 

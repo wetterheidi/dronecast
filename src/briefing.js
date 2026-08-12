@@ -47,15 +47,21 @@ export function buildBriefingHtml(opts) {
  * @param {{lat:number, lon:number}} opts.point
  * @param {string} opts.modelLabel
  * @param {number} opts.maxHeightM  max. Flughöhe (m AGL)
- * @param {number} opts.loadedAt    Ladezeitpunkt (ms) – bestimmt „heute" (UTC)
+ * @param {number} opts.loadedAt    Ladezeitpunkt (ms) – Default für den Tag,
+ *   falls selectedDate fehlt, und Basis für die „heute"/„morgen"-Bezeichnung
+ * @param {string} [opts.selectedDate]  gewählter Vorhersagetag (YYYY-MM-DD,
+ *   UTC) – z. B. aus dem Tages-Select im Briefing-Overlay; ohne Angabe der
+ *   Tag von loadedAt (bisheriges Verhalten: „heute")
  */
-export function buildBriefingContent({ surface, col, point, modelLabel, maxHeightM, loadedAt }) {
-  const today = new Date(loadedAt).toISOString().slice(0, 10);
-  const isToday = (sec) => new Date(sec * 1000).toISOString().slice(0, 10) === today;
+export function buildBriefingContent({ surface, col, point, modelLabel, maxHeightM, loadedAt, selectedDate }) {
+  const todayYmd = new Date(loadedAt).toISOString().slice(0, 10);
+  const day = selectedDate || todayYmd;
+  const isSelectedDay = (sec) => new Date(sec * 1000).toISOString().slice(0, 10) === day;
+  const dayLabel = relativeDayLabel(day, todayYmd);
 
-  const sfcIdx = surface.time.map((s, i) => (isToday(s) ? i : -1)).filter((i) => i >= 0);
+  const sfcIdx = surface.time.map((s, i) => (isSelectedDay(s) ? i : -1)).filter((i) => i >= 0);
   const colIdxByTime = new Map(col.time.map((s, i) => [s, i]));
-  const colIdx = col.time.map((s, i) => (isToday(s) ? i : -1)).filter((i) => i >= 0);
+  const colIdx = col.time.map((s, i) => (isSelectedDay(s) ? i : -1)).filter((i) => i >= 0);
 
   const heights = briefingHeights(maxHeightM);
   const wu = windUnit(), tu = tempUnit(), hu = heightUnit();
@@ -64,13 +70,17 @@ export function buildBriefingContent({ surface, col, point, modelLabel, maxHeigh
   let html = `<div class="header-info">
       <p><strong>Position:</strong> ${point.lat.toFixed(4)}°N ${point.lon.toFixed(4)}°E · Gitterhöhe ${Math.round(col.elevation)} m NN</p>
       <p><strong>Modell:</strong> ${modelLabel}</p>
-      <p><strong>Vorhersagetag:</strong> ${today} · <strong>erstellt:</strong> ${created}</p>
+      <p><strong>Vorhersagetag:</strong> ${day} (${dayLabel}) · <strong>erstellt:</strong> ${created}</p>
       <p><strong>Max. Flughöhe:</strong> ${Math.round(heightToDisplay(maxHeightM))} ${hu} AGL</p>
     </div>`;
 
+  if (!sfcIdx.length) {
+    return html + `<div class="section"><p>Keine Daten für diesen Tag geladen — ggf. den Vorhersagehorizont in den Einstellungen ("Horizont") erhöhen.</p></div>`;
+  }
+
   // --- Oberflächentabelle ---------------------------------------------------
   html += `<div class="section">
-    <h2>Oberfläche (heute, stündlich)</h2>
+    <h2>Oberfläche (${dayLabel}, stündlich)</h2>
     <table><thead><tr>
       <th>Datum</th><th>Zeit (Z)</th><th>Wind Dir (°)</th><th>Wind (${wu})</th>
       <th>Sicht (m)</th><th>Wetter</th><th>Wolken</th><th>Temp (${tu})</th>
@@ -98,7 +108,7 @@ export function buildBriefingContent({ surface, col, point, modelLabel, maxHeigh
 
   // --- Höhentabellen je Stunde ---------------------------------------------
   html += `<div class="section">
-    <h2>Höhendaten (heute, stündlich, bis ${Math.round(heightToDisplay(maxHeightM))} ${hu} AGL)</h2>`;
+    <h2>Höhendaten (${dayLabel}, stündlich, bis ${Math.round(heightToDisplay(maxHeightM))} ${hu} AGL)</h2>`;
 
   for (const i of colIdx) {
     const sec = col.time[i];
@@ -264,6 +274,13 @@ function fmtNum(x, digits) {
 }
 function ymdUTC(sec) {
   return new Date(sec * 1000).toISOString().slice(0, 10);
+}
+/** „heute"/„morgen" relativ zu todayYmd, sonst das Datum selbst (YYYY-MM-DD, beide UTC). */
+function relativeDayLabel(ymd, todayYmd) {
+  const diffDays = Math.round((Date.parse(ymd) - Date.parse(todayYmd)) / 86400000);
+  if (diffDays === 0) return "heute";
+  if (diffDays === 1) return "morgen";
+  return ymd;
 }
 function hhmmZ(sec) {
   return new Date(sec * 1000).toISOString().slice(11, 16).replace(":", "") + "Z";
