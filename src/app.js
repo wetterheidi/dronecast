@@ -7,10 +7,9 @@ import { fetchColumn, buildField } from "./column.js";
 import { cloudCeiling, cloudLayers, classifyFog } from "./clouds.js";
 import { renderCrossSection } from "./crosssection.js";
 import { gridFromColumn, sampleAt, derive } from "./gramet/grid.js";
-import { deriveView } from "./gramet/derive.js";
-import { renderGramet, exportPng as exportGrametPng } from "./gramet/render.js";
 import { ipiAt, ipiCategoryFloor } from "./gramet/hazards/icing.js";
 import { tfiAt, tfiCategoryFloor } from "./gramet/hazards/turbulence.js";
+import "./components/gramet-panel/gramet-panel.js";
 import { buildBriefingHtml, buildBriefingContent } from "./briefing.js";
 import { evaluate as evaluateGoNoGo } from "./gonogo.js";
 import { renderGoNoGoTable } from "./gonogotable.js";
@@ -620,17 +619,23 @@ el("xs-close").addEventListener("click", () => { el("crosssection").hidden = tru
 
 // GRAMET-Meteogramm: dieselbe gecachte Säule wie Cross-Section/Briefing, dazu
 // die ohnehin schon geladenen Oberflächenwerte (state.data.surface) — kein
-// eigener Request (s. src/gramet/grid.js).
+// eigener Request (s. src/gramet/grid.js). Rendering/Ableitung von `view`
+// übernimmt jetzt die <gramet-panel>-Komponente selbst (s.
+// src/components/gramet-panel/); app.js reicht nur noch `grid` +
+// Darstellungs-Einstellungen rein. `state.data.gmGrid` bleibt hier gecacht,
+// weil es sich die Go/No-Go-Hazardzeilen weiter unten teilen (s.
+// `icingBandMaxAt`/`turbulenceBandMaxAt`).
 async function openGramet() {
   if (!state.data || !state.point) return;
-  el("gramet").hidden = false;
-  el("gm-sub").textContent = el("pointpos").textContent;
+  const gm = el("gramet");
+  gm.hidden = false;
+  gm.subtitle = el("pointpos").textContent;
   if (!state.data.col) {
-    el("gm-body").textContent = "Lade Höhenprofil …";
+    gm.loading = "Lade Höhenprofil …";
     try {
       await ensureColumn();
     } catch (e) {
-      el("gm-body").textContent = "Fehler beim Laden des Höhenprofils: " + (e.message || e);
+      gm.loading = "Fehler beim Laden des Höhenprofils: " + (e.message || e);
       return;
     }
   }
@@ -639,69 +644,39 @@ async function openGramet() {
 
 function renderGm() {
   if (!state.data?.col) return;
-  syncGmToggle();
   if (!state.data.gmGrid) {
     const { lat, lon } = state.point;
     state.data.gmGrid = gridFromColumn(state.data.col, state.data.surface, lat, lon);
-    state.data.gmView = deriveView(state.data.gmGrid);
   }
-  let zMin, zMax;
-  if (settings.xsZoom) {
-    zMax = Math.round(settings.maxHeight * XS_ZOOM_HEADROOM);
-    zMin = Math.max(10, state.data.gmGrid.z[0] || 10);
-  }
-  state.data.gmCanvas = renderGramet(el("gm-body"), state.data.gmGrid, state.data.gmView, {
-    axis: settings.xsZoom ? "lin" : "log", zMin, zMax,
-    // Für die terrainfolgende Max-Flughöhen-Linie im Path-Modus (s. render.js
-    // `drawCeiling`) -- unabhängig vom `xsZoom`-Toggle, anders als `zMax`
-    // oben. Im Punkt-Modus (hier immer der Fall) ohne Wirkung,
-    // `gmGrid.meta.mode` ist nie "path".
-    maxHeightM: settings.maxHeight,
-    layerToggles: {
+  el("gramet").update({
+    grid: state.data.gmGrid,
+    maxHeight: settings.maxHeight,
+    range: settings.xsZoom ? "zoom" : "full",
+    layers: {
       isotherms: settings.gmIsothermsOn,
       isotachs: settings.gmIsotachsOn,
       hazards: settings.gmHazardsOn,
       windbarbs: settings.gmWindbarbsOn,
     },
-    // GRAMET zeichnet bei Container-Resize jetzt intern über seinen eigenen
-    // ResizeObserver neu (s. render.js) -- ohne diesen Callback bliebe
-    // `gmCanvas` nach so einem Redraw auf dem alten, dann aus dem DOM
-    // entfernten Canvas stehen und der PNG-Export exportierte einen
-    // veralteten Stand.
-    onRedraw: (canvas) => { state.data.gmCanvas = canvas; },
+    exportNameParts: ["gramet", settings.model, state.point?.lat, state.point?.lon],
   });
 }
 
-function syncGmToggle() {
-  document.querySelectorAll("#gm-range button").forEach((b) => {
-    b.classList.toggle("active", (b.dataset.range === "zoom") === settings.xsZoom);
-  });
-  document.querySelectorAll("#gm-layers input[data-layer]").forEach((cb) => {
-    const key = `gm${cb.dataset.layer[0].toUpperCase()}${cb.dataset.layer.slice(1)}On`;
-    cb.checked = settings[key] !== false;
-  });
-}
-
-el("gm-range").addEventListener("click", (e) => {
-  const btn = e.target.closest("button[data-range]");
-  if (!btn) return;
-  updateSetting("xsZoom", btn.dataset.range === "zoom");
-  renderGm();
+// Persistenz der Panel-eigenen Darstellungs-Einstellungen ist Sache der
+// Host-App (s. Doc-Kommentar in gramet-panel.js) -- hier in `settings.js`
+// spiegeln. `xsZoom` teilt sich Cross-Section und GRAMET (dieselbe
+// Umschaltfläche bedient beide Ansichten), daher bei jeder Änderung auch
+// die Cross-Section neu zeichnen, falls offen.
+el("gramet").addEventListener("settingschange", (e) => {
+  const { range, layers } = e.detail;
+  updateSetting("xsZoom", range === "zoom");
+  updateSetting("gmIsothermsOn", layers.isotherms);
+  updateSetting("gmIsotachsOn", layers.isotachs);
+  updateSetting("gmHazardsOn", layers.hazards);
+  updateSetting("gmWindbarbsOn", layers.windbarbs);
   if (!el("crosssection").hidden) renderXs();
 });
-el("gm-layers").addEventListener("change", (e) => {
-  const cb = e.target.closest("input[data-layer]");
-  if (!cb) return;
-  const key = `gm${cb.dataset.layer[0].toUpperCase()}${cb.dataset.layer.slice(1)}On`;
-  updateSetting(key, cb.checked);
-  renderGm();
-});
-el("gm-export").addEventListener("click", () => {
-  if (state.data?.gmCanvas) {
-    exportGrametPng(state.data.gmCanvas, ["gramet", settings.model, state.point?.lat, state.point?.lon]);
-  }
-});
-el("gm-close").addEventListener("click", () => { el("gramet").hidden = true; });
+el("gramet").addEventListener("close", () => { el("gramet").hidden = true; });
 
 // Go/No-Go-Tabelle: Windmaximum zwischen 10 m und Flughöhe pro Stunde aus dem
 // bereits gecachten WindField auflösen (keine neuen Requests, nur

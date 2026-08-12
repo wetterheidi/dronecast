@@ -166,24 +166,6 @@ select, input[type="number"], input[type="text"] {
   font-weight: 600;
 }
 
-/* GRAMET-Ebenenschalter: Kurzform-Checkboxen statt Segment-Buttons -- es sind
-   unabhängige Ein/Aus-Schalter, keine sich ausschließende Auswahl. */
-.gm-layers {
-  display: inline-flex;
-  gap: 12px;
-  font-size: 11px;
-  font-weight: 400;
-  color: #52514e;
-}
-.gm-layers label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.gm-layers input[type="checkbox"] { margin: 0; cursor: pointer; }
-
 /* Cross-Section-Overlay: gleiche Hülle wie Meteogramm, füllt den Container. */
 #crosssection {
   position: absolute;
@@ -203,7 +185,9 @@ select, input[type="number"], input[type="text"] {
 .seg-toggle + #xs-close { margin-left: 8px; } /* Umschalter übernimmt das Auffüllen */
 #xs-close:hover { color: #0b0b0b; }
 
-/* GRAMET-Overlay: gleiche Hülle wie Meteogramm/Cross-Section. */
+/* GRAMET-Overlay: gleiche Hülle wie Meteogramm/Cross-Section -- nur noch die
+   äußere Positionierung; Kopf/Inhalt sind Sache der Web Component
+   (src/components/gramet-panel/, eigenes Shadow DOM). */
 #gramet {
   position: absolute;
   inset: 10px 400px 10px 10px;
@@ -211,38 +195,9 @@ select, input[type="number"], input[type="text"] {
   background: rgba(252, 252, 251, 0.98);
   border-radius: 8px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
-  display: flex;
-  flex-direction: column;
   overflow: hidden;
 }
 #gramet[hidden] { display: none; }
-/* Kein horizontales Padding: `position: sticky; left: 0` des Achsenstreifens
-   bezieht sich auf die Padding-Box des Scrollcontainers -- mit Padding würde
-   die Beschriftung beim Andocken um genau diesen Betrag springen. */
-#gm-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 0 8px; position: relative; }
-.gm-plot { display: flex; align-items: flex-start; width: max-content; }
-.gm-canvas { display: block; cursor: crosshair; flex: none; position: relative; z-index: 1; }
-/* Linker Randstreifen (Höhenachse + Zeilenbeschriftung) bleibt beim
-   horizontalen Scrollen stehen; liegt über dem durchlaufenden Chart. */
-.gm-axis { display: block; flex: none; position: sticky; left: 0; z-index: 2; }
-#gm-export, #gm-close { margin-left: 0; border: none; background: none; font-size: 13px; color: #52514e; cursor: pointer; padding: 0 4px; }
-#gm-close { font-size: 20px; margin-left: 4px; }
-.seg-toggle + #gm-export { margin-left: 8px; }
-#gm-export:hover, #gm-close:hover { color: #0b0b0b; }
-.gm-tip {
-  position: absolute;
-  pointer-events: none;
-  background: rgba(252, 252, 251, 0.97);
-  border: 1px solid #c9c8c2;
-  border-radius: 5px;
-  padding: 6px 8px;
-  font-size: 11px;
-  line-height: 1.5;
-  color: #0b0b0b;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
-  white-space: nowrap;
-  z-index: 5;
-}
 
 /* Go/No-Go-Tabelle-Overlay: gleiche Hülle wie Meteogramm/Cross-Section. */
 #gonogo {
@@ -663,13 +618,14 @@ input[type="range"]::-moz-range-thumb {
     position: relative;
     padding-right: 40px;
   }
-  #mg-close, #xs-close, #gm-close, #brf-close, #gng-close {
+  #mg-close, #xs-close, #brf-close, #gng-close {
     position: absolute;
     top: 8px;
     right: 12px;
     margin-left: 0;
   }
-  .gm-layers { flex-wrap: wrap; row-gap: 4px; }
+  /* #gm-close liegt jetzt im Shadow DOM von <gramet-panel> -- dasselbe
+     Umbruch-/Pin-Verhalten steckt dort in gramet-panel.css. */
 
   /* Mehrspaltige Formulare (Einstellungen, Drohnenprofil-Editor) auf eine
      Spalte reduzieren -- zwei/drei Selects nebeneinander sind auf
