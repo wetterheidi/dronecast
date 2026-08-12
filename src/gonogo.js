@@ -62,8 +62,8 @@ const KMH_TO_MS = 1 / 3.6;
  *                     (`turbulenceBandMaxAt` in app.js). Deckt NUR das
  *                     Flugband oberhalb 10 m ab; Bodenböigkeit bleibt die
  *                     separate `gustSurface`-Zeile (keine Doppelung).
- * @returns { time, rows: [{id,label,kind,cells:[{status,value|text,subtext?}]}],
- *            conclusion: [{status, limitingId}] }
+ * @returns { time, rows: [{id,label,kind,naHint?,cells:[{status,value|text,subtext?,hint?}]}],
+ *            conclusion: [{status, limitingId, hint?}] }
  */
 export function evaluate(
   surface, windBandMax, profile, opHeightM, cloudCeilingArr = null, fogArr = null, icingBandMaxArr = null,
@@ -90,7 +90,12 @@ export function evaluate(
       }),
       { nullIsGreen: true }),
     numericRow("visibility", "Sicht", "vis", L.visibility, profile.marginPct,
-      time.map((_, i) => (visArr ? visArr[i] ?? null : null))),
+      time.map((_, i) => (visArr ? visArr[i] ?? null : null)),
+      {
+        unavailableIfAllNull: true,
+        unavailableText: "n. verfügbar",
+        unavailableHint: "Sicht wird von diesem Modell nicht geliefert – manuell prüfen (Satellitenbild, METAR, Webcam).",
+      }),
     numericRow("precipitation", "Niederschlag", "precip", L.precipitation, profile.marginPct,
       time.map((_, i) => (precipArr ? precipArr[i] ?? null : null))),
     rangeRow("temperature", "Temperatur", "temp", L.tempMin, L.tempMax, profile.marginPct,
@@ -106,14 +111,26 @@ export function evaluate(
 
 // --- Zeilen-Aufbau ----------------------------------------------------------
 
+// `unavailableIfAllNull`: unterscheidet "Modell liefert die Variable grund-
+// sätzlich nicht" (Wert an JEDER Stunde null, z. B. `visibility` bei ICON
+// Global -- per Live-Check der API bestätigt, kein Transportfehler) von
+// einer einzelnen fehlenden Stunde (z. B. Modellhorizont-Ende). Nur im
+// ersten Fall bekommen Zelle und Zeile den erklärenden Text/Hinweis --
+// sonst bliebe eine echte punktuelle Datenlücke stillschweigend "n.
+// verfügbar", obwohl das Modell den Wert an anderen Stunden sehr wohl liefert.
 function numericRow(id, label, kind, limit, defaultMarginPct, valuesRaw, opts = {}) {
+  const unavailable = opts.unavailableIfAllNull && valuesRaw.every((v) => v == null);
   const cells = valuesRaw.map((val) => {
     if (val == null || !Number.isFinite(val)) {
-      return opts.nullIsGreen ? { status: "green", value: null } : { status: "na", value: null };
+      if (opts.nullIsGreen) return { status: "green", value: null };
+      if (unavailable) return { status: "na", value: null, text: opts.unavailableText, hint: opts.unavailableHint };
+      return { status: "na", value: null };
     }
     return { status: evalThreshold(val, limit, defaultMarginPct), value: val };
   });
-  return { id, label, kind, limit, cells };
+  const row = { id, label, kind, limit, cells };
+  if (unavailable && opts.unavailableHint) row.naHint = opts.unavailableHint;
+  return row;
 }
 
 // Vereisungs-Intensität statt Prozentzahl: Piloten kennen die Vereisung
@@ -240,7 +257,7 @@ function conclusionAt(rows, i) {
   const red = firstWithStatus("red");
   if (red) return { status: "red", limitingId: red.id };
   const na = firstWithStatus("na");
-  if (na) return { status: "na", limitingId: na.id };
+  if (na) return { status: "na", limitingId: na.id, hint: na.naHint };
   const yellow = firstWithStatus("yellow");
   if (yellow) return { status: "yellow", limitingId: yellow.id };
   return { status: "green", limitingId: null };

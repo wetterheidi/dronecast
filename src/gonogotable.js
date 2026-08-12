@@ -78,7 +78,10 @@ function conclusionRow(conclusion, labelById) {
     const td = document.createElement("td");
     td.className = `gng-cell go-${c.status}`;
     td.textContent = STATUS_LABEL[c.status];
-    if (c.limitingId) td.title = `Begrenzender Faktor: ${labelById[c.limitingId] || c.limitingId}`;
+    if (c.limitingId) {
+      const factor = labelById[c.limitingId] || c.limitingId;
+      td.title = c.hint ? `Begrenzender Faktor: ${factor} — ${c.hint}` : `Begrenzender Faktor: ${factor}`;
+    }
     tr.append(td);
   }
   return tr;
@@ -90,6 +93,7 @@ function conclusionRow(conclusion, labelById) {
 function cellContent(kind, cell) {
   const td = document.createElement("td");
   td.className = `gng-cell go-${cell.status}`;
+  if (cell.hint) td.title = cell.hint;
   if (cell.subtext) {
     const main = document.createElement("div");
     main.textContent = formatCell(kind, cell);
@@ -103,8 +107,13 @@ function cellContent(kind, cell) {
   return td;
 }
 
+// `cell.text` überschreibt bei numerischen Zeilen (kind !== "text") die
+// formatierte Zahl NUR, wenn der Wert grundsätzlich fehlt (s. gonogo.js
+// `numericRow` `unavailableIfAllNull`) -- sonst greift wie bisher die
+// numerische Formatierung nach `kind`.
 function formatCell(kind, cell) {
   if (kind === "text") return cell.text ?? "–";
+  if (cell.text) return cell.text;
   const v = cell.value;
   if (v == null || !Number.isFinite(v)) return "–";
   switch (kind) {
