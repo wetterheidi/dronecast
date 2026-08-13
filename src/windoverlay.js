@@ -108,7 +108,9 @@ const AUTO_CHECK_MS = 10 * 60 * 1000;
 // typischen Drohnen-Limits orientiert (vgl. droneProfiles.js: windSurface
 // max. 10 m/s, windBandMax 12 m/s, gustSurface 15 m/s). Bewusst statisch
 // statt ans gewählte Profil gekoppelt (Profile sind austauschbare Platzhalter).
-const WIND_FILL_STOPS = [
+// Exportiert: von windspinne.js für dieselbe Windfarbcodierung wiederverwendet
+// (konsistente Windfarbe app-weit statt einer zweiten, abweichenden Skala).
+export const WIND_FILL_STOPS = [
   { max: 2, rgb: [110, 170, 235] },
   { max: 4, rgb: [120, 200, 160] },
   { max: 6, rgb: [160, 210, 100] },

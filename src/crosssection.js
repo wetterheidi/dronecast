@@ -13,6 +13,7 @@ import {
   fmtHeight, fmtWind, fmtDir, fmtTemp,
 } from "./units.js";
 import { placeWindBarb, CHART_PX_PER_HOUR, CHART_BARB_SIZE } from "./windbarb.js";
+import { lerpAngle } from "./column.js";
 
 const KT_PER_MS = 1.94384;
 
@@ -132,8 +133,14 @@ function setupHover(svg, ctx) {
     if (k >= targetH.length) k = targetH.length - 1;
     const k0 = k - 1, f = (h - targetH[k0]) / (targetH[k] - targetH[k0]);
     const lin = (a) => a[k0][i] + f * (a[k][i] - a[k0][i]);
-    const u = lin(field.u), v = lin(field.v);
-    return { spd: Math.hypot(u, v), dir: (Math.atan2(-u, -v) * 180 / Math.PI + 360) % 360, temp: lin(field.temp), cloud: lin(field.cloud) };
+    // Richtung über den kürzeren Bogen, Betrag linear -- field.spd/field.dir
+    // kommen bereits so aus buildField() (s. dortiger Doc-Kommentar), hier nur
+    // zwischen den beiden benachbarten Zielhöhen-Reihen weiterinterpoliert.
+    return {
+      spd: lin(field.spd),
+      dir: lerpAngle(field.dir[k0][i], field.dir[k][i], f),
+      temp: lin(field.temp), cloud: lin(field.cloud),
+    };
   };
   const clearOv = () => { while (ov.firstChild) ov.removeChild(ov.firstChild); };
 

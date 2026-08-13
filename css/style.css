@@ -72,7 +72,9 @@ select, input[type="number"], input[type="text"] {
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
 .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 8px 0; }
 .grid2 label, .grid3 label { display: flex; flex-direction: column; gap: 3px; font-weight: 600; font-size: 12px; }
-.grid2 select, .grid3 select { width: 100%; }
+.grid2 select, .grid3 select, .grid2 input, .grid3 input { width: 100%; box-sizing: border-box; }
+.grid2 .inline-group { width: 100%; }
+.grid2 .inline-group input { width: auto; flex: 1; min-width: 0; }
 
 #load {
   width: 100%;
@@ -198,6 +200,20 @@ select, input[type="number"], input[type="text"] {
   overflow: hidden;
 }
 #gramet[hidden] { display: none; }
+
+/* Windspinne-Overlay: gleiche Hülle wie Meteogramm/Cross-Section/GRAMET --
+   nur die äußere Positionierung; Kopf/Inhalt sind Sache der Web Component
+   (src/components/windspinne-panel/, eigenes Shadow DOM). */
+#windspinne {
+  position: absolute;
+  inset: 10px 400px 10px 10px;
+  z-index: 1100;
+  background: rgba(252, 252, 251, 0.98);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+#windspinne[hidden] { display: none; }
 
 /* Go/No-Go-Tabelle-Overlay: gleiche Hülle wie Meteogramm/Cross-Section. */
 #gonogo {
@@ -606,7 +622,7 @@ input[type="range"]::-moz-range-thumb {
   input[type="range"] { height: 24px; }
 
   /* Overlays bildschirmfüllend. */
-  #meteogram, #crosssection, #gramet, #gonogo, #briefing { inset: 0; border-radius: 0; z-index: 1300; }
+  #meteogram, #crosssection, #gramet, #windspinne, #gonogo, #briefing { inset: 0; border-radius: 0; z-index: 1300; }
 
   /* Overlay-Kopf: bei schmalen Screens umbrechen statt seitlich abzuschneiden.
      Schließen-Button fest oben rechts, damit er unabhängig vom Umbruch der

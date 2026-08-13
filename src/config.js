@@ -87,8 +87,9 @@ export const SURFACE_OPTIONAL = [
   "snowfall", // Niederschlagsphase im GRAMET-Meteogramm (src/gramet)
 ];
 
-// Vorhersage-Obergrenze (max. Flughöhe AGL) – Auswahl fürs Settings-Panel.
-export const MAX_HEIGHT_OPTIONS = [120, 300, 500, 1000, 2000, 6000, 8000, 10000]; // m AGL
+// Vorhersage-Obergrenze (max. Flughöhe AGL) – Eingabefeld im Settings-Panel.
+export const MIN_MAX_HEIGHT = 120; // m AGL
+export const MAX_MAX_HEIGHT = 10000; // m AGL
 export const DEFAULT_MAX_HEIGHT = 300;
 
 // Vorhersage-Zeithorizont in Tagen.

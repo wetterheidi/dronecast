@@ -60,6 +60,7 @@
           <button class="product" data-prod="meteogram">Meteogramm</button>
           <button class="product" data-prod="xsection">Cross-Section</button>
           <button class="product" data-prod="gramet">GRAMET</button>
+          <button class="product" data-prod="windspinne">Windspinne</button>
           <button class="product" data-prod="briefing">Briefing</button>
           <button class="product" data-prod="table">Tabelle (Go/No-Go)</button>
         </div>
@@ -222,7 +223,10 @@
       <div class="hint mono" id="model-run-hint" hidden></div>
       <div class="grid2">
         <label>Vorhersage bis (Höhe AGL)
-          <select id="set-maxheight"></select>
+          <span class="inline-group">
+            <input type="number" id="set-maxheight" inputmode="numeric">
+            <span id="set-maxheight-unit" class="hint mono"></span>
+          </span>
         </label>
         <label>Zeithorizont
           <select id="set-days"></select>
@@ -287,6 +291,11 @@
        den übrigen Overlays über die #gramet-Regel in css/style.css, Kopf/
        Inhalt sind komponentenintern. -->
   <gramet-panel id="gramet" hidden></gramet-panel>
+
+  <!-- Windspinne-Overlay: eigenständige Web Component (Shadow DOM), s.
+       src/components/windspinne-panel/. Positionierung/Rahmen über die
+       #windspinne-Regel in css/style.css, Kopf/Inhalt sind komponentenintern. -->
+  <windspinne-panel id="windspinne" hidden></windspinne-panel>
 
   <!-- Briefing-Overlay -->
   <div id="briefing" hidden>

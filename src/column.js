@@ -123,10 +123,30 @@ export function buildField(col, capM = 8000, nTarget = 44, grid = "log") {
   const hMin = Math.max(10, firstFinite(h[0]) || 10);
   const targetH = grid === "lin" ? linspace(hMin, capM, nTarget) : logspace(hMin, capM, nTarget);
 
-  const spd = [], dir = [], temp = [], uc = [], vc = [], rhc = [], cloud = [];
+  // Richtung/Betrag je REALEM Level einmal ableiten, dann getrennt auf die
+  // Zielhöhen interpolieren: Betrag linear, Richtung über den kürzeren Bogen
+  // (`lerpAngle`) -- NICHT rohe u/v-Interpolation mit anschließender
+  // Ableitung (frühere Version). Grund (s. Nutzerfeedback): bei zwei ähnlich
+  // schwachen, aber entgegengesetzt gerichteten Leveln verläuft die Gerade in
+  // u/v-Raum nahe am Nullpunkt -- das erfindet eine Flaute zwischen den
+  // Leveln, die die Daten nicht hergeben (Artefakt in der Farbfläche), und
+  // macht die gezeichnete Drehrichtung vom Zufall der Vektorgeometrie
+  // abhängig statt einer bewussten "kürzerer Weg"-Wahl. Dieselbe Korrektur
+  // wie in windspinne.js.
+  const nLevels = u.length;
+  const dirLv = [], spdLv = [];
+  for (let k = 0; k < nLevels; k++) {
+    dirLv.push(new Float64Array(T));
+    spdLv.push(new Float64Array(T));
+    for (let i = 0; i < T; i++) {
+      spdLv[k][i] = Math.hypot(u[k][i], v[k][i]);
+      dirLv[k][i] = (Math.atan2(-u[k][i], -v[k][i]) * 180 / Math.PI + 360) % 360;
+    }
+  }
+
+  const spd = [], dir = [], temp = [], rhc = [], cloud = [];
   for (let k = 0; k < nTarget; k++) {
     spd.push(new Float64Array(T)); dir.push(new Float64Array(T)); temp.push(new Float64Array(T));
-    uc.push(new Float64Array(T)); vc.push(new Float64Array(T));
     rhc.push(new Float64Array(T)); cloud.push(new Float64Array(T));
   }
   const freezing = new Float64Array(T).fill(NaN);
@@ -136,14 +156,13 @@ export function buildField(col, capM = 8000, nTarget = 44, grid = "log") {
     const hi = h.map((a) => a[i]);
     for (let k = 0; k < nTarget; k++) {
       const br = bracket(hi, targetH[k]);
-      const uu = lerp(u, br, i), vv = lerp(v, br, i), tt = lerp(t, br, i), rr = lerp(rh, br, i);
+      const tt = lerp(t, br, i), rr = lerp(rh, br, i);
       const ww = w ? lerp(w, br, i) : NaN;
       const pp = p ? lerp(p, br, i) : NaN, qq = q ? lerp(q, br, i) : NaN;
       const qwq = qw ? lerp(qw, br, i) : NaN, qiq = qi ? lerp(qi, br, i) : NaN;
       const clcq = clc ? lerp(clc, br, i) : NaN;
-      uc[k][i] = uu; vc[k][i] = vv;
-      spd[k][i] = Math.hypot(uu, vv);
-      dir[k][i] = (Math.atan2(-uu, -vv) * 180 / Math.PI + 360) % 360;
+      spd[k][i] = lerp(spdLv, br, i);
+      dir[k][i] = lerpAngle(dirLv[br.k0][i], dirLv[br.k1][i], br.f);
       temp[k][i] = tt;
       rhc[k][i] = rr;
       cloud[k][i] = cloudFraction({ q: qq, p: pp, t: tt, rh: rr, qw: qwq, qi: qiq, clc: clcq, model }, targetH[k], ww);
@@ -151,14 +170,15 @@ export function buildField(col, capM = 8000, nTarget = 44, grid = "log") {
     // Nullgradgrenze: unterster Übergang T ≥ 0 → < 0 nach oben.
     freezing[i] = zeroCrossing(hi, t, i);
   }
-  // u/v mitführen: korrekte Windinterpolation beim Hover (Winkel nie direkt).
-  return { time, targetH, spd, dir, temp, u: uc, v: vc, rh: rhc, cloud, freezing };
+  return { time, targetH, spd, dir, temp, rh: rhc, cloud, freezing };
 }
 
 /**
  * Rohe Säule zur Stunde `i` linear auf die AGL-Zielhöhe `ht` (m) interpolieren.
- * u/v/T/RH linear, Druck logarithmisch in der Höhe. Unter dem untersten Level
- * wird geklammert (wie in windfield.js). Wind kommt in m/s, T/RH/p in SI/hPa.
+ * T/RH linear, Druck logarithmisch in der Höhe, Wind als Richtung (kürzerer
+ * Bogen, `lerpAngle`) + Betrag (linear) statt roher u/v-Interpolation (s.
+ * `buildField` Doc-Kommentar für den Grund). Unter dem untersten Level wird
+ * geklammert (wie in windfield.js). Wind in m/s, T/RH/p in SI/hPa.
  */
 export function sampleColumnAtHeight(col, i, ht) {
   const hi = col.h.map((a) => a[i]);
@@ -171,10 +191,24 @@ export function sampleColumnAtHeight(col, i, ht) {
       ? Math.exp(Math.log(a) + br.f * (Math.log(b) - Math.log(a)))
       : lerp(col.p, br, i);
   }
+  const dirAt = (k) => (Math.atan2(-col.u[k][i], -col.v[k][i]) * 180 / Math.PI + 360) % 360;
+  const spdAt = (k) => Math.hypot(col.u[k][i], col.v[k][i]);
   return {
-    h: ht, u: val(col.u), v: val(col.v), t: val(col.t), rh: val(col.rh), p, w: val(col.w), q: val(col.q),
+    h: ht,
+    dir: lerpAngle(dirAt(br.k0), dirAt(br.k1), br.f),
+    spd: spdAt(br.k0) + br.f * (spdAt(br.k1) - spdAt(br.k0)),
+    t: val(col.t), rh: val(col.rh), p, w: val(col.w), q: val(col.q),
     qw: val(col.qw), qi: val(col.qi), clc: val(col.clc), model: col.model,
   };
+}
+
+/** Kürzester Bogen zwischen zwei Windrichtungen (Grad, 0-360): Δ auf ±180°
+ *  geklammert, bevor interpoliert wird -- s. `buildField` Doc-Kommentar.
+ *  Dieselbe Funktion (bewusst separat gehalten, kein Modul-Import) auch in
+ *  `windspinne.js`. */
+export function lerpAngle(a0, a1, f) {
+  const delta = ((a1 - a0 + 540) % 360) - 180;
+  return (a0 + delta * f + 360) % 360;
 }
 
 /**

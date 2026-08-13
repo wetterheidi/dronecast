@@ -17,7 +17,7 @@
  */
 
 import { cloudFraction } from "../clouds.js";
-import { fetchColumn, sliceColumnAtTime } from "../column.js";
+import { fetchColumn, sliceColumnAtTime, lerpAngle } from "../column.js";
 import { nearestIndex } from "../weather.js";
 
 const KELVIN = 273.15;
@@ -227,8 +227,17 @@ export function sampleAt(grid, i, hAgl) {
   const z0 = grid.z[k0], z1 = grid.z[k1];
   const f = z1 > z0 ? clamp01((hAgl - z0) / (z1 - z0)) : 0;
   const lerp = (a) => a[k0] + f * (a[k1] - a[k0]);
+  // Richtung über den kürzeren Bogen, Betrag linear -- NICHT rohe u/v-
+  // Interpolation mit anschließender atan2/hypot-Ableitung (frühere Version,
+  // s. dieselbe Korrektur + Begründung in column.js `buildField()`). Betraf
+  // hier den GRAMET-Hover-Tooltip und die Windfiedern-Overlay
+  // (`rows/wind.js` `drawWindBarbOverlay`) -- beide riefen bislang
+  // `Math.atan2`/`Math.hypot` auf dem u/v-Ergebnis dieser Funktion auf.
+  const dir0 = (Math.atan2(-grid.u[k0], -grid.v[k0]) * 180 / Math.PI + 360) % 360;
+  const dir1 = (Math.atan2(-grid.u[k1], -grid.v[k1]) * 180 / Math.PI + 360) % 360;
+  const spd0 = Math.hypot(grid.u[k0], grid.v[k0]), spd1 = Math.hypot(grid.u[k1], grid.v[k1]);
   return {
-    z: hAgl, T: lerp(grid.T), u: lerp(grid.u), v: lerp(grid.v), w: lerp(grid.w),
+    z: hAgl, T: lerp(grid.T), dir: lerpAngle(dir0, dir1, f), spd: spd0 + f * (spd1 - spd0), w: lerp(grid.w),
     rh: lerp(grid.rh), p: lerp(grid.p), cloudFrac: lerp(derive(grid).cloudFrac),
   };
 }

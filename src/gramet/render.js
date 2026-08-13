@@ -1672,7 +1672,7 @@ function setupHover(host, canvas, axis, grid, info) {
       return;
     }
     const s = sampleAt(grid, i, hAgl);
-    const dir = (Math.atan2(-s.u, -s.v) * 180 / Math.PI + 360) % 360;
+    const dir = s.dir;
     // WW gilt für den Boden (weather_code ist ein Oberflächenfeld), nicht für
     // die gehoverte Höhe -- daher explizit gekennzeichnet.
     const code = grid.surface?.wcode?.[i];
@@ -1699,7 +1699,7 @@ function setupHover(host, canvas, axis, grid, info) {
         ? `Höhe ${fmtHeight(h)} AMSL · ${fmtHeight(hAgl)} über Modellgrund`
         : `Höhe ${fmtHeight(h)}`,
       `Temp ${fmtTemp(s.T - 273.15)}`,
-      `Wind ${fmtDir(dir)} ${fmtWind(Math.hypot(s.u, s.v))}`,
+      `Wind ${fmtDir(dir)} ${fmtWind(s.spd)}`,
       `Wolken ${Math.round((s.cloudFrac || 0) * 100)} %`,
       `WW (Boden) ${ww}`,
       `Nd (Vorstunde) ${amount}${snow}`,

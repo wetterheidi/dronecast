@@ -1,15 +1,16 @@
-import { MODELS, PREVIEW_HEIGHTS } from "./config.js";
+import { MODELS, PREVIEW_HEIGHTS, MIN_MAX_HEIGHT, MAX_MAX_HEIGHT } from "./config.js";
 import { WindField } from "./windfield.js";
 import { fetchSurface, fetchModelRunInit, nearestIndex, nearestIndexOrNull } from "./weather.js";
 import { initTimeControls, setRange, getMasterMs, subscribe as subscribeTime } from "./timeController.js";
 import { renderMeteogram } from "./meteogram.js";
-import { fetchColumn, buildField } from "./column.js";
+import { fetchColumn, buildField, sliceColumnAtTime } from "./column.js";
 import { cloudCeiling, cloudLayers, classifyFog } from "./clouds.js";
 import { renderCrossSection } from "./crosssection.js";
 import { gridFromColumn, sampleAt, derive } from "./gramet/grid.js";
 import { ipiAt, ipiCategoryFloor } from "./gramet/hazards/icing.js";
 import { tfiAt, tfiCategoryFloor } from "./gramet/hazards/turbulence.js";
 import "./components/gramet-panel/gramet-panel.js";
+import "./components/windspinne-panel/windspinne-panel.js";
 import { buildBriefingHtml, buildBriefingContent } from "./briefing.js";
 import { evaluate as evaluateGoNoGo } from "./gonogo.js";
 import { renderGoNoGoTable } from "./gonogotable.js";
@@ -26,11 +27,11 @@ import { settings, loadSettings, updateSetting, OPTIONS } from "./settings.js";
 import { parseCoordInput } from "./coords.js";
 import { initGeoman } from "./geoman.js";
 import { initMapLayers } from "./maplayers.js";
-import { initWindOverlay } from "./windoverlay.js";
+import { initWindOverlay, WIND_FILL_STOPS } from "./windoverlay.js";
 import { initGustOverlay } from "./gustoverlay.js";
 import { initCloudOverlay } from "./cloudoverlay.js";
 import {
-  fmtHeight, fmtWind, fmtTemp, fmtDirPadded, heightUnit, heightToDisplay,
+  fmtHeight, fmtWind, fmtTemp, fmtDirPadded, heightUnit, heightToDisplay, heightFromDisplay,
 } from "./units.js";
 import { throttle } from "./overlayshared.js";
 
@@ -136,7 +137,14 @@ map.on("mouseout", () => { pendingLatLng = null; cursorReadout.hidden = true; })
 // loadForecast() verfeinert die Grenzen später auf die echte Zeitreihe.
 initTimeControls();
 setMasterRange();
-subscribeTime(() => { if (state.data) renderNow(); });
+subscribeTime(() => {
+  if (!state.data) return;
+  renderNow();
+  // Windspinne zeigt (anders als GRAMET/Cross-Section) nur EINEN Zeitpunkt --
+  // muss deshalb bei jedem Masterzeit-Tick neu gezeichnet werden, nicht nur
+  // beim Öffnen. Ohne bereits geladene Säule (noch nicht geöffnet) nichts tun.
+  if (!el("windspinne").hidden && state.data.col) renderWs();
+});
 
 function startOfTodayMs() {
   const d = new Date();
@@ -359,6 +367,7 @@ async function loadForecast() {
     if (!el("meteogram").hidden) openMeteogram();       // offene Overlays aktualisieren
     if (!el("crosssection").hidden) openCrossSection();
     if (!el("gramet").hidden) openGramet();
+    if (!el("windspinne").hidden) openWindspinne();
     if (!el("gonogo").hidden) openGoNoGo();
     // Briefing fehlte hier bisher (s. Nutzerfeedback): stand nach einem
     // Koordinatenwechsel bei geöffnetem Panel weiter mit den Daten des ALTEN
@@ -487,7 +496,7 @@ function line(k, v, warn) {
 // gleiches inset, gleicher z-index) und sind daher als Einzelplatz gedacht --
 // ohne Exklusivität bliebe ein neu geöffnetes Overlay unsichtbar hinter einem
 // bereits offenen liegen (Nutzerfeedback: GoNoGo-Tabelle verdeckte Meteogramm).
-const PRODUCT_OVERLAY_IDS = ["meteogram", "crosssection", "gramet", "gonogo", "briefing"];
+const PRODUCT_OVERLAY_IDS = ["meteogram", "crosssection", "gramet", "windspinne", "gonogo", "briefing"];
 function closeProductOverlays() {
   for (const id of PRODUCT_OVERLAY_IDS) el(id).hidden = true;
 }
@@ -498,6 +507,7 @@ document.querySelectorAll(".product").forEach((btn) => {
     if (btn.dataset.prod === "meteogram") openMeteogram();
     else if (btn.dataset.prod === "xsection") openCrossSection();
     else if (btn.dataset.prod === "gramet") openGramet();
+    else if (btn.dataset.prod === "windspinne") openWindspinne();
     else if (btn.dataset.prod === "briefing") openBriefing();
     else if (btn.dataset.prod === "table") openGoNoGo();
   });
@@ -686,6 +696,49 @@ el("gramet").addEventListener("settingschange", (e) => {
   if (!el("crosssection").hidden) renderXs();
 });
 el("gramet").addEventListener("close", () => { el("gramet").hidden = true; });
+
+// Windspinne: Windprofil (Richtung/Geschwindigkeit über Höhe) zur Masterzeit,
+// aus derselben gecachten Säule wie Cross-Section/GRAMET/Briefing (kein
+// eigener Request). Anders als GRAMET (Zeitverlauf) zeigt sie nur EINEN
+// Zeitpunkt -- deshalb hier neu rendern, sobald sich die Masterzeit ändert
+// (s. subscribeTime()-Callback oben), nicht nur beim Öffnen.
+async function openWindspinne() {
+  if (!state.data || !state.point) return;
+  const ws = el("windspinne");
+  ws.hidden = false;
+  ws.subtitle = el("pointpos").textContent;
+  if (!state.data.col) {
+    ws.loading = "Lade Höhenprofil …";
+    try {
+      await ensureColumn();
+    } catch (e) {
+      ws.loading = "Fehler beim Laden des Höhenprofils: " + (e.message || e);
+      return;
+    }
+  }
+  renderWs();
+}
+
+function renderWs() {
+  if (!state.data?.col) return;
+  const slice = sliceColumnAtTime(state.data.col, getMasterMs() / 1000);
+  const timeTxt = new Date(getMasterMs()).toLocaleString("de-DE", {
+    weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+  });
+  el("windspinne").update({
+    profile: slice ? { z: slice.h, u: slice.u, v: slice.v } : null,
+    maxHeight: settings.maxHeight,
+    // Drohnenspezifische Farbgrenzen -- dieselbe Bedeutung wie beim
+    // Windflächen-Kartenlayer (s. Doc-Kommentar in windspinne.js). Ein
+    // künftiger Host für andere Aktivitäten (z. B. Fallschirmspringer) würde
+    // hier eigene Grenzwerte übergeben statt WIND_FILL_STOPS.
+    colorStops: WIND_FILL_STOPS,
+    subtitle: `${el("pointpos").textContent} · gültig ${timeTxt} loc`,
+    exportNameParts: ["windspinne", settings.model, state.point?.lat, state.point?.lon, Math.round(getMasterMs() / 1000)],
+  });
+}
+
+el("windspinne").addEventListener("close", () => { el("windspinne").hidden = true; });
 
 // Go/No-Go-Tabelle: Windmaximum zwischen 10 m und Flughöhe pro Stunde aus dem
 // bereits gecachten WindField auflösen (keine neuen Requests, nur
@@ -1173,14 +1226,13 @@ window.addEventListener("resize", () => {
 // Settings-Panel verdrahten
 // ---------------------------------------------------------------------------
 function initSettings() {
-  fillOptions("set-maxheight", OPTIONS.maxHeight, (v) => `${v} m`);
   fillOptions("set-days", OPTIONS.forecastDays, (v) => `${v} ${v === 1 ? "Tag" : "Tage"}`);
   // Werks- + Nutzerprofile; getProfile() fällt auf das erste Werksmodell zurück,
   // falls ein gespeichertes Profil (z. B. gelöscht) nicht mehr existiert.
   populateProfileSelect();
 
   el("set-model").value = settings.model;
-  el("set-maxheight").value = String(settings.maxHeight);
+  syncMaxHeightInput();
   el("set-days").value = String(settings.forecastDays);
   el("set-unitheight").value = settings.unitHeight;
   el("set-unitwind").value = settings.unitWind;
@@ -1190,19 +1242,31 @@ function initSettings() {
   // Ist ein Punkt geladen, sofort automatisch neu abrufen statt auf den
   // manuellen "Vorhersage laden"-Button zu warten.
   bind("set-model", "model", () => { if (state.data) loadForecast(); });
-  bind("set-maxheight", "maxHeight", () => {
+  el("set-maxheight").addEventListener("change", (e) => {
+    // Eingabe steht in der aktuell gewählten Anzeigeeinheit (m oder ft) --
+    // zurück in Meter rechnen, das ist die intern durchgehend genutzte Einheit
+    // (AGL-Grenze fürs Datenabrufen/Rendern, s. settings.maxHeight-Nutzung).
+    const rawM = Math.round(heightFromDisplay(Number(e.target.value)));
+    const clampedM = Number.isFinite(rawM)
+      ? Math.min(MAX_MAX_HEIGHT, Math.max(MIN_MAX_HEIGHT, rawM))
+      : settings.maxHeight;
+    updateSetting("maxHeight", clampedM);
+    syncMaxHeightInput(); // zeigt den (ggf. geklemmten) Wert gerundet in der Anzeigeeinheit
     needReload();
     // Cross-Section/GRAMET können sofort nachziehen: die Säule enthält alle
     // Level, Flughöhenlinie und Zoom-Bereich hängen nur von dieser Einstellung ab.
     if (!el("crosssection").hidden) renderXs();
     if (!el("gramet").hidden) renderGm();
+    if (!el("windspinne").hidden) renderWs();
   });
   // Der Horizont ändert die Datenbasis (mehr/weniger Stunden). Ist ein Punkt
   // geladen, sofort automatisch neu abrufen, damit Meteogramm/Cross-Section und
   // die übrigen Produkte direkt nachziehen, statt auf einen manuellen Reload zu
   // warten. Ohne geladenen Punkt bleibt es beim reinen Speichern der Einstellung.
   bind("set-days", "forecastDays", () => { if (state.data) loadForecast(); });
-  bind("set-unitheight", "unitHeight", refreshViews);
+  // Höheneinheit koppelt auch das Max.-Höhe-Feld: Wert bleibt intern in Metern
+  // gespeichert, wird hier nur zur neuen Einheit passend neu anzeigt/umgerechnet.
+  bind("set-unitheight", "unitHeight", () => { syncMaxHeightInput(); refreshViews(); });
   bind("set-unitwind", "unitWind", refreshViews);
   bind("set-unittemp", "unitTemp", refreshViews);
 }
@@ -1213,6 +1277,7 @@ function refreshViews() {
   if (!el("meteogram").hidden) openMeteogram();
   if (!el("crosssection").hidden) renderXs();
   if (!el("gramet").hidden) renderGm();
+  if (!el("windspinne").hidden) renderWs();
   if (!el("gonogo").hidden && state.data?.windBandMax) {
     renderGoNoGoTable(el("gng-body"), evaluateGoNoGo(
       state.data.surface, state.data.windBandMax, getProfile(settings.droneProfile), settings.maxHeight,
@@ -1233,6 +1298,27 @@ function bind(id, key, after) {
 
 function fillOptions(id, values, label) {
   el(id).innerHTML = values.map((v) => `<option value="${v}">${label(v)}</option>`).join("");
+}
+
+// Max.-Höhe-Feld an die aktuell gewählte Höheneinheit anpassen: Anzeigewert,
+// min/max/step und Einheiten-Suffix. Die ANZEIGE wird immer auf ganze
+// Hunderter gerundet (krumme Umrechnungswerte wie "984 ft" wirken sonst
+// unruhig) -- settings.maxHeight bleibt davon unberührt und speichert
+// weiterhin den exakten Meterwert (Quelle: MIN_MAX_HEIGHT/MAX_MAX_HEIGHT aus
+// config.js), mit dem an allen anderen Stellen gerechnet wird.
+function syncMaxHeightInput() {
+  const input = el("set-maxheight");
+  const unit = heightUnit();
+  const minDisplay = heightToDisplay(MIN_MAX_HEIGHT);
+  const maxDisplay = heightToDisplay(MAX_MAX_HEIGHT);
+  input.min = String(Math.ceil(minDisplay / 100) * 100);
+  input.max = String(Math.floor(maxDisplay / 100) * 100);
+  input.step = "100";
+  const rounded = Math.round(heightToDisplay(settings.maxHeight) / 100) * 100;
+  // An den Rändern nie unter/über die echte Grenze runden (sonst wirkt das
+  // Feld, als würde es einen ungültigen Wert anzeigen).
+  input.value = String(Math.min(maxDisplay, Math.max(minDisplay, rounded)));
+  el("set-maxheight-unit").textContent = unit;
 }
 
 function needReload() {

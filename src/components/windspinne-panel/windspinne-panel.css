@@ -1,0 +1,61 @@
+/* Shadow-DOM-Styles für <windspinne-panel> -- vollständig gekapselt, keine
+   Abhängigkeit von der globalen css/style.css. Kopf/Body-Grundgerüst bewusst
+   identisch zu gramet-panel.css (gleiche Konvention bei der Umwandlung in
+   Web Components) -- Akzentfarbe/Panel-Hintergrund als Custom Properties,
+   damit Host-Apps mit eigenem Farbschema sie überschreiben können.
+*/
+
+:host {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font: 13px/1.4 system-ui, sans-serif;
+  color: #0b0b0b;
+  --ws-accent: #2f6cb6;
+  --ws-panel-bg: #fcfcfb;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+  font-weight: 600;
+  border-bottom: 1px solid #eceae4;
+  flex: none;
+}
+
+.title { flex: none; }
+.subtitle { font-weight: 400; color: #52514e; font-size: 12px; }
+.subtitle:empty { display: none; }
+
+.export-btn, .close-btn {
+  margin-left: 0;
+  border: none;
+  background: none;
+  font-size: 13px;
+  color: #52514e;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.export-btn { margin-left: auto; }
+.close-btn { font-size: 20px; margin-left: 4px; }
+.export-btn:hover, .close-btn:hover { color: #0b0b0b; }
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.body-message { padding: 12px; color: #52514e; align-self: flex-start; }
+
+.ws-svg { display: block; width: 100%; max-width: 640px; flex: 1; min-height: 0; }
+
+@media (max-width: 700px), (max-height: 500px) {
+  .head { flex-wrap: wrap; row-gap: 6px; position: relative; padding-right: 40px; }
+  .close-btn { position: absolute; top: 8px; right: 12px; margin-left: 0; }
+}

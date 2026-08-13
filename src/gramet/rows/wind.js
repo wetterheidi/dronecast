@@ -58,10 +58,8 @@ export function drawWindBarbOverlay(ctx, grid, x, y, opts = {}) {
     const h = y.inv(py);
     for (let i = 0; i < pos.length; i++) {
       const s = sampleAt(grid, i, h);
-      if (!Number.isFinite(s.u) || !Number.isFinite(s.v)) continue;
-      const spdKt = Math.hypot(s.u, s.v) * KT_PER_MS;
-      const dirDeg = (Math.atan2(-s.u, -s.v) * 180 / Math.PI + 360) % 360;
-      drawBarb(ctx, x(pos[i]), py, spdKt, dirDeg, { size, color });
+      if (!Number.isFinite(s.spd) || !Number.isFinite(s.dir)) continue;
+      drawBarb(ctx, x(pos[i]), py, s.spd * KT_PER_MS, s.dir, { size, color });
     }
   }
 }

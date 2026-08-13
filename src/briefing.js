@@ -120,8 +120,8 @@ export function buildBriefingContent({ surface, col, point, modelLabel, maxHeigh
 
     for (const hM of heights) {
       const s = sampleColumnAtHeight(col, i, hM);
-      const spdMs = Math.hypot(s.u, s.v);
-      const dir = (Math.atan2(-s.u, -s.v) * 180 / Math.PI + 360) % 360;
+      const spdMs = s.spd;
+      const dir = s.dir;
       const dew = dewFromRhT(s.rh, s.t);
       html += `<tr>
         <td>${Math.round(heightToDisplay(hM))}</td>

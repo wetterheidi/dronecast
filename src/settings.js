@@ -1,6 +1,6 @@
 import {
   DEFAULT_MAX_HEIGHT, DEFAULT_FORECAST_DAYS,
-  MAX_HEIGHT_OPTIONS, FORECAST_DAYS_OPTIONS,
+  FORECAST_DAYS_OPTIONS,
   SAT_PRODUCTS, WIND_OVERLAY_DEFAULT_DENSITY,
 } from "./config.js";
 import { setUnits } from "./units.js";
@@ -92,7 +92,6 @@ function applyUnits() {
 
 /** Options-Listen fürs Befüllen der Selects im Panel. */
 export const OPTIONS = {
-  maxHeight: MAX_HEIGHT_OPTIONS,
   forecastDays: FORECAST_DAYS_OPTIONS,
   droneProfile: DRONE_PROFILES.map((p) => p.id),
 };
