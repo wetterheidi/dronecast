@@ -54,12 +54,12 @@
 
 import { classFor, hex } from "./overlayshared.js";
 import {
-  heightToDisplay, heightUnit,
+  heightToDisplay, heightFromDisplay, heightUnit,
   windToDisplay, windUnit, fmtHeight, fmtWind, fmtDirPadded,
 } from "./units.js";
 
 const NS = "http://www.w3.org/2000/svg";
-const MUTED = "#52514e", GRID = "#d9d8d3";
+const INK = "#0b0b0b", MUTED = "#52514e", GRID = "#d9d8d3";
 const D = 560; // Breite der Zeichenfläche (quadratisch), skaliert responsiv per CSS
 const PAD = 56; // Rand für Grad-/Höhenlabels
 const LEGEND_H = 54; // zusätzliche Höhe unterhalb des Kreises für die Legende
@@ -154,6 +154,26 @@ function sampleAt(z, dirLevel, spdLevel, h) {
 function toXY(rPx, dirDeg) {
   const rad = dirDeg * Math.PI / 180;
   return { x: rPx * Math.sin(rad), y: -rPx * Math.cos(rad) };
+}
+
+function txt(x, y, s, fill, size, anchor = "start", weight = 400) {
+  const t = mk("text", { x, y, fill, "font-size": size, "text-anchor": anchor, "font-weight": weight });
+  t.textContent = s;
+  return t;
+}
+
+/** Gestylte Tooltip-Box an der Cursorposition, mit Kantenumbruch -- exakt
+ *  dasselbe Muster wie meteogram.js/crosssection.js `drawTip()` (dort je
+ *  eigene Kopie, hier ebenfalls lokal statt geteiltem Modul, s. Dateikonvention). */
+function drawTip(ov, px, py, lines, W, H) {
+  const pad = 7, lh = 15, w = 150, h = pad * 2 + lines.length * lh;
+  let tx = px + 14, ty = py + 14;
+  if (tx + w > W) tx = px - 14 - w;
+  if (ty + h > H) ty = py - 14 - h;
+  ov.append(mk("rect", { x: tx, y: ty, width: w, height: h, rx: 5, fill: "rgba(252,252,251,0.97)", stroke: "#c9c8c2", "stroke-width": 1 }));
+  lines.forEach((ln, j) => {
+    ov.append(txt(tx + pad, ty + pad + lh * (j + 1) - 4, ln, j === 0 ? INK : MUTED, 11, "start", j === 0 ? 700 : 400));
+  });
 }
 
 /** Textbreite ohne DOM-Messung (Canvas 2D `measureText`, funktioniert auch
@@ -287,14 +307,45 @@ export function renderWindspinne(host, profile, opts = {}) {
   svg.append(gPts);
   for (const p of markerPts) {
     const rgb = classFor(p.spd, colorStops).rgb;
-    const dot = mk("circle", { cx: cx + p.x, cy: cy + p.y, r: 3.5, fill: hex(rgb) });
-    const title = mk("title", {});
-    title.textContent = `${fmtHeight(p.h)} AGL: ${fmtDirPadded(p.dir)} ${fmtWind(p.spd)}`;
-    dot.append(title);
-    gPts.append(dot);
+    gPts.append(mk("circle", { cx: cx + p.x, cy: cy + p.y, r: 3.5, fill: hex(rgb) }));
   }
 
   drawLegend(svg, colorStops, D);
+
+  // -- Hover: stufenloses Fadenkreuz wie in Meteogramm/Cross-Section, aber
+  //    polar -- Cursor-Radius -> Höhe (kontinuierlich, per heightFromDisplay),
+  //    Richtung/Speed dann per sampleAt() an genau dieser Höhe abgelesen (der
+  //    Cursor-WINKEL bleibt dabei bewusst unberücksichtigt: die Windrichtung
+  //    ist wie bei der Profillinie selbst eine Funktion der Höhe, keine vom
+  //    Nutzer wählbare zweite Achse). Ersetzt das bisherige native `<title>`
+  //    auf den Marker-Punkten (Browser-Tooltipverzögerung, kleine Trefferfläche
+  //    -- s. Nutzerfeedback), Trefferfläche ist jetzt die ganze Kreisfläche.
+  const ov = mk("g", { "pointer-events": "none" });
+  svg.append(ov);
+  const clearOv = () => { while (ov.firstChild) ov.removeChild(ov.firstChild); };
+
+  svg.addEventListener("pointermove", (e) => {
+    const r = svg.getBoundingClientRect();
+    const mx = (e.clientX - r.left) * (D / r.width);
+    const my = (e.clientY - r.top) * ((D + LEGEND_H) / r.height);
+    const rPx = Math.hypot(mx - cx, my - cy);
+    if (rPx > R + 8) { clearOv(); return; }
+
+    const rDisplay = Math.min((rPx / R) * maxR, maxR);
+    const h = Math.min(heightFromDisplay(rDisplay), maxHeightM);
+    const s = sampleAt(z, dirLevel, spdLevel, h);
+    const rgb = classFor(s.spd, colorStops).rgb;
+    const dot = toXY(px(rDisplay), s.dir);
+
+    clearOv();
+    ov.append(mk("circle", { cx: cx + dot.x, cy: cy + dot.y, r: 5, fill: "none", stroke: "#fff", "stroke-width": 2.4 }));
+    ov.append(mk("circle", { cx: cx + dot.x, cy: cy + dot.y, r: 5, fill: "none", stroke: hex(rgb), "stroke-width": 1.8 }));
+    drawTip(ov, mx, my, [
+      `${fmtHeight(h)} AGL`,
+      `${fmtDirPadded(s.dir)} · ${fmtWind(s.spd)}`,
+    ], D, D + LEGEND_H);
+  });
+  svg.addEventListener("pointerleave", clearOv);
 
   host.append(svg);
   return svg;
