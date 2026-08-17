@@ -10,6 +10,8 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* Bezugsrahmen für den absolut positionierten Ladehinweis (.busy). */
+  position: relative;
   font: 13px/1.4 system-ui, sans-serif;
   color: #0b0b0b;
   --gramet-accent: #2f6cb6;
@@ -96,6 +98,25 @@
 */
 .body { flex: 1; min-height: 0; overflow: auto; padding: 4px 0 8px; position: relative; }
 .body-message { padding: 12px; color: #52514e; }
+
+/* Ladehinweis über dem weiterhin sichtbaren Chart (s. `busy` in
+   gramet-panel.js) -- am Kopf statt mittig, damit er die Tafel nicht
+   verdeckt, und ohne Pointer-Events, damit Hover darunter weiterläuft. */
+.busy {
+  position: absolute;
+  top: 44px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  pointer-events: none;
+  background: rgba(11, 11, 11, 0.82);
+  color: #fff;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+.busy[hidden] { display: none; }
 
 .gm-plot { display: flex; align-items: flex-start; width: max-content; }
 .gm-canvas { display: block; cursor: crosshair; flex: none; position: relative; z-index: 1; }

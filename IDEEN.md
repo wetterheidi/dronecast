@@ -372,6 +372,20 @@ Alle Details in METHODIK.md 7.8/7.9.
   Wegpunktzeiten ab. Damit funktionieren Pfade in der **Vergangenheit**, die
   `forecast_days` prinzipiell nicht abdecken kann — Voraussetzung für die
   Rückwärtstrajektorien in `trajectories` (Zeitschieber bis −72 h).
+- **Ladezeit des Path-Modus:** eine Säule kostet gemessen 2,2 s (D2) bzw. 4,2 s
+  (EU) — sequenziell wurde ein 12-h-Pfad damit zur Dreiviertelminute. Jetzt
+  parallel mit Pool (`FETCH_CONCURRENCY = 12`, s. Messung dort), und das
+  Mapterhorn-Gelände blockiert nicht mehr die Erstanzeige
+  (`opts.terrainDeferred` → `terrainPromise`, Host reicht es nach). Im Browser
+  gemessen: Erstaufbau 8,5 → 3,7 s, Trajektorienwechsel 25,4 → 4,1 s.
+  Ergänzend zeigt `<gramet-panel>.busy` einen Ladehinweis ÜBER der weiterhin
+  sichtbaren Tafel, statt sie (wie `loading`) durch Text zu ersetzen — sonst
+  wirkt jeder Datenwechsel wie ein Neustart.
+- **Gesamthöhe endet an der Tropopause:** das Modell reicht bis ~20-22 km,
+  darüber ist für Luftfahrt/Drohnen nichts mehr zu sehen; die halbe Tafel war
+  leere Stratosphäre und drückte das Wetter in den unteren Rand (Feedback).
+  `render.js` `fullRangeTop()` deckelt auf höchste Tropopause + 2,5 km
+  (überschießende Cb-Gipfel bleiben drin), Rückfallwert 15 km.
 - **Terrain: regionale Feinauflösung (z13-17):** aktuell fester Zoom 12
   (weltweit verfügbar, s. METHODIK.md 7.9); Mapterhorn bietet für ausgewählte
   Gebiete deutlich feinere Kacheln (z. B. Schweiz swissALTI3D 0,5 m) — bei

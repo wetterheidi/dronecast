@@ -90,10 +90,13 @@ export class GrametPanelElement extends HTMLElement {
         <button type="button" class="close-btn" title="Schließen">×</button>
       </div>
       <div class="body"></div>
+      <div class="busy" hidden></div>
     `;
 
     this._subtitleEl = root.querySelector(".subtitle");
     this._bodyEl = root.querySelector(".body");
+    this._busyEl = root.querySelector(".busy");
+    this._zoomBtn = root.querySelector('button[data-range="zoom"]');
 
     root.querySelector(".layers").addEventListener("change", (e) => {
       if (!e.target.closest("input[data-layer]")) return;
@@ -146,11 +149,33 @@ export class GrametPanelElement extends HTMLElement {
   get subtitle() { return this._subtitleEl.textContent; }
   set subtitle(v) { this._subtitleEl.textContent = v ?? ""; }
 
-  /** Meldetext statt Chart -- z. B. während die Host-App noch Daten lädt. */
+  /** Beschriftung des Zoom-Knopfes. Default "bis Flughöhe" passt, wo die
+   *  Host-App eine Flughöhe VORGIBT (droneforecast: Eingabefeld, daraus die
+   *  Deckellinie). Wo der Ausschnitt stattdessen aus den Daten folgt -- etwa
+   *  aus einem übergebenen `profile` --, kann die Host-App hier den
+   *  zutreffenden Namen setzen, statt eine Flughöhe zu behaupten, die es
+   *  nicht gibt. */
+  get zoomLabel() { return this._zoomBtn.textContent; }
+  set zoomLabel(v) { this._zoomBtn.textContent = v || "bis Flughöhe"; }
+
+  /** Meldetext STATT Chart -- für den Erstaufbau und für Fehler, wo es nichts
+   *  Sinnvolles zu zeigen gibt. Beim Nachladen über einem bereits stehenden
+   *  Chart stattdessen `busy` setzen (s. dort), sonst blinkt die Tafel bei
+   *  jedem Datenwechsel auf eine Textmeldung zurück. */
   get loading() { return this.#loading; }
   set loading(v) {
     this.#loading = v || null;
+    if (this.#loading) this.busy = null;
     this._render();
+  }
+
+  /** Ladehinweis ÜBER dem weiterhin sichtbaren Chart -- für Aktualisierungen,
+   *  die dauern (im Path-Modus kostet ein Datenwechsel etliche Säulenabrufe),
+   *  ohne die alte Darstellung wegzunehmen. `null` blendet ihn aus. */
+  get busy() { return this._busyEl.hidden ? null : this._busyEl.textContent; }
+  set busy(v) {
+    this._busyEl.textContent = v || "";
+    this._busyEl.hidden = !v;
   }
 
   get layers() {
@@ -176,8 +201,10 @@ export class GrametPanelElement extends HTMLElement {
   /** Mehrere Properties in einem Rutsch setzen -- ein einziger Redraw statt
    *  einem pro Einzel-Setter (relevant beim Öffnen/bei Datenwechsel, wo
    *  Grid, Flughöhe, Höhenbereich und Ebenen zusammen aktualisiert werden). */
-  update({ grid, maxHeight, range, layers, subtitle, exportNameParts, terrain, pathStop, profile } = {}) {
+  update({ grid, maxHeight, range, layers, subtitle, exportNameParts, terrain, pathStop, profile, zoomLabel } = {}) {
     this.#loading = null;
+    this.busy = null;
+    if (zoomLabel !== undefined) this.zoomLabel = zoomLabel;
     if (grid !== undefined) {
       this.#grid = grid ?? null;
       this.#view = this.#grid ? deriveView(this.#grid) : null;

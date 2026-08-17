@@ -62,6 +62,18 @@ const NIGHT_COLOR = "#050b1e", DAY_COLOR = "#2b5c93";
 // direkt in der Haupttafel (`drawModelTerrain`, AMSL-Achse -- Ogimet-
 // Konvention, s. Feedback/Diskussion).
 const GROUND_H = 14;
+
+// Obergrenze der "Gesamthöhe": das Modell reicht bis ~20-22 km, oberhalb der
+// Tropopause passiert für Luftfahrt/Drohnen aber nichts mehr -- die halbe
+// Tafel bliebe leere Stratosphäre und drückte das Wettergeschehen in den
+// unteren Rand (s. Feedback). Gezeigt wird deshalb bis knapp über die
+// Tropopause: das Polster lässt überschießende Cb-Gipfel/Ambosse noch
+// vollständig sichtbar (die durchstoßen die Tropopause um typisch einige
+// hundert bis ~1500 m). Findet `derive.js` keine Tropopause (z. B. Gitter
+// endet zu früh), greift der feste Deckel -- über typischen mittleren
+// Breiten (11-12 km) und immer noch weit unter dem Modelldeckel.
+const TROPOPAUSE_HEADROOM_M = 2500;
+const FULL_RANGE_FALLBACK_TOP_M = 15000;
 // Folgt derselben Tag/Nacht-Kurve wie der Himmel (`view.daylight`), damit
 // Boden und Himmel zur selben Stunde gemeinsam dunkeln/hellen. Deutlich
 // dunkler als eine "natürliche" Erdfarbe gewählt (nicht nur ein anderer
@@ -221,6 +233,11 @@ export function renderGramet(host, grid, view, state = {}) {
       hMinData = Math.max(10, grid.z[0] || 10);
       hMaxData = grid.z[nk - 1];
     }
+    // Leere Stratosphäre abschneiden (s. `TROPOPAUSE_HEADROOM_M`). Auf
+    // `rview` gerechnet, damit im Path-Modus AMSL gegen AMSL verglichen wird.
+    // Nie unter den Datenboden drücken -- ein Pfad über Hochgebirge könnte
+    // sonst theoretisch einen Deckel unterhalb von `hMinData` bekommen.
+    hMaxData = Math.max(hMinData + 100, Math.min(hMaxData, fullRangeTop(rview.tropopause)));
     const zMin = state.zMin ?? hMinData, zMax = state.zMax ?? hMaxData;
     // Path-Modus ohne Bodenstreifen -- das Gelände sitzt in der Haupttafel.
     const stripH = isPath ? 0 : GROUND_H;
@@ -808,6 +825,16 @@ function amslViewOf(view, grid) {
   };
   amslViewCache.set(view, v);
   return v;
+}
+
+// Deckel der "Gesamthöhe": höchster Tropopausenpunkt der Tafel plus Polster,
+// sonst der feste Rückfallwert (s. Konstanten oben). `line` ist die bereits
+// projizierte Tropopausen-Polylinie aus `view`/`amslViewOf` -- damit stimmt
+// die Bezugshöhe automatisch mit der gezeichneten Achse überein.
+function fullRangeTop(line) {
+  let top = -Infinity;
+  for (const p of line ?? []) if (Number.isFinite(p.z) && p.z > top) top = p.z;
+  return Number.isFinite(top) ? top + TROPOPAUSE_HEADROOM_M : FULL_RANGE_FALLBACK_TOP_M;
 }
 
 // Ruft `cb(i0, i1)` für jeden zusammenhängenden Abschnitt endlicher Werte auf
