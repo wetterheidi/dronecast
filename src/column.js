@@ -7,7 +7,7 @@
 
 import { MODELS } from "./config.js";
 import { cloudFraction } from "./clouds.js";
-import { lastFiniteIndex } from "./weather.js";
+import { lastFiniteIndex, horizonParams } from "./weather.js";
 
 const KMH_TO_MS = 1 / 3.6;
 
@@ -32,11 +32,11 @@ function levelVars(nLevels, includeCloudDiag) {
   return vars;
 }
 
-async function tryFetchColumn(lat, lon, model, forecastDays, vars, fetchImpl) {
+async function tryFetchColumn(lat, lon, model, horizon, vars, fetchImpl) {
   const params = new URLSearchParams({
     latitude: round5(lat), longitude: round5(lon),
     hourly: vars.join(","), models: model.apiModel,
-    timeformat: "unixtime", forecast_days: String(forecastDays),
+    timeformat: "unixtime", ...horizonParams(horizon),
     cell_selection: "nearest",
   });
   const resp = await fetchImpl(`${model.apiBase}/v1/forecast?${params}`);
@@ -49,14 +49,17 @@ async function tryFetchColumn(lat, lon, model, forecastDays, vars, fetchImpl) {
   return { data };
 }
 
-/** Rohe Säule (Level von unten nach oben) am Punkt über den Vorhersagehorizont. */
-export async function fetchColumn(lat, lon, modelKey, forecastDays, fetchImpl = fetch.bind(globalThis)) {
+/** Rohe Säule (Level von unten nach oben) am Punkt über den Zeithorizont --
+ *  `horizon`: Vorhersagetage (Zahl, wie bisher) oder `{ startDate, endDate }`
+ *  für einen expliziten Datumsbereich inkl. Vergangenheit (s. `weather.js`
+ *  `horizonParams()`). */
+export async function fetchColumn(lat, lon, modelKey, horizon, fetchImpl = fetch.bind(globalThis)) {
   const model = MODELS[modelKey];
   if (!model) throw new Error(`Unbekanntes Modell: ${modelKey}`);
 
-  let result = await tryFetchColumn(lat, lon, model, forecastDays, levelVars(model.nLevels, true), fetchImpl);
+  let result = await tryFetchColumn(lat, lon, model, horizon, levelVars(model.nLevels, true), fetchImpl);
   if (result.error) {
-    result = await tryFetchColumn(lat, lon, model, forecastDays, levelVars(model.nLevels, false), fetchImpl);
+    result = await tryFetchColumn(lat, lon, model, horizon, levelVars(model.nLevels, false), fetchImpl);
   }
   if (result.error) throw new Error(result.error);
   const data = result.data;

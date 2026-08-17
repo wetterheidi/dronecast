@@ -347,11 +347,31 @@ der Backlog-Blick, was als Nächstes drankäme:
 
 Alle Details in METHODIK.md 7.8/7.9.
 
-- **Web-Component-Wrapper:** `renderGramet(host, grid, view, state)` nimmt
-  bereits einen Host-Container statt fest ins droneforecast-DOM zu greifen —
-  gute Ausgangsbasis. Offen: eigenes npm-Paket vs. Git-Submodule vs. Copy für
-  die tatsächliche Verteilung an `trajectories`, Shadow-DOM-Kapselung fürs
-  Styling, Custom-Element-Boilerplate (`<gramet-chart>` o. Ä.).
+- **Web-Component-Wrapper:** erledigt —
+  [`<gramet-panel>`](src/components/gramet-panel/gramet-panel.js) mit
+  Shadow-DOM-Kapselung. **Verteilung an `trajectories` entschieden:
+  Vite-Alias** (`@windkit/*` → `../droneforecast/src/*`, s.
+  `trajectories/vite.config.js`) statt npm-Paket, Submodule oder Copy — eine
+  Quelle der Wahrheit, ohne Veröffentlichungs-/Pinning-Aufwand; Voraussetzung
+  ist nur, dass beide Repos nebeneinander ausgecheckt sind (auch beim
+  VPS-Build). Die konsumierte Oberfläche ist bewusst schmal gehalten:
+  `<gramet-panel>`, `gramet/path.js` (`fetchGridForPath`, `posOfPath`) und
+  `units.js` (`setUnits`) — alles andere gilt als intern. `trajectories`
+  importiert `@windkit/…` nur in einer einzigen Datei (`src/gramet.js`),
+  damit eine spätere Extraktion in ein eigenes Paket nur das Alias-Ziel
+  betrifft.
+- **Path-Modus in der Komponente:** `update()` nimmt zusätzlich
+  `terrain`/`pathStop`/`profile` und rechnet den Zoombereich AMSL-gerecht
+  (`_pathZoom()`); `profile = { pos, z (m AMSL), color, label }` zeichnet ein
+  fremdes Höhenprofil (in `trajectories`: die Trajektorie) als Linie in die
+  Haupttafel (`render.js` `drawProfile`). `maxHeight: null` schaltet die
+  Drohnen-Deckellinie ab. Die Gelände-Checkbox erscheint nur im Path-Modus.
+- **Zeitfenster per Datumsbereich:** `fetchColumn`/`fetchSurface` nehmen statt
+  `forecast_days` wahlweise `{ startDate, endDate }` (`weather.js`
+  `horizonParams()`); `fetchGridForPath` leitet den Bereich aus den
+  Wegpunktzeiten ab. Damit funktionieren Pfade in der **Vergangenheit**, die
+  `forecast_days` prinzipiell nicht abdecken kann — Voraussetzung für die
+  Rückwärtstrajektorien in `trajectories` (Zeitschieber bis −72 h).
 - **Terrain: regionale Feinauflösung (z13-17):** aktuell fester Zoom 12
   (weltweit verfügbar, s. METHODIK.md 7.9); Mapterhorn bietet für ausgewählte
   Gebiete deutlich feinere Kacheln (z. B. Schweiz swissALTI3D 0,5 m) — bei

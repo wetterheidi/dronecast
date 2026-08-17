@@ -1,13 +1,29 @@
 import { SURFACE_API_BASE, MODELS, SURFACE_CORE, SURFACE_OPTIONAL } from "./config.js";
 
 /**
+ * Zeithorizont eines Forecast-Requests als Query-Parameter: eine Zahl wird
+ * wie bisher zu `forecast_days` (Fenster ab jetzt), ein Objekt
+ * `{ startDate, endDate }` ("YYYY-MM-DD", UTC) zu `start_date`/`end_date` --
+ * nötig für Zeitfenster in der Vergangenheit (Rückwärtstrajektorien im
+ * GRAMET-Path-Modus, s. `gramet/path.js`), die `forecast_days` nicht
+ * abdecken kann. Die beiden Formen schließen sich API-seitig aus, deshalb
+ * wird immer nur eine gesendet.
+ */
+export function horizonParams(horizon) {
+  return horizon && typeof horizon === "object"
+    ? { start_date: horizon.startDate, end_date: horizon.endDate }
+    : { forecast_days: String(horizon) };
+}
+
+/**
  * Holt die stündlichen Oberflächen-/Standardvariablen (limitierende Faktoren)
  * für einen Punkt über den Vorhersagehorizont. Optionale Variablen, die das
  * Modell nicht anbietet, werden bei einem Fehler automatisch weggelassen.
+ * `horizon`: Vorhersagetage (Zahl) oder Datumsbereich, s. `horizonParams()`.
  *
  * Rückgabe: { time: number[] (unixtime, s), units: {}, vars: { name: (number|null)[] }, elevation }
  */
-export async function fetchSurface(lat, lon, modelKey, forecastDays, fetchImpl = fetch.bind(globalThis)) {
+export async function fetchSurface(lat, lon, modelKey, horizon, fetchImpl = fetch.bind(globalThis)) {
   const model = MODELS[modelKey];
   if (!model) throw new Error(`Unbekanntes Modell: ${modelKey}`);
 
@@ -19,7 +35,7 @@ export async function fetchSurface(lat, lon, modelKey, forecastDays, fetchImpl =
       daily: "sunrise,sunset",
       models: model.apiModel,
       timeformat: "unixtime",
-      forecast_days: String(forecastDays),
+      ...horizonParams(horizon),
       cell_selection: "nearest",
     });
     return `${SURFACE_API_BASE}/v1/forecast?${params}`;

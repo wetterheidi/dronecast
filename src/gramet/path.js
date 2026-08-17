@@ -49,6 +49,24 @@ function haversineM(lat1, lon1, lat2, lon2) {
 }
 
 /**
+ * Datumsbereich (UTC), der alle Wegpunkt-Zeiten abdeckt -- als `horizon`-
+ * Objekt für `fetchColumn`/`fetchSurface` (s. `weather.js` `horizonParams()`).
+ * Anders als das frühere `forecast_days` funktioniert das auch für Pfade in
+ * der Vergangenheit (Rückwärtstrajektorien) und lädt für Zukunftspfade nur
+ * die tatsächlich benötigten Tage statt des vollen Vorhersagehorizonts.
+ * 1 h Polster an beiden Enden: `sliceColumnAtTime` klemmt an den Serien-
+ * rändern (s. `column.js` `bracketTime`) -- ein Wegpunkt um 23:30 UTC darf
+ * nicht auf die 23:00-Stunde des Endtags geklemmt werden.
+ */
+function dateRangeOfWaypoints(waypoints) {
+  const day = (sec) => new Date(sec * 1000).toISOString().slice(0, 10);
+  return {
+    startDate: day(waypoints[0].t - 3600),
+    endDate: day(waypoints[waypoints.length - 1].t + 3600),
+  };
+}
+
+/**
  * Verstrichene Sekunden seit `waypoints[0].t` -- der X-Achsen-Positionswert
  * im Path-Modus (Entscheidung: verstrichene Zeit statt Distanz, s. Diskussion
  * vor dem Umbau). Separat exportiert, damit ein späteres Terrain-Profil
@@ -108,7 +126,13 @@ function selectWaypointsToFetch(waypoints, model, opts = {}) {
  * Modell-Handoff -- ein Path-Grid nimmt EIN Modell für den gesamten Pfad an,
  * s. Plan), und setzt das Gitter zusammen.
  * @param waypoints Array<{ lat, lon, t }> -- dicht, vom Aufrufer geliefert
- *   (z. B. aus einer Trajektorienberechnung), `t` in Unixsekunden.
+ *   (z. B. aus einer Trajektorienberechnung), `t` in Unixsekunden,
+ *   aufsteigend (Rückwärtstrajektorien vor der Übergabe umkehren).
+ * @param forecastDays ungenutzt (historisch) -- der Zeithorizont wird seit
+ *   der `start_date`/`end_date`-Umstellung aus den Wegpunkt-Zeiten selbst
+ *   abgeleitet (s. `dateRangeOfWaypoints`), womit auch Pfade in der
+ *   Vergangenheit funktionieren. Parameter bleibt für Aufrufer-Kompatibilität
+ *   in der Signatur.
  * @param opts { maxCols, timeResSec, distResM (s. `selectWaypointsToFetch`),
  *   resampleIntervalSec (optional -- wenn gesetzt, wird das gefetchte,
  *   sparsame Gitter per `resample.js` `resamplePath()` auf diese Kadenz in
@@ -128,6 +152,7 @@ export async function fetchGridForPath(waypoints, modelKey, forecastDays, fetchI
   if (waypoints.length < 2) throw new Error("Path-Modus braucht mindestens zwei Wegpunkte");
 
   const pos = posOfPath(waypoints);
+  const horizon = dateRangeOfWaypoints(waypoints);
   const indices = selectWaypointsToFetch(waypoints, model, opts);
   // Läuft unabhängig von der Wetterschleife unten durch -- Gelände hat nichts
   // mit der Modell-Bbox/-Auflösung zu tun, deshalb über die volle dichte
@@ -153,8 +178,8 @@ export async function fetchGridForPath(waypoints, modelKey, forecastDays, fetchI
     // `grid.js` `buildSurfaceFromWaypoints`) -- anders als die Säule, ohne
     // die es für diese Spalte gar kein Höhenprofil gäbe.
     const [col, surface] = await Promise.all([
-      fetchColumn(wp.lat, wp.lon, modelKey, forecastDays, fetchImpl),
-      fetchSurface(wp.lat, wp.lon, modelKey, forecastDays, fetchImpl).catch(() => null),
+      fetchColumn(wp.lat, wp.lon, modelKey, horizon, fetchImpl),
+      fetchSurface(wp.lat, wp.lon, modelKey, horizon, fetchImpl).catch(() => null),
     ]);
     if (!col.time.length) {
       pathStop = { lat: wp.lat, lon: wp.lon, index: i, reason: NO_DATA_STOP_REASON };

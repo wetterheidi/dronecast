@@ -2,10 +2,14 @@
  * GRAMET-Meteogramm — Canvas-Renderer (anders als die SVG-Cross-Section:
  * Wolkenschraffur mit vielen Einzelstrichen ist auf Canvas günstiger).
  * Einstieg: `renderGramet(host, grid, view, state)`, `state = { zMin, zMax,
- * axis: "log"|"lin", activeRows, layerToggles, pathStop, terrain, maxHeightM }`.
+ * axis: "log"|"lin", activeRows, layerToggles, pathStop, terrain, maxHeightM,
+ * profile }`.
  * Höhenumschalter (axis/zMin/zMax) folgt demselben State/Mechanismus wie
  * `crosssection.js` (`settings.xsZoom`) — dieselbe Umschaltfläche bedient
- * beide Ansichten. `terrain`/`maxHeightM` sind nur im Path-Modus wirksam.
+ * beide Ansichten. `terrain`/`maxHeightM`/`profile` sind nur im Path-Modus
+ * wirksam; `profile = { pos, z (m AMSL, NaN = Lücke), color?, label? }`
+ * zeichnet ein Höhenprofil (z. B. die Trajektorie der Host-App) als Linie in
+ * die Haupttafel (s. `drawProfile`).
  *
  * HÖHENREFERENZ: Punkt-Modus plottet AGL (wie bisher), der PATH-Modus plottet
  * AMSL mit der Modell-Orographie als Silhouette in der Haupttafel (Ogimet-
@@ -315,6 +319,9 @@ export function renderGramet(host, grid, view, state = {}) {
     if (showRealTerrain) drawRealTerrainOverlay(ctx, state.terrain, x, y, mainBot);
     if (isPath && state.maxHeightM) {
       drawCeiling(ctx, grid, showRealTerrain ? state.terrain : null, state.maxHeightM, x, y);
+    }
+    if (isPath && state.profile) {
+      drawProfile(ctx, state.profile, x, y, mainTop, mainBot, zMin, zMax);
     }
 
     ctx.strokeStyle = MUTED; ctx.lineWidth = 1;
@@ -930,6 +937,53 @@ function drawCeiling(ctx, grid, terrain, maxHeightM, x, y) {
     ctx.fillStyle = "#b5179e"; ctx.font = "600 10px system-ui, sans-serif";
     ctx.textAlign = "right"; ctx.textBaseline = "bottom";
     ctx.fillText(`Max. Flughöhe ${fmtH(maxHeightM)} AGL`, x(pos[last]) - 4, y(ground[last] + maxHeightM) - 4);
+  }
+  ctx.restore();
+}
+
+// Höhenprofil der Host-App (z. B. eine berechnete Trajektorie) als Linie in
+// der Haupttafel -- nur Path-Modus, `profile.z` sind ABSOLUTE Höhen (m AMSL),
+// anders als die Deckellinie also keine Boden-Addition. Durchgezogen statt
+// gestrichelt, damit Profil und Ceiling unterscheidbar bleiben, wenn beide
+// sichtbar sind. NaN-Werte (z. B. der erste Integrationspunkt einer
+// Trajektorie ohne diagnostizierte Höhe) unterbrechen die Linie
+// (`forEachFiniteRun`); Höhen außerhalb des sichtbaren Bereichs werden über
+// `clipPolylineZ` GESCHNITTEN statt von `y()` an den Rand geklemmt (s.
+// Kommentarblock "Höhen-Clipping" unten -- sonst Phantom-Flachlinie am
+// Panelrand). Der Rect-Clip schneidet zusätzlich Profilpunkte hinter dem
+// Chart-Ende ab: nach einem `pathStop` läuft der Pfad der Host-App weiter
+// als das Wettergitter, `x()` würde diese Punkte sonst in den Rand zeichnen.
+function drawProfile(ctx, profile, x, y, mainTop, mainBot, zMin, zMax) {
+  const { pos, z } = profile;
+  const color = profile.color || "#b5179e";
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x.left, mainTop, x.right - x.left, mainBot - mainTop);
+  ctx.clip();
+  ctx.lineJoin = "round";
+  ctx.setLineDash([]);
+  let labelAt = null;
+  forEachFiniteRun(z, (i0, i1) => {
+    if (i1 === i0) return;
+    const pl = [];
+    for (let i = i0; i <= i1; i++) pl.push({ t: pos[i], z: z[i] });
+    for (const piece of clipPolylineZ(pl, zMin, zMax)) {
+      const path = new Path2D();
+      path.moveTo(x(piece[0].t), y(piece[0].z));
+      for (let k = 1; k < piece.length; k++) path.lineTo(x(piece[k].t), y(piece[k].z));
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.stroke(path);
+      ctx.strokeStyle = color; ctx.lineWidth = 1.8; ctx.stroke(path);
+      // Label ans rechte Ende des am weitesten rechts endenden Teilstücks --
+      // auch wenn dieses hinter dem Chartrand liegt (Pfad länger als das
+      // Wettergitter, s. `pathStop`); die x-Position wird unten geklemmt.
+      const end = piece[piece.length - 1];
+      if (!labelAt || end.t > labelAt.t) labelAt = end;
+    }
+  });
+  if (labelAt && profile.label) {
+    ctx.fillStyle = color; ctx.font = "600 10px system-ui, sans-serif";
+    ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+    ctx.fillText(profile.label, Math.min(x(labelAt.t), x.right) - 4, y(labelAt.z) - 4);
   }
   ctx.restore();
 }

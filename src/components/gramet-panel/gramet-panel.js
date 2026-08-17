@@ -11,6 +11,21 @@
  * eigentliche Zeichnen (`gramet/render.js` `renderGramet()`) übernimmt die
  * Komponente selbst.
  *
+ * PATH-MODUS (`grid.meta.mode === "path"`, s. `gramet/path.js`
+ * `fetchGridForPath()`): zusätzlich `terrain` (Mapterhorn-Geländeprofil),
+ * `pathStop` (Abbruchmarker am Modellrand) und `profile` (Höhenprofil der
+ * Host-App, z. B. eine Trajektorie -- `{ pos, z (m AMSL), color?, label? }`)
+ * über `update()` hereinreichbar; `maxHeight: null` schaltet die
+ * Max-Flughöhen-Deckellinie ab (Default 300 m für den droneforecast-
+ * Punktmodus bleibt). Achse und Zoombereich wählt die Komponente path-gerecht
+ * selbst (AMSL linear, `_pathZoom()`).
+ *
+ * BIBLIOTHEKS-OBERFLÄCHE (für einbettende Apps, z. B. trajectories via
+ * Vite-Alias): öffentliche Einstiegspunkte sind NUR diese Komponente,
+ * `gramet/path.js` (`fetchGridForPath`, `posOfPath`) und `units.js`
+ * (`setUnits`) -- alles andere ist intern und darf sich ohne Rücksicht auf
+ * Einbettungen ändern.
+ *
  * Darstellungs-Zustand (Höhenbereich, Ebenen-Sichtbarkeit, Flughöhe) lebt
  * ausschließlich in der Komponente; Persistenz (z. B. in
  * `localStorage`) ist Sache der Host-App -- dafür das `settingschange`-Event
@@ -31,7 +46,9 @@ import { renderGramet, exportPng as exportGrametPng } from "../../gramet/render.
 // `XS_ZOOM_HEADROOM` in app.js).
 const ZOOM_HEADROOM = 1.15;
 
-const LAYER_KEYS = ["isotherms", "isotachs", "hazards", "windbarbs"];
+// "terrain" (echtes Mapterhorn-Gelände) ist nur im Path-Modus sinnvoll --
+// die Checkbox dazu blendet gramet-panel.css über `:host([path])` ein/aus.
+const LAYER_KEYS = ["isotherms", "isotachs", "hazards", "windbarbs", "terrain"];
 
 export class GrametPanelElement extends HTMLElement {
   static observedAttributes = ["subtitle", "range", "max-height"];
@@ -40,9 +57,15 @@ export class GrametPanelElement extends HTMLElement {
   #view = null;
   #canvas = null;
   #loading = null;
+  // Default 300 m fürs droneforecast-Punktszenario; `null` (via `update({
+  // maxHeight: null })`) heißt "keine Deckellinie" -- im Path-Modus einer
+  // Trajektorien-App gibt es keine gesetzliche Max-Flughöhe zu zeichnen.
   #maxHeightM = 300;
   #range = "full";
   #exportNameParts = ["gramet"];
+  #terrain = null;
+  #pathStop = null;
+  #profile = null;
 
   constructor() {
     super();
@@ -57,6 +80,7 @@ export class GrametPanelElement extends HTMLElement {
           <label><input type="checkbox" data-layer="isotachs" checked> Isotachen</label>
           <label><input type="checkbox" data-layer="hazards" checked> Hazards</label>
           <label><input type="checkbox" data-layer="windbarbs"> Windfiedern</label>
+          <label class="terrain"><input type="checkbox" data-layer="terrain" checked> Gelände</label>
         </div>
         <div class="range-toggle">
           <button type="button" data-range="full">Gesamthöhe</button>
@@ -152,7 +176,7 @@ export class GrametPanelElement extends HTMLElement {
   /** Mehrere Properties in einem Rutsch setzen -- ein einziger Redraw statt
    *  einem pro Einzel-Setter (relevant beim Öffnen/bei Datenwechsel, wo
    *  Grid, Flughöhe, Höhenbereich und Ebenen zusammen aktualisiert werden). */
-  update({ grid, maxHeight, range, layers, subtitle, exportNameParts } = {}) {
+  update({ grid, maxHeight, range, layers, subtitle, exportNameParts, terrain, pathStop, profile } = {}) {
     this.#loading = null;
     if (grid !== undefined) {
       this.#grid = grid ?? null;
@@ -160,8 +184,13 @@ export class GrametPanelElement extends HTMLElement {
     }
     if (maxHeight !== undefined) {
       const n = Number(maxHeight);
-      if (Number.isFinite(n) && n > 0) this.#maxHeightM = n;
+      if (maxHeight === null) this.#maxHeightM = null;
+      else if (Number.isFinite(n) && n > 0) this.#maxHeightM = n;
     }
+    // Path-Modus-Beiwerk: `undefined` = unverändert lassen, `null` = löschen.
+    if (terrain !== undefined) this.#terrain = terrain ?? null;
+    if (pathStop !== undefined) this.#pathStop = pathStop ?? null;
+    if (profile !== undefined) this.#profile = profile ?? null;
     if (range !== undefined) {
       this.#range = range === "zoom" ? "zoom" : "full";
       this._syncRangeButtons();
@@ -207,21 +236,64 @@ export class GrametPanelElement extends HTMLElement {
     if (!this.#grid || !this.#view) {
       this._bodyEl.innerHTML = "";
       this.#canvas = null;
+      this.removeAttribute("path");
       return;
     }
+    const isPath = this.#grid.meta?.mode === "path";
+    // `path`-Attribut fürs CSS (Gelände-Checkbox nur im Path-Modus zeigen).
+    this.toggleAttribute("path", isPath);
     let zMin, zMax;
     if (this.#range === "zoom") {
-      zMax = Math.round(this.#maxHeightM * ZOOM_HEADROOM);
-      zMin = Math.max(10, this.#grid.z[0] || 10);
+      if (isPath) ({ zMin, zMax } = this._pathZoom());
+      else if (this.#maxHeightM) {
+        zMax = Math.round(this.#maxHeightM * ZOOM_HEADROOM);
+        zMin = Math.max(10, this.#grid.z[0] || 10);
+      }
     }
     this.#canvas = renderGramet(this._bodyEl, this.#grid, this.#view, {
-      axis: this.#range === "zoom" ? "lin" : "log",
+      // Path-Modus: Achse dem Renderer überlassen (linear auf AMSL, s.
+      // render.js) -- ein erzwungenes "log" wäre dort Unsinn, weil der
+      // log-Nullpunkt auf Meereshöhe statt am Boden läge.
+      axis: isPath ? undefined : (this.#range === "zoom" ? "lin" : "log"),
       zMin,
       zMax,
-      maxHeightM: this.#maxHeightM,
+      maxHeightM: this.#maxHeightM ?? undefined,
+      terrain: isPath ? this.#terrain ?? undefined : undefined,
+      pathStop: isPath ? this.#pathStop ?? undefined : undefined,
+      profile: isPath ? this.#profile ?? undefined : undefined,
       layerToggles: this.layers,
       onRedraw: (canvas) => { this.#canvas = canvas; },
     });
+  }
+
+  /** Zoombereich ("bis Flughöhe") im Path-Modus: AMSL-Spanne vom tiefsten
+   *  Modell-Boden bis Gelände + Flughöhe bzw. bis übers Profilmaximum --
+   *  Konvention aus dem Debug-Harness (`debug/gramet-path.js`), erweitert um
+   *  das Trajektorien-Profil. Die Punkt-Modus-Rechnung (`grid.z[0]`, AGL)
+   *  wäre hier falsch, `grid.z` sind im Path-Modus AGL-Werte auf einer
+   *  AMSL-Achse. Ohne Flughöhe UND ohne Profil gibt es nichts, worauf man
+   *  zoomen könnte -> volle Höhe (leeres Objekt). */
+  _pathZoom() {
+    let eMin = Infinity, eMax = -Infinity;
+    for (const e of this.#grid.elevation) {
+      if (!Number.isFinite(e)) continue;
+      if (e < eMin) eMin = e;
+      if (e > eMax) eMax = e;
+    }
+    if (!Number.isFinite(eMin)) return {};
+    let profMax = -Infinity;
+    for (const z of this.#profile?.z ?? []) {
+      if (Number.isFinite(z) && z > profMax) profMax = z;
+    }
+    if (this.#maxHeightM == null && !Number.isFinite(profMax)) return {};
+    // 20 m Polster unterm tiefsten Boden, damit die Silhouette sichtbar bleibt.
+    const zMin = Math.max(0, eMin - 20);
+    let zMax = eMax + (this.#maxHeightM ?? 0) * ZOOM_HEADROOM;
+    if (Number.isFinite(profMax)) {
+      zMax = Math.max(zMax, profMax + 0.15 * Math.max(profMax - zMin, 100));
+    }
+    if (!(zMax > zMin)) return {};
+    return { zMin, zMax };
   }
 }
 
