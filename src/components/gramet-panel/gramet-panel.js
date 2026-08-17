@@ -91,11 +91,13 @@ export class GrametPanelElement extends HTMLElement {
       </div>
       <div class="body"></div>
       <div class="busy" hidden></div>
+      <div class="notice" hidden></div>
     `;
 
     this._subtitleEl = root.querySelector(".subtitle");
     this._bodyEl = root.querySelector(".body");
     this._busyEl = root.querySelector(".busy");
+    this._noticeEl = root.querySelector(".notice");
     this._zoomBtn = root.querySelector('button[data-range="zoom"]');
 
     root.querySelector(".layers").addEventListener("change", (e) => {
@@ -176,6 +178,18 @@ export class GrametPanelElement extends HTMLElement {
   set busy(v) {
     this._busyEl.textContent = v || "";
     this._busyEl.hidden = !v;
+  }
+
+  /** Dauerhafter Warnhinweis über dem Chart -- für Zustände, die das Gezeigte
+   *  entwerten, ohne es falsch zu machen: etwa "die Einstellungen der Host-App
+   *  passen nicht mehr zu diesen Daten". Anders als `busy` transportiert er
+   *  keine Aktivität, sondern eine Einordnung, und wird deshalb von `update()`
+   *  NICHT automatisch gelöscht -- ein Datenwechsel hebt die Ursache ja nicht
+   *  auf. Die Host-App setzt ihn auf `null`, wenn der Zustand vorbei ist. */
+  get notice() { return this._noticeEl.hidden ? null : this._noticeEl.textContent; }
+  set notice(v) {
+    this._noticeEl.textContent = v || "";
+    this._noticeEl.hidden = !v;
   }
 
   get layers() {

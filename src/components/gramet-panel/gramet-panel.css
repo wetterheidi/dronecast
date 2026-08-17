@@ -118,6 +118,28 @@
 }
 .busy[hidden] { display: none; }
 
+/* Dauerhafter Warnhinweis (s. `notice`). Bewusst anders als `.busy`: warnend
+   eingefärbt statt neutral, und am unteren Rand über die volle Breite --
+   `.busy` meldet einen Vorgang, der gleich vorbei ist, `.notice` einen
+   Zustand, der bleibt, bis die Host-App ihn aufhebt. Beide können
+   gleichzeitig sichtbar sein, ohne sich zu überdecken. */
+.notice {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  pointer-events: none;
+  background: #fdf1d6;
+  color: #6b4a00;
+  border-top: 1px solid #e0be6d;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  padding: 5px 10px;
+}
+.notice[hidden] { display: none; }
+
 .gm-plot { display: flex; align-items: flex-start; width: max-content; }
 .gm-canvas { display: block; cursor: crosshair; flex: none; position: relative; z-index: 1; }
 .gm-axis { display: block; flex: none; position: sticky; left: 0; z-index: 2; }
