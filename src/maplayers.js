@@ -29,7 +29,7 @@ import {
   EUMETSAT_WMS_BASE, EUMETSAT_CAPS_URL, EUMETSAT_CAPS_TTL_MS, SAT_PRODUCTS,
 } from "./config.js";
 import { settings, updateSetting } from "./settings.js";
-import { subscribe as subscribeTime, getMasterMs, isNow } from "./timeController.js";
+import { subscribe as subscribeTime, getMasterMs, isNow, resetToNow } from "./timeController.js";
 
 /* global L */
 
@@ -63,6 +63,28 @@ export function initMapLayers(map) {
     const hh = String(d.getHours()).padStart(2, "0");
     const mi = String(d.getMinutes()).padStart(2, "0");
     return `${dd}.${mm}.${yy} ${hh}:${mi}`;
+  }
+
+  // Statuszeile unter Radar/Satellit. Normal = unauffälliger Hinweistext;
+  // warn = rot hervorgehoben (v. a. "kein Bild für diesen Zeitpunkt" — das
+  // ist der Fall, den Nutzer sonst leicht übersehen und dann fälschlich für
+  // einen Ausfall halten). Bei Zeiten außerhalb des Nowcasting-Fensters gibt
+  // es zusätzlich einen direkten Sprung zurück auf "Jetzt".
+  function setHint(target, text, { warn = false } = {}) {
+    target.classList.toggle("warn", warn);
+    target.textContent = text;
+  }
+
+  function setHintWithJumpNow(target, text) {
+    target.classList.add("warn");
+    target.textContent = "";
+    target.append(document.createTextNode(text + " — "));
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "jump-now";
+    btn.textContent = "zu „Jetzt“ springen";
+    btn.addEventListener("click", () => resetToNow());
+    target.append(btn);
   }
 
   // -- RainViewer-Metadaten (gecacht) --------------------------------------
@@ -106,7 +128,7 @@ export function initMapLayers(map) {
     }
     const isNowcast = (meta.radar.nowcast || []).some((f) => f.time === frame.time);
     const frameTxt = fmtLocalTimestamp(new Date(frame.time * 1000));
-    el("ml-radar-time").textContent = `Angezeigt: ${frameTxt} loc${isNowcast ? " ▶ Nowcast" : ""}`;
+    setHint(el("ml-radar-time"), `Angezeigt: ${frameTxt} loc${isNowcast ? " ▶ Nowcast" : ""}`);
   }
 
   // Jenseits dieser Toleranz gibt es kein passendes Radarbild (Radar reicht nur
@@ -120,7 +142,7 @@ export function initMapLayers(map) {
     try {
       meta = await getRVMeta();
     } catch {
-      el("ml-radar-time").textContent = "Radar: Metadaten nicht erreichbar";
+      setHint(el("ml-radar-time"), "Radar: Metadaten nicht erreichbar", { warn: true });
       return;
     }
     const targetSec = Math.round(getMasterMs() / 1000);
@@ -128,7 +150,14 @@ export function initMapLayers(map) {
     const frame = rvClosest(allFrames, targetSec);
     if (!frame || Math.abs(frame.time - targetSec) > RADAR_AVAIL_TOLERANCE_S) {
       if (radarLayer) { map.removeLayer(radarLayer); radarLayer = null; }
-      el("ml-radar-time").textContent = "Kein Radarbild für diesen Zeitpunkt";
+      const target = el("ml-radar-time");
+      const first = allFrames[0], last = allFrames[allFrames.length - 1];
+      const rangeTxt = first && last
+        ? ` (verfügbar: ${fmtLocalTimestamp(new Date(first.time * 1000))} – ${fmtLocalTimestamp(new Date(last.time * 1000))} loc)`
+        : "";
+      const msg = `Kein Radarbild für diesen Zeitpunkt${rangeTxt}`;
+      if (isNow()) setHint(target, msg, { warn: true });
+      else setHintWithJumpNow(target, msg);
       return;
     }
     setRadarFrame(meta, frame);
@@ -288,7 +317,7 @@ export function initMapLayers(map) {
 
   function removeRadar() {
     if (radarLayer) { map.removeLayer(radarLayer); radarLayer = null; }
-    el("ml-radar-time").textContent = "";
+    setHint(el("ml-radar-time"), "");
   }
 
   // -- Satellit (EUMETSAT-WMS) ------------------------------------------------
@@ -355,14 +384,18 @@ export function initMapLayers(map) {
       ext = extents[product];
       resolvedMs = resolveSatTime(extents, product, targetMs);
     } catch {
-      el("ml-sat-time").textContent = "Zeitinfo nicht erreichbar (zeigt Standard-Zeitpunkt)";
+      setHint(el("ml-sat-time"), "Zeitinfo nicht erreichbar (zeigt Standard-Zeitpunkt)", { warn: true });
     }
 
     // Zukunft/außerhalb der verfügbaren Zeitreihe → ausblenden statt ein
     // veraltetes Bild (z. B. das letzte, an einem Zeitpunkt „morgen") zu zeigen.
     if (ext && (targetMs > ext.endMs + ext.stepMs || targetMs < ext.startMs - ext.stepMs)) {
       if (satLayer) { map.removeLayer(satLayer); satLayer = null; }
-      el("ml-sat-time").textContent = "Kein Satellitenbild für diesen Zeitpunkt";
+      const target = el("ml-sat-time");
+      const rangeTxt = ` (verfügbar: ${fmtLocalTimestamp(new Date(ext.startMs))} – ${fmtLocalTimestamp(new Date(ext.endMs))} loc)`;
+      const msg = `Kein Satellitenbild für diesen Zeitpunkt${rangeTxt}`;
+      if (isNow()) setHint(target, msg, { warn: true });
+      else setHintWithJumpNow(target, msg);
       return;
     }
 
@@ -391,13 +424,13 @@ export function initMapLayers(map) {
     satLayer.addTo(map);
 
     if (resolvedMs != null) {
-      el("ml-sat-time").textContent = `Angezeigt: ${fmtLocalTimestamp(new Date(resolvedMs))} loc`;
+      setHint(el("ml-sat-time"), `Angezeigt: ${fmtLocalTimestamp(new Date(resolvedMs))} loc`);
     }
   }
 
   function removeSat() {
     if (satLayer) { map.removeLayer(satLayer); satLayer = null; }
-    el("ml-sat-time").textContent = "";
+    setHint(el("ml-sat-time"), "");
   }
 
   // -- UI-Verdrahtung ---------------------------------------------------------

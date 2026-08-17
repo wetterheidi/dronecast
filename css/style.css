@@ -380,6 +380,17 @@ select, input[type="number"], input[type="text"] {
 .wx-line .v { font-variant-numeric: tabular-nums; font-weight: 600; }
 .wx-line.warn .v { color: #b3261e; }
 .hint.warn { color: #b3261e; margin: -2px 0 6px; }
+.hint.warn button.jump-now {
+  font: inherit;
+  font-size: 12px;
+  padding: 1px 8px;
+  border: 1px solid #b3261e;
+  border-radius: 4px;
+  background: #fff;
+  color: #b3261e;
+  cursor: pointer;
+}
+.hint.warn button.jump-now:hover { background: #b3261e; color: #fff; }
 
 #settings { margin-top: 12px; }
 #settings summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
