@@ -381,6 +381,18 @@ Alle Details in METHODIK.md 7.8/7.9.
   Ergänzend zeigt `<gramet-panel>.busy` einen Ladehinweis ÜBER der weiterhin
   sichtbaren Tafel, statt sie (wie `loading`) durch Text zu ersetzen — sonst
   wirkt jeder Datenwechsel wie ein Neustart.
+- **Ratenbegrenzung:** beim Testen quittierte die private Instanz anhaltende
+  Last mit 429/503. `column.js` sitzt solche Fehler jetzt mit wachsender
+  Wartezeit aus (`RETRYABLE_STATUS`, `Retry-After` hat Vorrang) und meldet sie
+  in Klartext. Wichtig dabei: der Wolken-Fallback (Wiederholung ohne
+  `cloud_water/ice/cover`) greift nur noch bei NICHT-vorübergehenden Fehlern —
+  vorher schickte jeder 429 sofort eine zweite, gleich teure Anfrage hinterher
+  und verschärfte damit genau das Problem, das er zu lösen versuchte.
+- **`<gramet-panel>.notice`:** dauerhaftes Warnband unter dem Kopf (im Fluss,
+  verdeckt also nichts) für Zustände, die das Gezeigte entwerten, ohne es
+  falsch zu machen — `trajectories` meldet damit „Einstellungen geändert,
+  zeigt den vorigen Lauf". Anders als `busy` löscht `update()` es NICHT: ein
+  Datenwechsel hebt die Ursache ja nicht auf.
 - **Gesamthöhe endet an der Tropopause:** das Modell reicht bis ~20-22 km,
   darüber ist für Luftfahrt/Drohnen nichts mehr zu sehen; die halbe Tafel war
   leere Stratosphäre und drückte das Wetter in den unteren Rand (Feedback).

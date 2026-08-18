@@ -96,15 +96,21 @@
    Scrollcontainers -- mit Padding würde die Beschriftung beim Andocken um
    genau diesen Betrag springen (übernommen aus der bisherigen #gm-body-Regel).
 */
+/* Bezugsrahmen für den schwebenden Ladehinweis: `.plot` beginnt exakt unter
+   Kopf und (optionalem) Warnband, wie hoch die auch immer geraten -- der Kopf
+   bricht bei schmalem Panel um. Ein fester Pixelversatz vom Panelrand traf
+   das nicht zuverlässig und ließ Hinweis und Warnband überlappen. */
+.plot { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+
 .body { flex: 1; min-height: 0; overflow: auto; padding: 4px 0 8px; position: relative; }
 .body-message { padding: 12px; color: #52514e; }
 
 /* Ladehinweis über dem weiterhin sichtbaren Chart (s. `busy` in
-   gramet-panel.js) -- am Kopf statt mittig, damit er die Tafel nicht
+   gramet-panel.js) -- am oberen Rand der Tafel statt mittig, damit er wenig
    verdeckt, und ohne Pointer-Events, damit Hover darunter weiterläuft. */
 .busy {
   position: absolute;
-  top: 44px;
+  top: 8px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 6;
@@ -118,21 +124,16 @@
 }
 .busy[hidden] { display: none; }
 
-/* Dauerhafter Warnhinweis (s. `notice`). Bewusst anders als `.busy`: warnend
-   eingefärbt statt neutral, und am unteren Rand über die volle Breite --
-   `.busy` meldet einen Vorgang, der gleich vorbei ist, `.notice` einen
-   Zustand, der bleibt, bis die Host-App ihn aufhebt. Beide können
-   gleichzeitig sichtbar sein, ohne sich zu überdecken. */
+/* Dauerhafter Warnhinweis (s. `notice`). Anders als `.busy` liegt er IM FLUSS
+   direkt unter dem Kopf: `.busy` meldet einen Vorgang, der gleich vorbei ist
+   und deshalb nichts verdrängen soll -- `.notice` beschreibt einen Zustand,
+   der bleibt, bis die Host-App ihn aufhebt, und darf dafür Platz bekommen,
+   statt dauerhaft Chartinhalt zu überdecken. */
 .notice {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 6;
-  pointer-events: none;
+  flex: none;
   background: #fdf1d6;
   color: #6b4a00;
-  border-top: 1px solid #e0be6d;
+  border-bottom: 1px solid #e0be6d;
   font-size: 11px;
   font-weight: 600;
   text-align: center;

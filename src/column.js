@@ -32,6 +32,20 @@ function levelVars(nLevels, includeCloudDiag) {
   return vars;
 }
 
+// Transportseitige Fehler, bei denen ein zweiter Versuch Sinn ergibt -- allen
+// voran 429: eine Säule ist eine schwere Anfrage (bis 120 Level x 11
+// Variablen), und ein Pfad holt bis zu `maxCols` davon, da winkt die Instanz
+// zwischendurch schon mal ab. Diese Unterscheidung MUSS vor dem
+// Wolken-Fallback in `fetchColumn` greifen: der schickt sonst bei jedem
+// beliebigen Fehler sofort eine zweite, gleich teure Anfrage hinterher --
+// bei einer Überlastung genau das Falsche, und die daraus entstehende
+// Fehlermeldung nennt dann auch noch die falsche Ursache.
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const RETRIES = 3;
+const RETRY_BASE_MS = 900;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function tryFetchColumn(lat, lon, model, horizon, vars, fetchImpl) {
   const params = new URLSearchParams({
     latitude: round5(lat), longitude: round5(lon),
@@ -39,14 +53,51 @@ async function tryFetchColumn(lat, lon, model, horizon, vars, fetchImpl) {
     timeformat: "unixtime", ...horizonParams(horizon),
     cell_selection: "nearest",
   });
-  const resp = await fetchImpl(`${model.apiBase}/v1/forecast?${params}`);
+  let resp;
+  try {
+    resp = await fetchImpl(`${model.apiBase}/v1/forecast?${params}`);
+  } catch (err) {
+    // Netzwerkabbruch: genauso vorübergehend wie ein 503.
+    return { error: `Netzwerkfehler: ${err.message}`, retryable: true };
+  }
+  const retryable = RETRYABLE_STATUS.has(resp.status);
+  const retryAfterMs = Number(resp.headers?.get?.("retry-after")) * 1000 || 0;
   const body = await resp.text();
   let data;
-  try { data = JSON.parse(body); } catch { return { error: `Serverfehler: ${body.slice(0, 150)}` }; }
+  try {
+    data = JSON.parse(body);
+  } catch {
+    return { error: `Serverfehler: ${body.slice(0, 150)}`, retryable, retryAfterMs };
+  }
   if (!resp.ok || data.error) {
-    return { error: data.reason ? `API: ${data.reason.slice(0, 150)}` : `API-Fehler ${resp.status}` };
+    return { error: apiErrorText(resp.status, data.reason), retryable, retryAfterMs };
   }
   return { data };
+}
+
+// Die nackte Statuszahl sagt niemandem etwas, der vor der Karte sitzt -- und
+// gerade 429/503 sind die Fälle, in denen "nochmal in einer Minute" die
+// richtige Handlungsanweisung ist statt "irgendwas ist kaputt".
+function apiErrorText(status, reason) {
+  if (status === 429) return "Server überlastet (zu viele Anfragen) — bitte kurz warten";
+  if (status >= 500) return `Server vorübergehend nicht erreichbar (${status})`;
+  if (reason) return `API: ${reason.slice(0, 150)}`;
+  return `API-Fehler ${status}`;
+}
+
+/** `tryFetchColumn` mit Wiederholung bei vorübergehenden Fehlern (exponentiell
+ *  wachsende Wartezeit plus Zufallsanteil, damit die parallel laufenden
+ *  Säulen eines Pfades nicht im Gleichtakt erneut anklopfen). Ein `Retry-After`
+ *  des Servers hat Vorrang vor der eigenen Schätzung. */
+async function fetchColumnWithRetry(lat, lon, model, horizon, vars, fetchImpl) {
+  let result;
+  for (let attempt = 0; attempt <= RETRIES; attempt++) {
+    result = await tryFetchColumn(lat, lon, model, horizon, vars, fetchImpl);
+    if (!result.error || !result.retryable || attempt === RETRIES) return result;
+    const backoff = RETRY_BASE_MS * 2 ** attempt + Math.random() * RETRY_BASE_MS;
+    await sleep(Math.max(result.retryAfterMs || 0, backoff));
+  }
+  return result;
 }
 
 /** Rohe Säule (Level von unten nach oben) am Punkt über den Zeithorizont --
@@ -57,9 +108,13 @@ export async function fetchColumn(lat, lon, modelKey, horizon, fetchImpl = fetch
   const model = MODELS[modelKey];
   if (!model) throw new Error(`Unbekanntes Modell: ${modelKey}`);
 
-  let result = await tryFetchColumn(lat, lon, model, horizon, levelVars(model.nLevels, true), fetchImpl);
-  if (result.error) {
-    result = await tryFetchColumn(lat, lon, model, horizon, levelVars(model.nLevels, false), fetchImpl);
+  let result = await fetchColumnWithRetry(lat, lon, model, horizon, levelVars(model.nLevels, true), fetchImpl);
+  // Ohne die optionalen Wolkenfelder nur dann erneut versuchen, wenn der
+  // Fehler wirklich an den Variablen liegen kann -- eine Überlastung (s.
+  // `RETRYABLE_STATUS`) hat `fetchColumnWithRetry` bereits ausgesessen, ein
+  // weiterer Versuch würde sie nur verlängern.
+  if (result.error && !result.retryable) {
+    result = await fetchColumnWithRetry(lat, lon, model, horizon, levelVars(model.nLevels, false), fetchImpl);
   }
   if (result.error) throw new Error(result.error);
   const data = result.data;

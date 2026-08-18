@@ -89,9 +89,11 @@ export class GrametPanelElement extends HTMLElement {
         <button type="button" class="export-btn" title="Als PNG speichern">⭳ PNG</button>
         <button type="button" class="close-btn" title="Schließen">×</button>
       </div>
-      <div class="body"></div>
-      <div class="busy" hidden></div>
       <div class="notice" hidden></div>
+      <div class="plot">
+        <div class="body"></div>
+        <div class="busy" hidden></div>
+      </div>
     `;
 
     this._subtitleEl = root.querySelector(".subtitle");

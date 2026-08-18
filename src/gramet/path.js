@@ -41,11 +41,13 @@ const NO_DATA_STOP_REASON = "Keine Modelldaten an diesem Punkt";
 // ein 12-h-Pfad damit zur Dreiviertelminute, in der die Host-App nur "lädt"
 // zeigen konnte (Feedback aus `trajectories`).
 // Der Server skaliert gut mit Parallelität (16 gleichzeitige Säulen kosteten
-// im Test nur ~1,7x die Zeit einer einzelnen), deshalb ein großzügiger, aber
-// endlicher Pool: 12 statt 6 halbierte den Gesamtabruf noch einmal (8,1 s ->
-// 3,5 s für 16 Spalten). Begrenzt bleibt es trotzdem, damit ein sehr langer
-// Pfad die private Instanz nicht in einem Schlag mit allen Anfragen trifft.
-const FETCH_CONCURRENCY = 12;
+// im Test nur ~1,7x die Zeit einer einzelnen): 16 Spalten brauchten mit Pool 6
+// gemessen 8,1 s, mit Pool 12 nur 3,5 s. Trotzdem bewusst NICHT ans Maximum
+// gegangen -- beim Testen quittierte die private Instanz anhaltende Last mit
+// 429/503. 8 ist der Kompromiss: klar schneller als 6, aber kein Schwall, der
+// eine Ratenbegrenzung reißt. Ein doch auftretender 429 ist seit `column.js`
+// (`RETRYABLE_STATUS`) kein Abbruch mehr, sondern wird ausgesessen.
+const FETCH_CONCURRENCY = 8;
 
 /** `mapper` über alle `items`, höchstens `limit` gleichzeitig. Ergebnisse in
  *  Eingabereihenfolge (die Pfadreihenfolge trägt hier Bedeutung). */
