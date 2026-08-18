@@ -6,8 +6,8 @@
  * prüfen lässt (kein automatisiertes Browser-Testing in dieser Umgebung).
  */
 
-import { fetchGridForPath } from "../src/gramet/path.js";
-import { renderGramet } from "../src/gramet/render.js";
+import { fetchGridForPath } from "meteokit/gramet";
+import { renderGramet } from "meteokit/gramet/render";
 
 const DEG = Math.PI / 180;
 const EARTH_R_M = 6371000;

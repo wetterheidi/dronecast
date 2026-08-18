@@ -42,9 +42,9 @@ import {
   GUST_OVERLAY_RATE_LIMIT_COOLDOWN_MS,
 } from "./config.js";
 import { settings, updateSetting } from "./settings.js";
-import { nearestIndex } from "./weather.js";
+import { nearestIndex } from "meteokit/weather";
 import { subscribe as subscribeTime, getMasterMs } from "./timeController.js";
-import { windToDisplay, windUnit } from "./units.js";
+import { windToDisplay, windUnit } from "meteokit/units";
 import {
   clampNum, round5, classFor, hex, bilin, fillBlock,
   buildGrid, debounce, throttle, sleep,

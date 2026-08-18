@@ -9,10 +9,9 @@
  * gewertet).
  */
 
-import { cloudBaseAgl } from "./clouds.js";
-import { fmtHeight } from "./units.js";
-import { ipiStatus, ipiCategory } from "./gramet/hazards/icing.js";
-import { tfiStatus, tfiCategory } from "./gramet/hazards/turbulence.js";
+import { cloudBaseAgl } from "meteokit/clouds";
+import { fmtHeight } from "meteokit/units";
+import { ipiStatus, ipiCategory, tfiStatus, tfiCategory } from "meteokit/gramet/hazards";
 
 const KMH_TO_MS = 1 / 3.6;
 

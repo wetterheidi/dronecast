@@ -56,7 +56,7 @@ import { classFor, hex } from "./overlayshared.js";
 import {
   heightToDisplay, heightFromDisplay, heightUnit,
   windToDisplay, windUnit, fmtHeight, fmtWind, fmtDirPadded,
-} from "./units.js";
+} from "meteokit/units";
 
 const NS = "http://www.w3.org/2000/svg";
 const INK = "#0b0b0b", MUTED = "#52514e", GRID = "#d9d8d3";

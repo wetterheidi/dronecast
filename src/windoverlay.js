@@ -68,10 +68,10 @@ import {
   WIND_OVERLAY_MAX_CONCURRENCY, WIND_OVERLAY_CHUNK_RETRIES,
 } from "./config.js";
 import { settings, updateSetting } from "./settings.js";
-import { nearestIndex } from "./weather.js";
+import { nearestIndex } from "meteokit/weather";
 import { subscribe as subscribeTime, getMasterMs } from "./timeController.js";
-import { windToDisplay, windUnit, heightToDisplay, heightUnit } from "./units.js";
-import { windBarbMarkup } from "./windbarb.js";
+import { windToDisplay, windUnit, heightToDisplay, heightUnit } from "meteokit/units";
+import { windBarbMarkup } from "meteokit/windbarb";
 import {
   clampNum, firstFinite, round5, classFor, hex, bilin, fillBlock,
   buildGrid, debounce, throttle, sleep,

@@ -29,7 +29,7 @@
  * Konstanten sollten nicht blind automatisiert überschrieben werden).
  */
 
-import { effectiveRH } from "../src/clouds.js";
+import { effectiveRH } from "meteokit/clouds";
 
 const API_BASE = "https://open-meteo.mah.priv.at";
 

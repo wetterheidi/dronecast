@@ -3,7 +3,7 @@ import {
   FORECAST_DAYS_OPTIONS,
   SAT_PRODUCTS, WIND_OVERLAY_DEFAULT_DENSITY,
 } from "./config.js";
-import { setUnits } from "./units.js";
+import { setUnits } from "meteokit/units";
 import { DRONE_PROFILES } from "./droneProfiles.js";
 
 const STORAGE_KEY = "droneforecast.settings.v1";

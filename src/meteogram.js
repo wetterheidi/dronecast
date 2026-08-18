@@ -30,9 +30,9 @@ import {
   heightToDisplay, heightUnit,
   windToDisplay, windUnit, tempToDisplay, tempUnit,
   fmtHeight, fmtWind, fmtDir, fmtTemp,
-} from "./units.js";
-import { refineCloudBase } from "./clouds.js";
-import { placeWindBarb, CHART_PX_PER_HOUR, CHART_BARB_SIZE } from "./windbarb.js";
+} from "meteokit/units";
+import { refineCloudBase } from "meteokit/clouds";
+import { placeWindBarb, CHART_PX_PER_HOUR, CHART_BARB_SIZE } from "meteokit/windbarb";
 
 const KT_PER_MS = 1.94384;
 

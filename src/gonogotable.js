@@ -4,7 +4,7 @@
  * Erwartet das Modell aus gonogo.js: evaluate(surface, windAtHeight, profile, opHeightM).
  */
 
-import { fmtWind, fmtHeight, fmtTemp } from "./units.js";
+import { fmtWind, fmtHeight, fmtTemp } from "meteokit/units";
 
 const STATUS_LABEL = { green: "Go", yellow: "Bedingt", red: "No-Go", na: "Prüfen" };
 

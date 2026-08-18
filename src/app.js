@@ -1,17 +1,16 @@
 import { MODELS, PREVIEW_HEIGHTS, MIN_MAX_HEIGHT, MAX_MAX_HEIGHT } from "./config.js";
 import { WindField } from "./windfield.js";
-import { fetchSurface, fetchModelRunInit, nearestIndex, nearestIndexOrNull } from "./weather.js";
+import { fetchSurface, fetchModelRunInit, nearestIndex, nearestIndexOrNull } from "meteokit/weather";
 import { initTimeControls, setRange, getMasterMs, subscribe as subscribeTime } from "./timeController.js";
 import { renderMeteogram } from "./meteogram.js";
-import { fetchColumn, buildField, sliceColumnAtTime } from "./column.js";
-import { cloudCeiling, cloudLayers, classifyFog } from "./clouds.js";
-import { renderCrossSection } from "./crosssection.js";
-import { gridFromColumn, sampleAt, derive } from "./gramet/grid.js";
-import { ipiAt, ipiCategoryFloor } from "./gramet/hazards/icing.js";
-import { tfiAt, tfiCategoryFloor } from "./gramet/hazards/turbulence.js";
-import "./components/gramet-panel/gramet-panel.js";
+import { fetchColumn, buildField, sliceColumnAtTime } from "meteokit/column";
+import { cloudCeiling, cloudLayers, classifyFog } from "meteokit/clouds";
+import { renderCrossSection } from "meteokit/crosssection";
+import { gridFromColumn, sampleAt, derive } from "meteokit/gramet";
+import { ipiAt, ipiCategoryFloor, tfiAt, tfiCategoryFloor } from "meteokit/gramet/hazards";
+import "meteokit/components/gramet-panel";
 import "./components/windspinne-panel/windspinne-panel.js";
-import { buildBriefingHtml, buildBriefingContent } from "./briefing.js";
+import { buildBriefingHtml, buildBriefingContent } from "meteokit/briefing";
 import { evaluate as evaluateGoNoGo } from "./gonogo.js";
 import { renderGoNoGoTable } from "./gonogotable.js";
 import { DRONE_PROFILES } from "./droneProfiles.js";
@@ -22,7 +21,7 @@ import {
 } from "./droneProfileStore.js";
 import { renderProfileDetails } from "./droneProfileView.js";
 import { renderProfileEditor } from "./droneProfileEditor.js";
-import * as astro from "./astro.js";
+import * as astro from "meteokit/astro";
 import { settings, loadSettings, updateSetting, OPTIONS } from "./settings.js";
 import { parseCoordInput } from "./coords.js";
 import { initGeoman } from "./geoman.js";
@@ -32,7 +31,7 @@ import { initGustOverlay } from "./gustoverlay.js";
 import { initCloudOverlay } from "./cloudoverlay.js";
 import {
   fmtHeight, fmtWind, fmtTemp, fmtDirPadded, heightUnit, heightToDisplay, heightFromDisplay,
-} from "./units.js";
+} from "meteokit/units";
 import { throttle } from "./overlayshared.js";
 
 /* global L */
@@ -638,9 +637,9 @@ el("xs-close").addEventListener("click", () => { el("crosssection").hidden = tru
 
 // GRAMET-Meteogramm: dieselbe gecachte Säule wie Cross-Section/Briefing, dazu
 // die ohnehin schon geladenen Oberflächenwerte (state.data.surface) — kein
-// eigener Request (s. src/gramet/grid.js). Rendering/Ableitung von `view`
+// eigener Request (s. `meteokit/gramet`). Rendering/Ableitung von `view`
 // übernimmt jetzt die <gramet-panel>-Komponente selbst (s.
-// src/components/gramet-panel/); app.js reicht nur noch `grid` +
+// `meteokit/components/gramet-panel`); app.js reicht nur noch `grid` +
 // Darstellungs-Einstellungen rein. `state.data.gmGrid` bleibt hier gecacht,
 // weil es sich die Go/No-Go-Hazardzeilen weiter unten teilen (s.
 // `icingBandMaxAt`/`turbulenceBandMaxAt`).

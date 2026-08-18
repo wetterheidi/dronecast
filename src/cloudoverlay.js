@@ -40,10 +40,10 @@ import {
   CLOUD_OVERLAY_CHUNK_RETRIES,
 } from "./config.js";
 import { settings, updateSetting } from "./settings.js";
-import { nearestIndex } from "./weather.js";
+import { nearestIndex } from "meteokit/weather";
 import { subscribe as subscribeTime, getMasterMs } from "./timeController.js";
-import { heightToDisplay, heightUnit } from "./units.js";
-import { bandCoverage, cloudCeiling } from "./clouds.js";
+import { heightToDisplay, heightUnit } from "meteokit/units";
+import { bandCoverage, cloudCeiling } from "meteokit/clouds";
 import {
   clampNum, firstFinite, round5, classFor, hex, bilin, fillBlock, fillBlockAlpha,
   buildGrid, debounce, throttle, sleep,
