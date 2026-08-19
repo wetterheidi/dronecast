@@ -1,7 +1,9 @@
 import { MODELS, PREVIEW_HEIGHTS, MIN_MAX_HEIGHT, MAX_MAX_HEIGHT } from "./config.js";
 import { WindField } from "./windfield.js";
 import { fetchSurface, fetchModelRunInit, nearestIndex, nearestIndexOrNull } from "meteokit/weather";
-import { initTimeControls, setRange, getMasterMs, subscribe as subscribeTime } from "./timeController.js";
+import {
+  initTimeControls, setRange, getMasterMs, setMasterMs, subscribe as subscribeTime,
+} from "./timeController.js";
 import { renderMeteogram } from "./meteogram.js";
 import { fetchColumn, buildField, sliceColumnAtTime } from "meteokit/column";
 import { cloudCeiling, cloudLayers, classifyFog } from "meteokit/clouds";
@@ -143,7 +145,19 @@ subscribeTime(() => {
   // muss deshalb bei jedem Masterzeit-Tick neu gezeichnet werden, nicht nur
   // beim Öffnen. Ohne bereits geladene Säule (noch nicht geöffnet) nichts tun.
   if (!el("windspinne").hidden && state.data.col) renderWs();
+  syncGrametCursor();
 });
+
+// GRAMET zeigt den ganzen Zeitraum auf einmal -- ein Masterzeit-Wechsel lädt
+// dort also nichts nach, sondern verschiebt nur die Cursorlinie. Damit ist im
+// Querschnitt jederzeit ablesbar, welcher Zeitpunkt gerade auf der Karte
+// liegt. Im Punkt-Modus ist `pos` die Epochensekunde (s. `gridFromColumn`),
+// die Umrechnung deshalb nur ms -> s.
+function syncGrametCursor() {
+  const gm = el("gramet");
+  if (gm.hidden || !gm.grid) return;
+  gm.cursor = getMasterMs() / 1000;
+}
 
 function startOfTodayMs() {
   const d = new Date();
@@ -647,7 +661,9 @@ async function openGramet() {
   if (!state.data || !state.point) return;
   const gm = el("gramet");
   gm.hidden = false;
-  gm.subtitle = el("pointpos").textContent;
+  // Der Klick-Hinweis steht im Untertitel, nicht im Hover-Tooltip: die
+  // Bibliothek kennt keine Masterzeit, das ist eine Zusage dieser App.
+  gm.subtitle = `${el("pointpos").textContent} · Klick setzt die Zeit`;
   if (!state.data.col) {
     gm.loading = "Lade Höhenprofil …";
     try {
@@ -678,6 +694,8 @@ function renderGm() {
     },
     exportNameParts: ["gramet", settings.model, state.point?.lat, state.point?.lon],
   });
+  // Nach jedem Neuaufbau: die Linie soll ohne Zutun auf der Masterzeit stehen.
+  syncGrametCursor();
 }
 
 // Persistenz der Panel-eigenen Darstellungs-Einstellungen ist Sache der
@@ -695,6 +713,20 @@ el("gramet").addEventListener("settingschange", (e) => {
   if (!el("crosssection").hidden) renderXs();
 });
 el("gramet").addEventListener("close", () => { el("gramet").hidden = true; });
+
+// Klick ins GRAMET übernimmt den abgelesenen Zeitpunkt als Masterzeit --
+// derselbe Vorgang wie „+1 h", nur gezielt statt gesucht. Genau die Bewegung,
+// die vorher Handarbeit war: im Querschnitt eine Vereisungsschicht oder eine
+// Nebelphase sehen und dazu das horizontale Bild (Radar, Satellit,
+// Flächenlayer) holen wollen.
+//
+// Bewusst NUR am Klick, nie am Hover: an der Masterzeit hängen Kachelabrufe
+// (Radar/Satellit) und Vollbild-Redraws der numerischen Layer. Als
+// „committed" gemeldet, weil es eine abgeschlossene Handlung ist -- die
+// teuren Konsumenten sollen sofort nachziehen und nicht drosseln.
+el("gramet").addEventListener("posclick", (e) => {
+  if (Number.isFinite(e.detail?.pos)) setMasterMs(e.detail.pos * 1000, true);
+});
 
 // Windspinne: Windprofil (Richtung/Geschwindigkeit über Höhe) zur Masterzeit,
 // aus derselben gecachten Säule wie Cross-Section/GRAMET/Briefing (kein
