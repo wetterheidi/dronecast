@@ -34,17 +34,21 @@
 
     <!-- Masterzeit: eine Zeitachse für Bedingungen, numerische Felder UND
          Nowcasting. Verhindert, dass Daten verschiedener Zeitpunkte gemischt
-         werden. 15-min-Raster (Radar/Sat-Bilder liegen so vor). -->
+         werden. Der Regler rastet auf 1 h (alle numerischen Produkte sind
+         stündlich) und nur bei aktivem Radar/Satellit auf 15 min. -->
     <div id="mastertime">
       <div class="row mt-head">
         <span class="label">Zeitpunkt</span>
-        <span id="master-time-label" class="mono">–</span>
+        <span id="master-time-grid" class="hint"></span>
         <button id="master-time-now" type="button" title="Alles auf jetzt zurücksetzen">Jetzt</button>
       </div>
+      <!-- Eigene Zeile: nebeneinander mit Rasterhinweis und „Jetzt" brach die
+           Zeitangabe auf schmalen Panels um. Die Schriftgröße ordnet zu. -->
+      <div id="master-time-label" class="mono">–</div>
       <div class="mt-nav">
-        <button id="master-time-back" type="button" title="1 Stunde zurück">−1 h</button>
+        <button id="master-time-back" type="button" title="Auf die vorherige volle Stunde">−1 h</button>
         <input id="master-time-slider" type="range" min="0" max="0" step="1" value="0" />
-        <button id="master-time-fwd" type="button" title="1 Stunde vor">+1 h</button>
+        <button id="master-time-fwd" type="button" title="Auf die nächste volle Stunde">+1 h</button>
       </div>
     </div>
 

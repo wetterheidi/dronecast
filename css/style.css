@@ -425,8 +425,12 @@ select, input[type="number"], input[type="text"] {
   border-bottom: 1px solid #e2e0d9;
   box-shadow: 0 3px 5px -3px rgba(0, 0, 0, 0.18);
 }
-.mt-head { margin: 0 0 6px; }
-#master-time-label { flex: 1; text-align: center; font-weight: 600; }
+.mt-head { margin: 0 0 2px; }
+#master-time-label { text-align: center; font-weight: 600; margin: 0 0 6px; }
+/* Rasterweite des Reglers (1 h bzw. 15 min bei aktivem Nowcasting) -- ohne
+   diesen Hinweis änderte sich das Reglerverhalten unerklärt. Bezieht sich NUR
+   auf den Regler: die ±1-h-Knöpfe rasten immer auf die volle Stunde ein. */
+#master-time-grid { white-space: nowrap; }
 #master-time-now { color: #1c5cab; font-weight: 600; }
 #master-time-now.active { background: #1c5cab; color: #fff; border-color: #1c5cab; }
 .mt-nav { display: flex; align-items: center; gap: 8px; }

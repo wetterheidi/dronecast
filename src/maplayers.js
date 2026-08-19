@@ -29,7 +29,9 @@ import {
   EUMETSAT_WMS_BASE, EUMETSAT_CAPS_URL, EUMETSAT_CAPS_TTL_MS, SAT_PRODUCTS,
 } from "./config.js";
 import { settings, updateSetting } from "./settings.js";
-import { subscribe as subscribeTime, getMasterMs, isNow, resetToNow } from "./timeController.js";
+import {
+  subscribe as subscribeTime, getMasterMs, isNow, resetToNow, setSliderGrid, HOUR_MS, QUARTER_MS,
+} from "./timeController.js";
 
 /* global L */
 
@@ -173,7 +175,7 @@ export function initMapLayers(map) {
   const PLAY_STEP_MS = 500;                    // Anzeigedauer je Frame
   const PLAY_LOOP_PAUSE_MS = 1100;             // längere Pause am aktuellsten Frame
   const PLAY_WINDOW_MS = 2 * 60 * 60 * 1000;   // Schleifenlänge: letzte 2 h
-  const PLAY_GRID_MS = 15 * 60 * 1000;         // gemeinsames Loop-Raster (wie Masterzeit)
+  const PLAY_GRID_MS = 15 * 60 * 1000;         // gemeinsames Loop-Raster (Radar/Sat-Frametakt)
 
   let playRadar = null;    // Map<frameTime(s), L.tileLayer>
   let playSat = null;      // Map<isoTime, L.tileLayer.wms>
@@ -443,6 +445,15 @@ export function initMapLayers(map) {
     `).join("");
   }
 
+  // Zwischen den vollen Stunden gibt es NUR bei Radar/Satellit Daten -- alle
+  // numerischen Produkte sind stündlich. Also bekommt der Zeitregler das feine
+  // 15-min-Raster genau dann, wenn einer der beiden Layer an ist, und sonst das
+  // 1-h-Raster, auf dem jede erreichbare Reglerposition auch eine echte
+  // Modellstunde ist. Nach jeder Änderung an den Layer-Schaltern aufrufen.
+  function syncTimeGrid() {
+    setSliderGrid(settings.radarLayerOn || settings.satLayerOn ? QUARTER_MS : HOUR_MS);
+  }
+
   function wireUI() {
     // Zeit kommt zentral von der Masterzeit — Radar/Sat lösen daraus die
     // nächstliegende verfügbare Aufnahme auf. Nur bei "committed" (Regler
@@ -454,6 +465,7 @@ export function initMapLayers(map) {
 
     el("ml-sat-on").addEventListener("change", (e) => {
       updateSetting("satLayerOn", e.target.checked);
+      syncTimeGrid();
       if (e.target.checked) refreshSat(); else removeSat();
     });
     el("ml-sat-products").addEventListener("change", (e) => {
@@ -471,6 +483,7 @@ export function initMapLayers(map) {
 
     el("ml-radar-on").addEventListener("change", (e) => {
       updateSetting("radarLayerOn", e.target.checked);
+      syncTimeGrid();
       if (e.target.checked) refreshRadar(); else removeRadar();
     });
     const radarOpacity = el("ml-radar-opacity");
@@ -499,6 +512,7 @@ export function initMapLayers(map) {
     el("ml-radar-opacity").value = String(Math.round(settings.radarLayerOpacity * 100));
     el("ml-radar-opacity-val").textContent = `${Math.round(settings.radarLayerOpacity * 100)}%`;
 
+    syncTimeGrid();
     if (settings.satLayerOn) refreshSat();
     if (settings.radarLayerOn) refreshRadar();
   }
@@ -509,10 +523,14 @@ export function initMapLayers(map) {
 
   // Solange die Masterzeit auf "jetzt" steht (und nicht abgespielt wird), alle
   // paar Minuten nachziehen, damit neu veröffentlichte Radar-/Satellitenbilder
-  // automatisch nachgeladen werden.
+  // automatisch nachgeladen werden. Bewusst über resetToNow: nur ein neu
+  // gesetztes "jetzt" schiebt das Suchziel mit der echten Uhr weiter -- mit dem
+  // alten Zielzeitpunkt bliebe rvClosest/resolveSatTime beim alten Frame
+  // hängen, weil der dem alten Ziel weiterhin am nächsten liegt. Die
+  // Abo-Kette löst das Neuladen dann selbst aus.
   setInterval(() => {
     if (!isNow() || playing) return;
-    if (settings.radarLayerOn) refreshRadar();
-    if (settings.satLayerOn) refreshSat();
+    if (!settings.radarLayerOn && !settings.satLayerOn) return;
+    resetToNow();
   }, AUTO_REFRESH_MS);
 }

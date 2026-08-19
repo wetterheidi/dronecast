@@ -2,7 +2,7 @@ import { MODELS, PREVIEW_HEIGHTS, MIN_MAX_HEIGHT, MAX_MAX_HEIGHT } from "./confi
 import { WindField } from "./windfield.js";
 import { fetchSurface, fetchModelRunInit, nearestIndex, nearestIndexOrNull } from "meteokit/weather";
 import {
-  initTimeControls, setRange, getMasterMs, setMasterMs, subscribe as subscribeTime,
+  initTimeControls, setRange, getMasterMs, setMasterMs, subscribe as subscribeTime, HOUR_MS,
 } from "./timeController.js";
 import { renderMeteogram } from "./meteogram.js";
 import { fetchColumn, buildField, sliceColumnAtTime } from "meteokit/column";
@@ -724,8 +724,12 @@ el("gramet").addEventListener("close", () => { el("gramet").hidden = true; });
 // (Radar/Satellit) und Vollbild-Redraws der numerischen Layer. Als
 // „committed" gemeldet, weil es eine abgeschlossene Handlung ist -- die
 // teuren Konsumenten sollen sofort nachziehen und nicht drosseln.
+// Rastet auf die volle Stunde: GRAMET zeigt stündliche Modelldaten, ein Klick
+// meint also „diese Modellstunde" und nicht „diese Pixelspalte". Ohne Raster
+// landete man auf einer krummen Sekunde, aus der alle Konsumenten ohnehin
+// wieder auf ihre Stunde zurückrunden -- nur ohne dass das Label es zeigt.
 el("gramet").addEventListener("posclick", (e) => {
-  if (Number.isFinite(e.detail?.pos)) setMasterMs(e.detail.pos * 1000, true);
+  if (Number.isFinite(e.detail?.pos)) setMasterMs(e.detail.pos * 1000, { grid: HOUR_MS });
 });
 
 // Windspinne: Windprofil (Richtung/Geschwindigkeit über Höhe) zur Masterzeit,
