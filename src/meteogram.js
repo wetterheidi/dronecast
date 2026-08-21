@@ -33,7 +33,7 @@ import {
 } from "meteokit/units";
 import { refineCloudBase } from "meteokit/clouds";
 import { placeWindBarb, CHART_PX_PER_HOUR, CHART_BARB_SIZE } from "meteokit/windbarb";
-import { wmoWeatherCategory } from "meteokit/wwsymbols";
+import { placeWxSymbol, wmoWeatherCodeToWx, wmoWeatherCategory } from "meteokit/wwsymbols";
 
 const KT_PER_MS = 1.94384;
 
@@ -52,6 +52,7 @@ const COL = {
 };
 
 const PANEL_H = 108;
+const WW_SYMBOL_SIZE = 22; // wie der Marker-Durchmesser im Kartenlayer wwoverlay.js
 const GAP = 6;
 const TOPAXIS = 26;
 const M = { l: 48, r: 46 };
@@ -77,7 +78,7 @@ export function renderMeteogram(host, model) {
   // Panels mit eigenen Höhen (Mond/Wetter-Leisten dünn, Rest voll).
   const panels = [
     { draw: drawMoonRow, h: 42 },
-    { draw: drawWeatherRibbon, h: 34 },
+    { draw: drawWeatherRibbon, h: 42 },
     { draw: drawTemp, h: PANEL_H },
     { draw: drawPrecip, h: PANEL_H },
     { draw: drawWind, h: PANEL_H },
@@ -197,25 +198,36 @@ function drawMoonRow(g, m, x, yTop, yBot) {
   }
 }
 
-// Signifikantes Wetter (WMO ww) pro Stunde als farbige Zellen — auch für
-// Erscheinungen ohne Niederschlagsmenge (Nebel, Gewitter). Nebel: sichtbasierte
-// Diagnose aus der Säule (m.fog, clouds.js `classifyFog`, s. `fogWwCat`) statt
-// des rohen weather_code — dieselbe Priorität wie GRAMET, damit sich beide
-// Ansichten nicht widersprechen (s. Feedback).
+// Signifikantes Wetter (WMO ww) pro Stunde als WMO-Symbol (meteokit/wwsymbols,
+// dieselbe Zeichnung wie im Kartenlayer wwoverlay.js) — auch für Erscheinungen
+// ohne Niederschlagsmenge (Nebel, Gewitter). Nebel: sichtbasierte Diagnose aus
+// der Säule (m.fog, clouds.js `classifyFog`, s. `fogWwCat`) statt des rohen
+// weather_code — dieselbe Priorität wie GRAMET, damit sich beide Ansichten
+// nicht widersprechen (s. Feedback). Kein Hintergrund-Chip (anders als auf der
+// Karte): auf dem weißen Panelgrund reicht das für Kontrast, ein Chip wäre
+// hier nur unnötiger Ballast. Aus demselben Grund KEINE Farb-Legende mehr --
+// die gab es hier wie im Kartenlayer, war aber derselbe Fehler: die Symbole
+// zeichnen mit wwsymbols.js' eigener 5-Farben-Palette (Niederschlagsphase),
+// nicht mit WW_TYPES' 7 Kategoriefarben (s. wwoverlay.js Kopfkommentar).
 function drawWeatherRibbon(g, m, x, yTop, yBot) {
   const WC = m.vars.weather_code;
   frame(g, yTop, yBot, x, "Wetter (ww)");
-  const cellW = Math.max(1.5, (x(m.time[1]) - x(m.time[0])) * 0.95);
-  const cy0 = yTop + 16, ch = yBot - cy0 - 3;
-  const present = new Set();
+  const cy0 = yTop + 16;
+  const cy = (cy0 + (yBot - 3)) / 2;
   m.time.forEach((t, i) => {
     const cat = fogWwCat(m.fog, i, WC[i]);
     if (!cat) return;
-    present.add(cat.key);
-    g.append(mk("rect", { x: x(t) - cellW / 2, y: cy0, width: cellW, height: ch, fill: cat.color }));
+    // Bei Nebel bestimmt fogWwCat die Kategorie ggf. UNABHÄNGIG vom rohen
+    // weather_code (sichtbasierte Korrektur) -- der rohe Code darf hier also
+    // nicht mehr für das Symbol herangezogen werden, sonst widerspräche das
+    // Symbol der (korrigierten) Kategorie. In jedem anderen Fall liefert
+    // fogWwCat exakt wwCat(code), das Symbol aus demselben Code passt also
+    // immer zur Kategorie.
+    const fog = m.fog ? m.fog[i] : null;
+    const wx = cat.key === "fog" ? (fog?.freezing ? "FZFG" : "FG") : wmoWeatherCodeToWx(WC[i]);
+    const el = placeWxSymbol(x(t), cy, wx, { size: WW_SYMBOL_SIZE });
+    if (el) g.append(el);
   });
-  const items = WW_TYPES.filter((t) => present.has(t.key)).map((t) => [t.label, t.color]);
-  if (items.length) legend(g, M.l + 78, yTop + 12, items);
 }
 
 function drawTemp(g, m, x, yTop, yBot) {
