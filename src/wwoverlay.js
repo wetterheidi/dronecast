@@ -19,12 +19,24 @@
  * erscheint. Aus demselben Grund liefert `valueAt()` den NÄCHSTEN Gitterpunkt
  * statt bilinear zu interpolieren (siehe dort).
  *
- * Kategorie-Farben (Glow-Box + Legende) sind bewusst dieselben sieben wie in
- * meteogram.js' `WW_TYPES` (fog/drizzle/rain/freezing/snow/showers/thunder) —
- * Kartenlayer und Meteogramm-Ribbon zeigen dieselbe Diagnose für denselben
- * Ort/dieselbe Stunde, ein zweites Farbschema wäre ein Widerspruch auf zwei
- * UI-Flächen. `WW_CATEGORIES` unten ist eine lokale Kopie (wie `GUST_FILL_STOPS`
- * auch je Layer lokal liegt) — bei Änderung an `WW_TYPES` dort mitziehen.
+ * Marker-Stil (nach zwei Feedback-Runden): runder, dunkler Chip ohne Rand/
+ * Glow (`.ww-symbol-chip` in style.css) — garantiert Kontrast unabhängig von
+ * der Kartenunterlage. Ein reiner Halo-Filter ohne jeden Hintergrund (erster
+ * Versuch) war auf hellem Untergrund kaum lesbar und wirkte unscharf; die
+ * ursprüngliche eckige Box mit Kategoriefarb-Rand + Glow (zweiter Versuch,
+ * s. Vergleichs-Artifact) wurde als zu dominant empfunden. Die METEOMAP-
+ * Beobachtungskarte behält ihr eigenes (anderes) Kästchen, das ist ein
+ * komplett separater Code-Pfad.
+ *
+ * KEINE Farb-Legende (dritte Feedback-Runde): Marker tragen keinerlei
+ * Kategoriefarbe (neutraler Chip, s. o.) — eine frühere Legende mit den 7
+ * meteogram.js-Kategoriefarben (fog/drizzle/rain/freezing/snow/showers/
+ * thunder) hatte deshalb keinen Bezugspunkt mehr auf der Karte UND war
+ * inhaltlich falsch: die Symbole selbst zeichnen mit `wwsymbols.js`s
+ * INTERNER 5-Farben-Palette (Niederschlagsphase liq/snow/haz/fog/dust, nicht
+ * die 7-Kategorie-Taxonomie) — z. B. Vereisung dort lila in der Legende, aber
+ * rot (`haz`) im tatsächlichen Symbol. Bedeutung kommt allein über die
+ * Symbolform, keine Legende nötig.
  */
 
 import {
@@ -51,18 +63,6 @@ const CACHE_TTL_MS = 60 * 60 * 1000; // Modellläufe kommen ~stündlich neu
 const CACHE_MAX = 8000;
 const AUTO_CHECK_MS = 10 * 60 * 1000;
 const NO_DATA = -1; // Sentinel im Int16Array: Modellstunde ohne Wert
-
-// Dieselben sieben Kategorien wie meteogram.js' WW_TYPES (siehe Kopfkommentar).
-const WW_CATEGORIES = [
-  { key: "fog", label: "Nebel", color: "#b0a06a" },
-  { key: "drizzle", label: "Niesel", color: "#a6d96a" },
-  { key: "rain", label: "Regen", color: "#1a7a1a" },
-  { key: "freezing", label: "Vereisung", color: "#7c3aed" },
-  { key: "snow", label: "Schnee", color: "#66d9e8" },
-  { key: "showers", label: "Schauer", color: "#2a78d6" },
-  { key: "thunder", label: "Gewitter", color: "#e34948" },
-];
-const catByKey = (k) => WW_CATEGORIES.find((c) => c.key === k);
 
 export function initWwOverlay(map) {
   if (!map.getPane("wxOverlays")) {
@@ -350,11 +350,12 @@ export function initWwOverlay(map) {
       if (!category) continue; // 0-3 (klar/bewölkt): kein Marker
       const svg = wxSymbolMarkup(wmoWeatherCodeToWx(code));
       if (!svg) continue;
-      const color = catByKey(category)?.color || "#888";
-      const html = `<div class="ww-symbol-box" style="--ww-tint:${color};opacity:${displayOpacity}">` +
+      // Runder dunkler Chip, kein Rand/Glow (s. Kopfkommentar) — s. style.css
+      // .ww-symbol-chip.
+      const html = `<div class="ww-symbol-chip" style="opacity:${displayOpacity}">` +
         `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="${WX_SYMBOL_VIEWBOX}">${svg}</svg>` +
         `</div>`;
-      const icon = L.divIcon({ className: "", html, iconSize: [28, 28], iconAnchor: [14, 14] });
+      const icon = L.divIcon({ className: "", html, iconSize: [22, 22], iconAnchor: [11, 11] });
       L.marker([iLat * g, iLon * g], { icon, interactive: false, pane: "wxOverlays", keyboard: false }).addTo(numGroup);
     }
   }
@@ -382,13 +383,7 @@ export function initWwOverlay(map) {
     })} loc`;
   }
 
-  // -- Legende / Status ---------------------------------------------------------
-  function renderLegend() {
-    const chips = WW_CATEGORIES.map((c) =>
-      `<span><span class="chip" style="background:${c.color}"></span>${c.label}</span>`);
-    el("ml-ww-legend").innerHTML = chips.join("");
-  }
-
+  // -- Status ---------------------------------------------------------------
   function renderDensityRadios() {
     el("ml-ww-density").innerHTML = WIND_OVERLAY_DENSITY_OPTIONS.map((d) => `
       <label>
@@ -463,7 +458,6 @@ export function initWwOverlay(map) {
   }
 
   renderDensityRadios();
-  renderLegend();
   wireUI();
   restoreFromSettings();
 

@@ -487,19 +487,19 @@ select, input[type="number"], input[type="text"] {
   text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff, 0 0 1px #fff;
 }
 
-/* WW-Symbol je Gitterpunkt (wwoverlay.js): dunkle Box, Rand/Schatten in der
-   Kategoriefarbe (--ww-tint, inline je Marker gesetzt) für Lesbarkeit über
-   OSM/Satellit, analog zum Halo der Zahlenwerte-Marker. */
-.ww-symbol-box {
+/* WW-Symbol je Gitterpunkt (wwoverlay.js): runder, dunkler Chip ohne Rand/
+   Glow (dritter Anlauf, s. Kopfkommentar wwoverlay.js) -- ein reiner
+   Halo-Filter ohne Hintergrund war auf hellem Untergrund kaum lesbar und
+   wirkte unscharf; die ursprüngliche eckige Box mit Farbrand+Glow zu
+   dominant. Der Chip garantiert Kontrast unabhängig von der Kartenunterlage. */
+.ww-symbol-chip {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  background: rgba(8, 12, 20, 0.85);
-  border: 1.5px solid var(--ww-tint, #888);
-  border-radius: 4px;
-  box-shadow: 0 0 5px color-mix(in srgb, var(--ww-tint, #888) 40%, transparent);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(15, 18, 24, 0.68);
 }
 
 input[type="range"] {
