@@ -478,7 +478,8 @@ select, input[type="number"], input[type="text"] {
 /* Böen-Zahlenwerte am Gitterpunkt (gustLayerMode "numbers"): dunkel, fett,
    mit weißem Halo für Lesbarkeit über OSM/Satellit — analog zu den Fiedern. */
 .gust-num,
-.cloud-num {
+.cloud-num,
+.dem-num {
   font: 700 12px/1 system-ui, sans-serif;
   color: #0b1220;
   text-align: center;

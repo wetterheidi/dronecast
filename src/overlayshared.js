@@ -29,6 +29,27 @@ export function round5(x) {
   return Math.round(x * 1e5) / 1e5;
 }
 
+// -- Barometrische Formel ------------------------------------------------------
+// Dieselbe Lapse-Rate/Exponent, mit der Open-Meteo/DWD nachweislich
+// `surface_pressure` erzeugen (METHODIK.md Abschnitt 5b) — hier von einer
+// beliebigen Referenzhöhe (nicht nur MSL) aus angewendet. EINE Quelle für
+// demoverlay.js (ΔQFE-Kartenlayer) UND app.js (QFE(DEM) in der
+// Punktvorhersage), statt zweier driftender Kopien.
+export const BAROMETRIC_LAPSE_K_PER_M = 0.0065;
+export const BAROMETRIC_EXPONENT = 5.25578;
+
+// QFE an einer Zielhöhe aus Druck (hPa) und Temperatur (K) an einer
+// Referenzhöhe. `deltaRefMinusTarget` = Referenzhöhe minus Zielhöhe (m) —
+// z. B. Modellhöhe minus DEM90-Höhe für QFE(DEM). `null` bei unrealistischem
+// Höhen-/Temperaturverhältnis (Formel dort nicht mehr sinnvoll), statt eines
+// NaN/Infinity-Werts, der als echte Zahl durchrutschen könnte.
+export function qfeAtTarget(psRef, refTempK, deltaRefMinusTarget) {
+  if (!Number.isFinite(psRef) || !Number.isFinite(refTempK) || !Number.isFinite(deltaRefMinusTarget)) return null;
+  const base = 1 + (BAROMETRIC_LAPSE_K_PER_M * deltaRefMinusTarget) / refTempK;
+  if (base <= 0) return null;
+  return psRef * Math.pow(base, BAROMETRIC_EXPONENT);
+}
+
 // -- Farbklassen --------------------------------------------------------------
 // Farbklasse für einen Skalarwert anhand der (parameterspezifischen) Stops.
 // `stops` in nativer Einheit des Parameters (Wind/Böen: m/s).

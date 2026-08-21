@@ -53,6 +53,14 @@ const DEFAULTS = {
   cloudCeilingOn: true,
   cloudCeilingMode: "fill", // "fill" = Farbfläche | "numbers" = Zahlenwerte
   cloudCeilingOpacity: 0.5,
+  // DEM-Layer (demoverlay.js, Testfeature): „quantity" wählt die Größe
+  // (Höhendifferenz Δh, statisch | Druckdifferenz ΔQFE, stündlich), „mode"
+  // schaltet wie beim Böen-Layer zwischen Farbfläche und Zahlenwerten um.
+  demLayerOn: false,
+  demLayerQuantity: "height", // "height" = Δh (m) | "pressure" = ΔQFE (hPa)
+  demLayerMode: "fill", // "fill" = Farbfläche | "numbers" = Zahlenwerte
+  demLayerOpacity: 0.5,
+  demLayerDensity: WIND_OVERLAY_DEFAULT_DENSITY,
 };
 
 export const settings = { ...DEFAULTS };

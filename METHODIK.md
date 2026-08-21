@@ -422,12 +422,86 @@ still grün"-Prinzip aus Abschnitt 6.2.
 
 ### Umsetzung
 [src/app.js](src/app.js), `renderNow()`: `WindField.elevationAt(lat, lon)`
-(bilinear an der Abfrageposition) gegen `surface.elevation` verglichen,
-als „Modellorographie"-Zeile mit Differenz angezeigt. Ab
-`TERRAIN_MISMATCH_WARN_M = 100` m (grobe Faustregel, keine
-Literaturkonstante) wird die Zeile rot hervorgehoben plus ein Warnhinweis
-eingeblendet: die Wind-auf-Höhe-Werte in diesem Fall mit Vorsicht
-interpretieren, da das Modellgitter das lokale Gelände hier nicht auflöst.
+(bilinear an der Abfrageposition) gegen `surface.elevation` verglichen, als
+„Modellorographie"-Zeile mit explizit BEIDEN Höhen und der Differenz
+angezeigt (`Modell … · DEM … · Δ …`). Ab `TERRAIN_MISMATCH_WARN_M = 100` m
+([src/config.js](src/config.js), grobe Faustregel, keine Literaturkonstante)
+wird die Zeile rot hervorgehoben plus ein Warnhinweis eingeblendet: die
+Wind-auf-Höhe-Werte in diesem Fall mit Vorsicht interpretieren, da das
+Modellgitter das lokale Gelände hier nicht auflöst.
+
+Direkt darunter eine **QFE(DEM)-Zeile**: Modell-Bodendruck
+(`surface_pressure_model`, eigener Fetch `fetchModelPressure()` mit
+`elevation=nan`, damit T2m konsistent an der Modellhöhe bleibt) barometrisch
+auf die DEM90-Höhe umgerechnet — `qfeAtTarget()` in
+[src/overlayshared.js](src/overlayshared.js), dieselbe Funktion wie im
+ΔQFE-Kartenlayer (s. u.). Bewusst mit DEMSELBEN `warn`-Flag wie die
+Orographie-Zeile eingefärbt, nicht mit einer eigenen Schwelle: derselbe Δh
+treibt beide Werte, ein roter QFE(DEM)-Wert soll direkt zur Vorsicht bei der
+Zeile darüber mahnen, nicht eine zweite unabhängige Bewertung sein.
+
+### Kartenlayer (Testfeature): Δ Modell − DEM90, flächig
+
+[src/demoverlay.js](src/demoverlay.js) zeigt dieselbe Δ-Diagnose räumlich
+statt nur am einen Operationspunkt — analog zum Ceiling-Kartenlayer (4.4b),
+nur mit zwei statischen statt zeitreihenbehafteten Quellen je Gitterpunkt:
+
+- **DEM90**: `/v1/elevation` gegen `API_BASE` (Michaels Instanz, seit sie
+  die weltweiten DEM90-Höhen hostet — Stand 2026-08), Fallback
+  `SURFACE_API_BASE` (öffentliche Instanz, dort schon immer DEM90-basiert).
+  Modellunabhängig.
+- **Modell-Orographie**: `/v1/forecast?hourly=model_elevation&elevation=nan`
+  gegen `model.apiBase` (je Modell verschieden, wie bei `windfield.js`) —
+  `elevation=nan` pinnt auf die modelleigene Gitterhöhe statt serverseitigem
+  DEM-Downscaling. Kein Fallback-Host, wie bei den übrigen Modell-Level-Feldern.
+
+Anders als Wind/Böen/Wolken ist der Layer **statisch** (kein Zeitbezug,
+keine Masterzeit-Kopplung, kein TTL-Ablauf) — weder DEM90 noch die
+Modell-Orographie ändern sich mit Vorhersagestunde oder Modelllauf. Farbklassen
+(divergierend um 0) nutzen `TERRAIN_MISMATCH_WARN_M` als innere
+Toleranzgrenze, dieselbe Konstante wie die Punkt-Diagnose oben — eine
+Quelle statt zweier driftender Kopien.
+
+**Ungetestet** (keine Browser-Session bei der Umsetzung verfügbar): ob
+`model_elevation` auf `API_BASE_ICON_GLOBAL` (separater Server für
+ICON Global, s. o.) echte Werte statt NULL liefert, ist offen — Symptom
+wäre eine leere/lückenhafte Fläche bei ICON Global, kein Absturz.
+
+Live gegengetestet (icon_d2/icon_eu, 2026-08-20) und dabei zwei Bugs
+gefunden+gefixt: (1) vorübergehender Verbindungsausfall bei Michael, kein
+App-Bug; (2) `elevation=nan` muss bei Mehrpunkt-Requests einmal PRO
+Koordinate mitgeschickt werden, nicht als einzelner Skalar — sonst lehnt
+die API mit „Parameter 'elevation' must have the same number of elements as
+coordinates" ab.
+
+### Erweiterung: Druckdifferenz ΔQFE (Testfeature)
+
+Zweite wählbare Größe im selben Layer (`settings.demLayerQuantity`):
+Modell-Bodendruck (`surface_pressure_model`, das rohe DWD-PS-Feld am
+Modellgitterpunkt, siehe [[dwd-raw-vs-openmeteo-surface-pressure]])
+barometrisch auf die DEM90-Höhe umgerechnet, minus Modell-Bodendruck:
+
+    QFE_DEM90 = PS_Modell · (1 + 0,0065·Δh / T2m_K) ^ 5,25578
+    ΔQFE = QFE_DEM90 − PS_Modell
+
+`Δh = Modell-Orographie − DEM90` (dieselbe Größe wie oben), `T2m_K` die
+Modell-Temperatur AM MODELLGITTERPUNKT (nicht DEM-korrigiert — `elevation=nan`
+gilt für den gesamten Request und pinnt auch `temperature_2m`). Lapse-Rate
+(0,0065 K/m) und Exponent (5,25578 = g·M/(R·L)) entsprechen exakt der
+Formel, mit der Open-Meteo/DWD nachweislich `surface_pressure` erzeugen
+(s. o.) — hier nur von der Modellhöhe statt von MSL aus angewendet.
+
+Anders als Δh ist ΔQFE **stündlich** (Modell-Bodendruck ändert sich mit
+jedem Lauf/jeder Stunde) — der Layer koppelt für diese Größe an die
+Masterzeit, mit stündlichem Cache-TTL wie beim Böen-Layer, während Δh
+weiterhin statisch bleibt (eigene Cache-Frische je Feld im selben Eintrag).
+
+Heuristischer Wert wie jede barometrische Extrapolation: konstante Lapse-Rate
+über die GESAMTE Δh-Strecke, keine reale Schichtung (Inversionen, Föhn) —
+bei großen |Δh| im Gebirge entsprechend unsicherer. Noch nicht gegen
+Rohdaten verifiziert (anders als die `surface_pressure`-Formel selbst, die
+oben bereits verifiziert ist) — nur die Formelübertragung auf einen
+zweiten Referenzpunkt (Modellhöhe statt MSL) ist neu, nicht die Formel an sich.
 
 ---
 

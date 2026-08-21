@@ -146,3 +146,35 @@ export const CLOUD_OVERLAY_MAX_POINTS = 400;
 export const CLOUD_OVERLAY_POINTS_PER_REQUEST = 40;
 export const CLOUD_OVERLAY_MAX_CONCURRENCY = 3;
 export const CLOUD_OVERLAY_CHUNK_RETRIES = 2;
+
+// Ab dieser Differenz zwischen echter (DEM-)Geländehöhe und modelleigener
+// Orographie gilt das lokale Gelände als vom Gitter nicht aufgelöst — grobe
+// Faustregel, keine Literaturkonstante (siehe METHODIK.md, Abschnitt 5b).
+// Zentral hier statt in app.js, weil sowohl die Punktvorhersage (renderNow)
+// als auch demoverlay.js (Kartenlayer, Farbklassen) denselben Schwellenwert
+// brauchen — EINE Quelle statt zwei driftender Kopien.
+export const TERRAIN_MISMATCH_WARN_M = 100;
+
+// DEM-Layer (demoverlay.js, Testfeature): flächige Differenz Modell-
+// Orographie minus DEM90-Geländehöhe. Anders als Böen/Wolken ist das ein
+// STATISCHER Layer (weder Gelände noch Modellgitter ändern sich mit der
+// Vorhersagestunde) — kein Zeitbezug, kein TTL-Refresh nötig, nur echte
+// Fehler lösen einen Retry aus. Zwei getrennte Quellen je Punkt:
+//   - DEM90: `/v1/elevation` — primär Michaels Instanz (API_BASE, seit
+//     Michael dort die weltweiten DEM90-Höhen hostet), Fallback öffentliche
+//     Instanz (SURFACE_API_BASE, dort schon immer DEM90-basiert). Modell-
+//     unabhängig, daher IMMER dieselben zwei Hosts, unabhängig vom
+//     gewählten ICON-Modell.
+//   - Modell-Orographie: `/v1/forecast?hourly=model_elevation&elevation=nan`
+//     gegen `model.apiBase` (je Modell verschieden, wie bei windfield.js/
+//     gustoverlay.js) — `elevation=nan` pinnt auf die modelleigene
+//     Gitterhöhe, unabhängig von serverseitigem DEM-Downscaling.
+// UNGETESTET (keine Browser-Session verfügbar): ob `model_elevation` auf
+// API_BASE_ICON_GLOBAL (separater Server, siehe icon-global-Memory) echte
+// Werte statt NULL liefert, ist offen — bei Fehlschlag zeigt der Layer für
+// icon_global Datenlücken/Fehler statt eines harten Absturzes.
+export const DEM_OVERLAY_MAX_POINTS = 500;
+export const DEM_OVERLAY_POINTS_PER_REQUEST = 100;
+export const DEM_OVERLAY_MAX_CONCURRENCY = 2;
+export const DEM_OVERLAY_CHUNK_RETRIES = 2;
+export const DEM_OVERLAY_RATE_LIMIT_COOLDOWN_MS = 30 * 1000;

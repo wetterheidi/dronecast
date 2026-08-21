@@ -1,4 +1,6 @@
-import { MODELS, PREVIEW_HEIGHTS, MIN_MAX_HEIGHT, MAX_MAX_HEIGHT } from "./config.js";
+import {
+  MODELS, PREVIEW_HEIGHTS, MIN_MAX_HEIGHT, MAX_MAX_HEIGHT, TERRAIN_MISMATCH_WARN_M,
+} from "./config.js";
 import { WindField } from "./windfield.js";
 import { fetchSurface, fetchModelRunInit, nearestIndex, nearestIndexOrNull } from "meteokit/weather";
 import {
@@ -31,10 +33,11 @@ import { initMapLayers } from "./maplayers.js";
 import { initWindOverlay, WIND_FILL_STOPS } from "./windoverlay.js";
 import { initGustOverlay } from "./gustoverlay.js";
 import { initCloudOverlay } from "./cloudoverlay.js";
+import { initDemOverlay } from "./demoverlay.js";
 import {
   fmtHeight, fmtWind, fmtTemp, fmtDirPadded, heightUnit, heightToDisplay, heightFromDisplay,
 } from "meteokit/units";
-import { throttle } from "./overlayshared.js";
+import { throttle, qfeAtTarget } from "./overlayshared.js";
 
 /* global L */
 
@@ -97,6 +100,12 @@ const gustOverlay = initGustOverlay(map);
 // am Operationspunkt. Datenquelle wie Wind: Michaels Instanz.
 const cloudOverlay = initCloudOverlay(map);
 
+// Kartenlayer (Testfeature): Δ Modell-Orographie − DEM90-Geländehöhe,
+// flächig — räumliche Darstellung derselben Diagnose, die am Operationspunkt
+// schon als „Modellorographie"-Zeile läuft (renderNow() unten, METHODIK.md
+// 5b). Statisch, keine Masterzeit-Kopplung.
+const demOverlay = initDemOverlay(map);
+
 // Cursor-Statuszeile: zeigt für JEDEN aktuell eingeschalteten Kartenlayer den
 // Wert unter dem Mauszeiger an (nicht nur den obersten) — Nutzerentscheidung,
 // weil die Layer sich farblich/räumlich unterscheiden und meist bewusst
@@ -116,6 +125,14 @@ function renderCursorReadout() {
   const cloud = cloudOverlay.valueAt(lat, lng);
   if (cloud?.coverPct != null) parts.push(`Bedeckung ${Math.round(cloud.coverPct)} %`);
   if (cloud?.ceilingM != null) parts.push(`Ceiling ${fmtHeight(cloud.ceilingM)} AGL`);
+  const dem = demOverlay.valueAt(lat, lng);
+  if (dem?.deltaM != null) {
+    const sign = dem.deltaM >= 0 ? "+" : "−";
+    parts.push(`Δ Gelände ${sign}${Math.round(Math.abs(heightToDisplay(dem.deltaM)))} ${heightUnit()}`);
+  } else if (dem?.deltaHpa != null) {
+    const sign = dem.deltaHpa >= 0 ? "+" : "−";
+    parts.push(`ΔQFE ${sign}${Math.abs(dem.deltaHpa).toFixed(1)} hPa`);
+  }
   cursorReadout.hidden = !parts.length;
   if (parts.length) cursorReadout.textContent = parts.join(" · ");
 }
@@ -323,6 +340,30 @@ function clearForecast() {
   el("model-run-hint").hidden = true;
 }
 
+// Modell-Bodendruck + T2m am Operationspunkt, als Stundenreihe — Basis für
+// QFE(DEM) in renderNow(). `elevation=nan` pinnt den Request auf die
+// modelleigene Gitterhöhe (kein DEM-Downscaling von T2m), analog zu
+// demoverlay.js' fetchModelChunk(), hier aber nur EIN Punkt über den vollen
+// Horizont statt eines Chunks. Fehler hier dürfen das restliche Laden nicht
+// verhindern (Aufrufer fängt mit .catch(() => null) ab, wie modelRunInit).
+async function fetchModelPressure(lat, lon, model) {
+  const params = new URLSearchParams({
+    latitude: String(lat),
+    longitude: String(lon),
+    hourly: "surface_pressure_model,temperature_2m",
+    models: model.apiModel,
+    elevation: "nan",
+    timeformat: "unixtime",
+    forecast_days: String(settings.forecastDays),
+    cell_selection: "nearest",
+  });
+  const resp = await fetch(`${model.apiBase}/v1/forecast?${params}`);
+  const data = await resp.json();
+  if (!resp.ok || data.error) throw new Error(data.reason || `API-Fehler ${resp.status}`);
+  const h = data.hourly || {};
+  return { time: h.time || [], ps: h.surface_pressure_model || [], t2m: h.temperature_2m || [] };
+}
+
 async function loadForecast() {
   if (!state.point) return;
   const { lat, lon } = state.point;
@@ -349,10 +390,11 @@ async function loadForecast() {
     // aber unkritisch — ein Fehler dabei darf das restliche Laden nicht
     // verhindern (daher eigenes .catch statt scharf in Promise.all).
     const wf = new WindField(settings.model);
-    const [surface, , modelRunInit] = await Promise.all([
+    const [surface, , modelRunInit, modelPressure] = await Promise.all([
       fetchSurface(lat, lon, settings.model, settings.forecastDays),
       wf.init(lat, lon, settings.maxHeight, now, tMax),
       fetchModelRunInit(settings.model).catch(() => null),
+      fetchModelPressure(lat, lon, model).catch(() => null),
     ]);
 
     // Modell-eigene Orographie am Punkt (bilinear) — zum Abgleich mit der
@@ -366,7 +408,7 @@ async function loadForecast() {
 
     // Die Modell-Level-Winde auf den Vorschau-Höhen berechnet renderNow zur
     // jeweils gewählten Masterzeit neu (billige In-Memory-Interpolation).
-    state.data = { surface, loadedAt: now, wf, modelElevation, modelRunInit };
+    state.data = { surface, loadedAt: now, wf, modelElevation, modelRunInit, modelPressure };
     setMasterRange(); // Zeitfenster auf die echte Zeitreihe verfeinern
     setStatus(`Geladen · ${model.label} · Elevation ${fmtHeight(surface.elevation)}`, "");
     updateModelRunHint();
@@ -419,10 +461,9 @@ function updateModelRunHint() {
 // ---------------------------------------------------------------------------
 // Produkt „Aktuell" (Lebenszeichen der Pipeline)
 // ---------------------------------------------------------------------------
-// Ab dieser Differenz zwischen echter (DEM-)Geländehöhe und modelleigener
-// Orographie gilt das lokale Gelände als vom Gitter nicht aufgelöst — grobe
-// Faustregel, keine Literaturkonstante (siehe METHODIK.md).
-const TERRAIN_MISMATCH_WARN_M = 100;
+// TERRAIN_MISMATCH_WARN_M kommt aus config.js — dieselbe Konstante nutzt auch
+// demoverlay.js für die Farbklassen des Kartenlayers (EINE Quelle statt zwei
+// driftender Kopien, siehe METHODIK.md Abschnitt 5b).
 
 // Neuberechnung serialisieren: renderNow ist async (Höhenwinde werden zur
 // Masterzeit interpoliert). Beim schnellen Ziehen des Zeitreglers laufen
@@ -465,9 +506,23 @@ async function renderNow() {
     const warn = Math.abs(deltaM) >= TERRAIN_MISMATCH_WARN_M;
     const sign = deltaM >= 0 ? "+" : "−";
     const deltaTxt = `${sign}${Math.round(Math.abs(heightToDisplay(deltaM)))} ${heightUnit()}`;
-    rows.push(line("Modellorographie", `${fmtHeight(d.modelElevation)} (Δ ${deltaTxt})`, warn));
+    rows.push(line("Orographie",
+      `Modell ${fmtHeight(d.modelElevation)} · DEM ${fmtHeight(surface.elevation)} · Δ ${deltaTxt}`, warn));
     if (warn) {
       rows.push(`<div class="hint warn">⚠ Gelände hier vom Modellgitter nicht aufgelöst — Wind auf Höhe mit Vorsicht interpretieren.</div>`);
+    }
+
+    // QFE(DEM): Modell-Bodendruck barometrisch auf die DEM90-Höhe umgerechnet
+    // (dieselbe Formel/Konstanten wie im ΔQFE-Kartenlayer, s. demoverlay.js
+    // Kopfkommentar) — bewusst mit demselben `warn` eingefärbt wie die
+    // Orographie-Zeile: derselbe Δh treibt beide, ein roter Wert hier soll
+    // direkt zur Vorsicht bei der Orographie-Zeile darüber mahnen.
+    const mp = d.modelPressure;
+    if (mp?.time?.length) {
+      const j = nearestIndex(mp.time, tMs);
+      const t2mK = mp.t2m[j] != null ? mp.t2m[j] + 273.15 : null;
+      const qfeDem = qfeAtTarget(mp.ps[j], t2mK, deltaM);
+      if (qfeDem != null) rows.push(line("QFE (DEM)", `${qfeDem.toFixed(1)} hPa`, warn));
     }
   }
 
