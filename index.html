@@ -212,6 +212,26 @@
 
       <div class="ml-section">
         <label class="row">
+          <span class="label"><input type="checkbox" id="ml-ww-on" /> Signifikantes Wetter</span>
+        </label>
+        <div class="hint warn" id="ml-ww-hint" hidden>Zum Anzeigen bitte näher heranzoomen (ab Zoom 9).</div>
+        <div id="ml-ww-body" class="ml-subsection" hidden>
+          <div class="row">
+            <span class="label">Gitterdichte</span>
+          </div>
+          <div class="radio-row" id="ml-ww-density"><!-- Radios aus WIND_OVERLAY_DENSITY_OPTIONS --></div>
+          <div class="row opacity-row" id="ml-ww-opacity-row">
+            <span class="label">Deckkraft Symbole</span>
+            <span id="ml-ww-opacity-val" class="mono">85%</span>
+          </div>
+          <input id="ml-ww-opacity" type="range" min="10" max="100" step="5" value="85" />
+          <div class="wind-legend" id="ml-ww-legend"></div>
+          <div class="hint mono" id="ml-ww-status"></div>
+        </div>
+      </div>
+
+      <div class="ml-section">
+        <label class="row">
           <span class="label"><input type="checkbox" id="ml-dem-on" /> Geländehöhe: Modell − DEM90 (Test)</span>
         </label>
         <div class="hint warn" id="ml-dem-hint" hidden>Zum Anzeigen bitte näher heranzoomen (ab Zoom 9).</div>

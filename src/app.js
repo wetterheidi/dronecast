@@ -33,6 +33,7 @@ import { initMapLayers } from "./maplayers.js";
 import { initWindOverlay, WIND_FILL_STOPS } from "./windoverlay.js";
 import { initGustOverlay } from "./gustoverlay.js";
 import { initCloudOverlay } from "./cloudoverlay.js";
+import { initWwOverlay } from "./wwoverlay.js";
 import { initDemOverlay } from "./demoverlay.js";
 import {
   fmtHeight, fmtWind, fmtTemp, fmtDirPadded, heightUnit, heightToDisplay, heightFromDisplay,
@@ -100,6 +101,10 @@ const gustOverlay = initGustOverlay(map);
 // am Operationspunkt. Datenquelle wie Wind: Michaels Instanz.
 const cloudOverlay = initCloudOverlay(map);
 
+// Kartenlayer: signifikantes Wetter (weather_code) als WMO-Symbol je
+// Gitterpunkt — Schwesterlayer zu Böen/Wolken, Datenquelle wie Böen.
+const wwOverlay = initWwOverlay(map);
+
 // Kartenlayer (Testfeature): Δ Modell-Orographie − DEM90-Geländehöhe,
 // flächig — räumliche Darstellung derselben Diagnose, die am Operationspunkt
 // schon als „Modellorographie"-Zeile läuft (renderNow() unten, METHODIK.md
@@ -125,6 +130,8 @@ function renderCursorReadout() {
   const cloud = cloudOverlay.valueAt(lat, lng);
   if (cloud?.coverPct != null) parts.push(`Bedeckung ${Math.round(cloud.coverPct)} %`);
   if (cloud?.ceilingM != null) parts.push(`Ceiling ${fmtHeight(cloud.ceilingM)} AGL`);
+  const ww = wwOverlay.valueAt(lat, lng);
+  if (ww) parts.push(`Wetter ${wmoText(ww.code)}`);
   const dem = demOverlay.valueAt(lat, lng);
   if (dem?.deltaM != null) {
     const sign = dem.deltaM >= 0 ? "+" : "−";

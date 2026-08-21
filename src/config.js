@@ -118,6 +118,16 @@ export const GUST_OVERLAY_CHUNK_RETRIES = 2;
 // Fallback-Wartezeit nach einem 429 ohne (brauchbaren) Retry-After-Header.
 export const GUST_OVERLAY_RATE_LIMIT_COOLDOWN_MS = 30 * 1000;
 
+// WW-Layer (wwoverlay.js): signifikantes Wetter (weather_code) als Symbol je
+// Gitterpunkt — wie Böen eine einzelne Oberflächenvariable (kein Level-Band),
+// bereits Teil von SURFACE_CORE auf BEIDEN Hosts (siehe meteokit/config.js),
+// daher dieselben unkritischen Lastparameter wie beim Böen-Layer.
+export const WW_OVERLAY_MAX_POINTS = 500;
+export const WW_OVERLAY_POINTS_PER_REQUEST = 100;
+export const WW_OVERLAY_MAX_CONCURRENCY = 2;
+export const WW_OVERLAY_CHUNK_RETRIES = 2;
+export const WW_OVERLAY_RATE_LIMIT_COOLDOWN_MS = 30 * 1000;
+
 // Höhenschieber: Die nativen ICON-Level haben keine feste Meterhöhe — ihre
 // Höhe AGL steht pro Punkt/Zeit in `height_agl_level{l}`. Beim Aktivieren des
 // Layers wird daher einmal je Modell an einem Sondierpunkt (Kartenmitte) die

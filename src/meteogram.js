@@ -33,6 +33,7 @@ import {
 } from "meteokit/units";
 import { refineCloudBase } from "meteokit/clouds";
 import { placeWindBarb, CHART_PX_PER_HOUR, CHART_BARB_SIZE } from "meteokit/windbarb";
+import { wmoWeatherCategory } from "meteokit/wwsymbols";
 
 const KT_PER_MS = 1.94384;
 
@@ -535,17 +536,12 @@ const WW_TYPES = [
   { key: "showers", label: "Schauer", color: "#2a78d6" },
   { key: "thunder", label: "Gewitter", color: "#e34948" },
 ];
+// Grenzwerte kommen aus meteokit/wwsymbols (wmoWeatherCategory) -- dieselbe
+// Quelle wie der WW-Kartenlayer (wwoverlay.js), damit Ribbon und Kartenlayer
+// nie widersprüchlich diagnostizieren.
 function wwCat(code) {
-  const byKey = (k) => WW_TYPES.find((t) => t.key === k);
-  if (code == null) return null;
-  if (code === 45 || code === 48) return byKey("fog");
-  if (code >= 95) return byKey("thunder");
-  if (code === 56 || code === 57 || code === 66 || code === 67) return byKey("freezing");
-  if ((code >= 80 && code <= 82) || code === 85 || code === 86) return byKey("showers");
-  if (code >= 71 && code <= 77) return byKey("snow");
-  if (code >= 61 && code <= 65) return byKey("rain");
-  if (code >= 51 && code <= 55) return byKey("drizzle");
-  return null; // 0-3: klar/bewölkt -> keine Zelle
+  const key = wmoWeatherCategory(code);
+  return key ? WW_TYPES.find((t) => t.key === key) : null;
 }
 
 // wwCat() mit sichtbasierter Nebel-Korrektur: liegt `fogArr` (m.fog,

@@ -53,6 +53,12 @@ const DEFAULTS = {
   cloudCeilingOn: true,
   cloudCeilingMode: "fill", // "fill" = Farbfläche | "numbers" = Zahlenwerte
   cloudCeilingOpacity: 0.5,
+  // WW-Layer (wwoverlay.js): signifikantes Wetter als Symbol je Gitterpunkt,
+  // nur EIN Darstellungsmodus (kategorial, kein Fläche/Zahlen-Umschalter wie
+  // bei Böen/Wolken/DEM).
+  wwLayerOn: false,
+  wwLayerOpacity: 0.85,
+  wwLayerDensity: WIND_OVERLAY_DEFAULT_DENSITY,
   // DEM-Layer (demoverlay.js, Testfeature): „quantity" wählt die Größe
   // (Höhendifferenz Δh, statisch | Druckdifferenz ΔQFE, stündlich), „mode"
   // schaltet wie beim Böen-Layer zwischen Farbfläche und Zahlenwerten um.

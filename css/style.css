@@ -487,6 +487,21 @@ select, input[type="number"], input[type="text"] {
   text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 2px #fff, 0 0 1px #fff;
 }
 
+/* WW-Symbol je Gitterpunkt (wwoverlay.js): dunkle Box, Rand/Schatten in der
+   Kategoriefarbe (--ww-tint, inline je Marker gesetzt) für Lesbarkeit über
+   OSM/Satellit, analog zum Halo der Zahlenwerte-Marker. */
+.ww-symbol-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: rgba(8, 12, 20, 0.85);
+  border: 1.5px solid var(--ww-tint, #888);
+  border-radius: 4px;
+  box-shadow: 0 0 5px color-mix(in srgb, var(--ww-tint, #888) 40%, transparent);
+}
+
 input[type="range"] {
   width: 100%;
   margin: 4px 0 10px;
