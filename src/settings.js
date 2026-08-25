@@ -29,6 +29,8 @@ const DEFAULTS = {
   satLayerOpacity: 0.7,
   radarLayerOn: false,
   radarLayerOpacity: 0.7,
+  airspaceLayerOn: false,
+  airspaceLayerOpacity: 0.8,
   windLayerOn: false,
   windLayerBarbs: true,
   windLayerOpacity: 0.5,

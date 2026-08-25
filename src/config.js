@@ -63,6 +63,10 @@ export const SAT_PRODUCTS = [
 
 export const MAPLAYERS_TIME_STEP_MIN = 15;
 
+// Lufträume (openflightmaps via Naviator/newaydata-Tiles), wie in trajectories.
+// Statischer Tile-Layer, kein Key/Proxy nötig, keine Zeitdimension.
+export const AIRSPACE_TILE_URL = "https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest";
+
 // Wind-Overlay (flächige Darstellung, unterstes Modelllevel ~10 m AGL):
 // Mindest-Zoom, ab dem der Layer Daten holt (Drohnenflüge sind kleinräumig —
 // bei icon_d2 (0,02° ≈ 2,2 km Gitterweite) zeigt Zoom 9 einen ca. 300 km

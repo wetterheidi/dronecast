@@ -71,6 +71,22 @@
       </div>
     </details>
 
+    <details id="airspace">
+      <summary>Lufträume</summary>
+      <div class="ml-section">
+        <label class="row">
+          <span class="label"><input type="checkbox" id="ml-airspace-on" /> Lufträume anzeigen</span>
+        </label>
+        <div class="hint">Luftraumgrenzen (openflightmaps), wie in trajectories. Statisch,
+          keine eigene Zeitdimension.</div>
+        <div class="row opacity-row">
+          <span class="label">Deckkraft</span>
+          <span id="ml-airspace-opacity-val" class="mono">80%</span>
+        </div>
+        <input id="ml-airspace-opacity" type="range" min="10" max="100" step="5" value="80" />
+      </div>
+    </details>
+
     <details id="maplayers">
       <summary>Nowcasting (Satellit &amp; Radar)</summary>
 
