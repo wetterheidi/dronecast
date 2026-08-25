@@ -29,8 +29,7 @@ const DEFAULTS = {
   satLayerOpacity: 0.7,
   radarLayerOn: false,
   radarLayerOpacity: 0.7,
-  airspaceLayerOn: false,
-  airspaceLayerOpacity: 0.8,
+  airspaceLayerOn: false, // Lufträume-Overlay, Ein/Aus über das native Kartenauswahlmenü (app.js)
   windLayerOn: false,
   windLayerBarbs: true,
   windLayerOpacity: 0.5,

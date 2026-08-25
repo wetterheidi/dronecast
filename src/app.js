@@ -1,5 +1,6 @@
 import {
   MODELS, PREVIEW_HEIGHTS, MIN_MAX_HEIGHT, MAX_MAX_HEIGHT, TERRAIN_MISMATCH_WARN_M,
+  AIRSPACE_TILE_URL,
 } from "./config.js";
 import { WindField } from "./windfield.js";
 import { fetchSurface, fetchModelRunInit, nearestIndex, nearestIndexOrNull } from "meteokit/weather";
@@ -76,8 +77,27 @@ const baseLayers = {
 };
 const initialBase = baseLayers[settings.baseLayer] ? settings.baseLayer : "OpenStreetMap";
 baseLayers[initialBase].addTo(map);
-L.control.layers(baseLayers, null, { position: "topleft" }).addTo(map);
+
+// Lufträume-Overlay (openflightmaps), wie in trajectories: statischer
+// Tile-Layer, Ein/Aus direkt über das native Kartenauswahlmenü (nicht im
+// Seitenpanel) — dort erwartet man ihn analog zu trajectories/DZMaster.
+const airspaceLayer = L.tileLayer(AIRSPACE_TILE_URL, {
+  maxZoom: 19,
+  attribution: '&copy; <a href="https://www.openflightmaps.org" target="_blank">openflightmaps.org</a>',
+  opacity: 0.8,
+  pane: "overlayPane",
+  zIndex: 3,
+  updateWhenIdle: true,
+  keepBuffer: 2,
+});
+const overlayLayers = { "Lufträume": airspaceLayer };
+if (settings.airspaceLayerOn) airspaceLayer.addTo(map);
+
+L.control.layers(baseLayers, overlayLayers, { position: "topleft" }).addTo(map);
 map.on("baselayerchange", (e) => updateSetting("baseLayer", e.name));
+map.on("overlayadd overlayremove", (e) => {
+  if (e.layer === airspaceLayer) updateSetting("airspaceLayerOn", e.type === "overlayadd");
+});
 
 // Geoman-Zeichenwerkzeug (Marker/Linie/Kreis, Peilung/Radius-Labels).
 initGeoman(map);

@@ -27,7 +27,6 @@
 import {
   RAINVIEWER_API, RAINVIEWER_META_TTL_MS, RAINVIEWER_COLOR_SCHEME,
   EUMETSAT_WMS_BASE, EUMETSAT_CAPS_URL, EUMETSAT_CAPS_TTL_MS, SAT_PRODUCTS,
-  AIRSPACE_TILE_URL,
 } from "./config.js";
 import { settings, updateSetting } from "./settings.js";
 import {
@@ -51,21 +50,6 @@ export function initMapLayers(map) {
   let satExtentsTs = 0;
   let radarLayer = null;
   let satLayer = null;
-
-  // -- Lufträume (openflightmaps, statisch) --------------------------------
-  // Anders als Radar/Satellit keine Zeitdimension — ein einziger Tile-Layer,
-  // nur Ein/Aus + Deckkraft. Im overlayPane (statt wxOverlays) platziert,
-  // damit die Luftraumgrenzen auch über Wind-/Wolken-/Böenflächen lesbar
-  // bleiben, wie die Esri-Grenzlinien-Ebene (app.js).
-  const airspaceLayer = L.tileLayer(AIRSPACE_TILE_URL, {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openflightmaps.org" target="_blank">openflightmaps.org</a>',
-    opacity: settings.airspaceLayerOpacity,
-    pane: "overlayPane",
-    zIndex: 3,
-    updateWhenIdle: true,
-    keepBuffer: 2,
-  });
 
   // Abspielen-Schleife (Nowcasting): läuft unabhängig von der Masterzeit über
   // die letzten 2 h und stellt beim Stoppen wieder die Masterzeit-Layer her.
@@ -509,18 +493,6 @@ export function initMapLayers(map) {
       if (radarLayer) radarLayer.setOpacity(v);
     });
     radarOpacity.addEventListener("change", (e) => updateSetting("radarLayerOpacity", Number(e.target.value) / 100));
-
-    el("ml-airspace-on").addEventListener("change", (e) => {
-      updateSetting("airspaceLayerOn", e.target.checked);
-      if (e.target.checked) airspaceLayer.addTo(map); else map.removeLayer(airspaceLayer);
-    });
-    const airspaceOpacity = el("ml-airspace-opacity");
-    airspaceOpacity.addEventListener("input", (e) => {
-      const v = Number(e.target.value) / 100;
-      el("ml-airspace-opacity-val").textContent = `${e.target.value}%`;
-      airspaceLayer.setOpacity(v);
-    });
-    airspaceOpacity.addEventListener("change", (e) => updateSetting("airspaceLayerOpacity", Number(e.target.value) / 100));
   }
 
   function restoreFromSettings() {
@@ -539,11 +511,6 @@ export function initMapLayers(map) {
     el("ml-radar-on").checked = settings.radarLayerOn;
     el("ml-radar-opacity").value = String(Math.round(settings.radarLayerOpacity * 100));
     el("ml-radar-opacity-val").textContent = `${Math.round(settings.radarLayerOpacity * 100)}%`;
-
-    el("ml-airspace-on").checked = settings.airspaceLayerOn;
-    el("ml-airspace-opacity").value = String(Math.round(settings.airspaceLayerOpacity * 100));
-    el("ml-airspace-opacity-val").textContent = `${Math.round(settings.airspaceLayerOpacity * 100)}%`;
-    if (settings.airspaceLayerOn) airspaceLayer.addTo(map);
 
     syncTimeGrid();
     if (settings.satLayerOn) refreshSat();
