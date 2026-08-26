@@ -7,17 +7,21 @@
  * "./config.js"` im App-Code unverändert gültig, und es gibt weiterhin genau
  * EINE Quelle der Wahrheit dafür (meteokit/src/config.js).
  *
- * Diese App nutzt die Bibliotheks-Defaults unverändert und ruft deshalb kein
- * `configure()` -- die Defaults SIND droneforecasts bisherige Werte.
- * `configure` wird trotzdem re-exportiert, damit es hier zentral greifbar
- * bleibt, falls das mal nötig wird.
+ * Für Produktion nutzt diese App die Bibliotheks-Defaults unverändert. Im
+ * Dev-Server (`import.meta.env.DEV`) biegt sie `API_BASE` und alle Modelle,
+ * die darauf zeigen, auf den lokalen Vite-Proxy `/api-proxy` um (s.
+ * vite.config.js) -- Michaels Modelllevel-Server lässt per CORS-Allowlist
+ * nur bekannte Produktions-Origins direkt aus dem Browser durch, ein
+ * localhost-Request bekäme sonst 403. ICON Global (eigener, offener Server)
+ * und die öffentliche Oberflächen-Instanz sind unbeschränkt und bleiben
+ * unverändert.
  *
  * Alles Übrige unten ist app-eigen (Kartenlayer, Overlays, Panel-Grenzen) und
  * gehört bewusst NICHT in die Bibliothek.
  */
 
-export {
-  API_BASE,
+import {
+  API_BASE as KIT_API_BASE,
   API_BASE_ICON_GLOBAL,
   SURFACE_API_BASE,
   MODELS,
@@ -26,6 +30,34 @@ export {
   getModel,
   configure,
 } from "meteokit/config";
+
+// App-eigene Konstante statt reinem Re-Export: demoverlay.js/wwoverlay.js/
+// gustoverlay.js bauen Fallback-URLs direkt aus `API_BASE` (nicht über
+// `model.apiBase`), und `configure()` kann eine `const`-Export der
+// Bibliothek nicht umbiegen -- daher die Umschaltung hier, EINMALIG an der
+// Stelle, die ohnehin schon "EINE Quelle der Wahrheit" für diese App ist.
+export const API_BASE = import.meta.env.DEV ? "/api-proxy" : KIT_API_BASE;
+
+if (import.meta.env.DEV) {
+  configure({
+    models: Object.fromEntries(
+      Object.entries(MODELS).map(([key, m]) => [
+        key,
+        m.apiBase === KIT_API_BASE ? { ...m, apiBase: API_BASE } : m,
+      ]),
+    ),
+  });
+}
+
+export {
+  API_BASE_ICON_GLOBAL,
+  SURFACE_API_BASE,
+  MODELS,
+  SURFACE_CORE,
+  SURFACE_OPTIONAL,
+  getModel,
+  configure,
+};
 
 // Vorhersage-Obergrenze (max. Flughöhe AGL) – Eingabefeld im Settings-Panel.
 export const MIN_MAX_HEIGHT = 120; // m AGL
