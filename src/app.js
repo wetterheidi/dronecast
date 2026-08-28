@@ -28,7 +28,7 @@ import { renderProfileDetails } from "./droneProfileView.js";
 import { renderProfileEditor } from "./droneProfileEditor.js";
 import * as astro from "meteokit/astro";
 import { settings, loadSettings, updateSetting, OPTIONS } from "./settings.js";
-import { parseCoordInput } from "./coords.js";
+import { initGeocode } from "./geocode.js";
 import { initGeoman } from "./geoman.js";
 import { initMapLayers } from "./maplayers.js";
 import { initWindOverlay, WIND_FILL_STOPS } from "./windoverlay.js";
@@ -39,7 +39,7 @@ import { initDemOverlay } from "./demoverlay.js";
 import {
   fmtHeight, fmtWind, fmtTemp, fmtDirPadded, heightUnit, heightToDisplay, heightFromDisplay,
 } from "meteokit/units";
-import { throttle, qfeAtTarget } from "./overlayshared.js";
+import { throttle, debounce, qfeAtTarget } from "./overlayshared.js";
 
 /* global L */
 
@@ -231,8 +231,8 @@ function requestPoint(lat, lon) {
   // Punkt kommt von der Karte, nicht aus dem Eingabefeld — ein dort noch
   // stehender, nicht übernommener Text wäre jetzt veraltet und dürfte beim
   // nächsten Klick auf "Vorhersage laden" nicht versehentlich diesen Punkt
-  // überschreiben (siehe goToCoordInput-Aufruf im load-Handler unten).
-  el("coordinput").value = "";
+  // überschreiben (siehe commitPending-Aufruf im load-Handler unten).
+  el("geocode").value = "";
   state.coordInputDirty = false;
   setPoint(lat, lon, { autoLoad: true });
 }
@@ -296,7 +296,7 @@ function setPoint(lat, lon, { autoLoad = false } = {}) {
       const p = state.marker.getLatLng();
       // Wie bei requestPoint: Karteninteraktion macht einen noch nicht
       // übernommenen Eingabefeld-Text ungültig.
-      el("coordinput").value = "";
+      el("geocode").value = "";
       state.coordInputDirty = false;
       setPoint(p.lat, p.lng, { autoLoad: true });
     });
@@ -305,6 +305,9 @@ function setPoint(lat, lon, { autoLoad = false } = {}) {
   el("load").disabled = false;
   setStatus("Bereit zum Laden.", "");
   updateSetting("lastPoint", { lat, lon });
+  // Nur tatsächlich geladene Punkte in die Geocode-Historie eintragen, nicht
+  // die passive Wiederherstellung des letzten Punkts beim Start.
+  if (autoLoad) geocode?.recordHistory(lat, lon);
   if (autoLoad) loadForecast();
 }
 
@@ -312,40 +315,41 @@ function setPoint(lat, lon, { autoLoad = false } = {}) {
 if (settings.lastPoint) setPoint(settings.lastPoint.lat, settings.lastPoint.lon);
 
 // ---------------------------------------------------------------------------
-// Positions-Eingabe: Dezimalgrad oder MGRS, alternativ zum Kartenklick.
+// Positions-Eingabe: Ortssuche (Photon) oder Dezimalgrad/MGRS, inkl. Historie
+// der letzten 8 Positionen und Favoriten — dieselbe Systematik wie im
+// Trajektorientool (src/geocode.js dort).
 // ---------------------------------------------------------------------------
-// Liefert true bei Erfolg. Gibt bei ungültiger Eingabe false zurück, statt
-// (gefährlich) einfach den alten Punkt stehen zu lassen — Aufrufer müssen das
-// prüfen, bevor sie z.B. eine Vorhersage laden.
-function goToCoordInput() {
-  const parsed = parseCoordInput(el("coordinput").value);
-  if (!parsed) { setStatus("Ungültige Koordinate.", "error"); return false; }
-  state.coordInputDirty = false;
-  setPoint(parsed.lat, parsed.lon, { autoLoad: true });
-  map.setView([parsed.lat, parsed.lon], Math.max(map.getZoom(), 11));
-  return true;
-}
-el("coordgo").addEventListener("click", goToCoordInput);
-el("coordinput").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") { e.preventDefault(); goToCoordInput(); }
+const geocode = initGeocode({
+  map,
+  setStart: (lat, lon) => {
+    state.coordInputDirty = false;
+    setPoint(lat, lon, { autoLoad: true });
+  },
+  debounce,
+  el,
 });
 // Markiert das Feld als "noch nicht übernommen", sobald der Nutzer tippt.
 // Verhindert, dass "Vorhersage laden" den alten Punkt neu lädt, während eine
-// eingegebene, aber nicht per "Gehe zu"/Enter bestätigte Koordinate im Feld
-// steht (siehe load-Handler unten).
-el("coordinput").addEventListener("input", () => { state.coordInputDirty = true; });
+// eingegebene, aber nicht per Auswahl/Enter bestätigte Eingabe im Feld steht
+// (siehe load-Handler unten).
+el("geocode").addEventListener("input", () => { state.coordInputDirty = true; });
 
 // ---------------------------------------------------------------------------
 // Vorhersage laden
 // ---------------------------------------------------------------------------
-// Steht im Koordinatenfeld noch unbestätigter Text (getippt, aber nicht per
-// "Gehe zu"/Enter übernommen), übernimmt der Klick auf den prominenten
+// Steht im Suchfeld noch unbestätigter Text (getippt, aber nicht per
+// Auswahl/Enter übernommen), übernimmt der Klick auf den prominenten
 // "Vorhersage laden"-Button ihn zuerst — sonst würde sonst unbemerkt die
 // Vorhersage des alten Standorts erneut geladen (siehe Nutzerfeedback).
 el("load").addEventListener("click", () => {
-  if (state.coordInputDirty && el("coordinput").value.trim()) {
-    if (!goToCoordInput()) return; // ungültige Koordinate: nicht mit altem Punkt weiterladen
-    return; // goToCoordInput löst über setPoint(..., { autoLoad: true }) das Laden bereits aus
+  if (state.coordInputDirty && el("geocode").value.trim()) {
+    // Ort/Koordinate nicht eindeutig bestätigbar (z. B. Text ohne Trefferliste):
+    // nicht mit altem Punkt weiterladen.
+    if (!geocode?.commitPending()) {
+      setStatus("Bitte Ort oder Koordinate aus der Liste bestätigen.", "error");
+      return;
+    }
+    return; // commitPending löst über setPoint(..., { autoLoad: true }) das Laden bereits aus
   }
   loadForecast();
 });

@@ -1,0 +1,304 @@
+/* global L */
+
+import { parseCoordInput } from "./coords.js";
+
+const PHOTON = "https://photon.komoot.io";
+
+function featureLabel(props) {
+  const name = props.name || props.street || props.city || "Ort";
+  const crumbs = [props.city, props.county, props.state, props.country]
+    .filter(Boolean)
+    .filter((c, i, a) => a.indexOf(c) === i && c !== name);
+  return { name, sub: crumbs.join(", ") };
+}
+
+// Dezimal- oder MGRS-Koordinate als Photon-artiges Feature verpacken, damit
+// render()/pick() unverändert bleiben können.
+function coordFeature(lat, lon) {
+  const ns = lat >= 0 ? "N" : "S";
+  const ew = lon >= 0 ? "E" : "W";
+  const label = `${Math.abs(lat).toFixed(5)}°${ns} ${Math.abs(lon).toFixed(5)}°${ew}`;
+  return {
+    geometry: { coordinates: [lon, lat] },
+    properties: { name: "Koordinate", city: label },
+  };
+}
+
+const HISTORY_KEY = "droneforecast.geocodeHistory.v1";
+const HISTORY_MAX = 8;
+
+function loadHistory() {
+  try {
+    const list = JSON.parse(localStorage.getItem(HISTORY_KEY));
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(list) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+  } catch {
+    /* Speichern ist Komfort, nie Fehlerquelle */
+  }
+}
+
+// Favoriten zählen nicht gegen die Kapazität — nur die HISTORY_MAX jüngsten
+// unmarkierten Einträge werden beim Einreihen verdrängt.
+function capHistory(list) {
+  let kept = 0;
+  return list.filter((e) => {
+    if (e.fav) return true;
+    kept += 1;
+    return kept <= HISTORY_MAX;
+  });
+}
+
+// Neuen Eintrag vorn einreihen; einen Treffer an (fast) derselben Stelle
+// ersetzen statt duplizieren (Favoritenstatus bleibt dabei erhalten),
+// damit die Historie nicht mit Wiederholungen vollläuft.
+function addToHistory({ lat, lon, name, sub }) {
+  const list = loadHistory();
+  const idx = list.findIndex(
+    (e) => Math.abs(e.lat - lat) <= 1e-4 && Math.abs(e.lon - lon) <= 1e-4,
+  );
+  const fav = idx >= 0 ? !!list[idx].fav : false;
+  if (idx >= 0) list.splice(idx, 1);
+  list.unshift({ lat, lon, name, sub, fav });
+  saveHistory(capHistory(list));
+}
+
+// Favoritenstatus umschalten, ohne die Kapazitätsgrenze sofort neu
+// durchzusetzen — überzählige Einträge werden erst beim nächsten
+// addToHistory() verdrängt, damit ein Klick nicht nebenbei andere
+// Einträge aus der Liste wirft.
+function setFavorite(lat, lon, fav) {
+  const list = loadHistory();
+  const idx = list.findIndex(
+    (e) => Math.abs(e.lat - lat) <= 1e-4 && Math.abs(e.lon - lon) <= 1e-4,
+  );
+  if (idx < 0) return;
+  list[idx] = { ...list[idx], fav };
+  saveHistory(list);
+}
+
+function historyFeature(entry) {
+  return {
+    geometry: { coordinates: [entry.lon, entry.lat] },
+    properties: { name: entry.name, city: entry.sub || "", fav: !!entry.fav },
+  };
+}
+
+function textEl(tag, text, className) {
+  const n = document.createElement(tag);
+  if (className) n.className = className;
+  n.textContent = text;
+  return n;
+}
+
+async function photonSearch(q) {
+  const url = `${PHOTON}/api/?${new URLSearchParams({ q, limit: "5", lang: "de" })}`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`Photon ${resp.status}`);
+  const data = await resp.json();
+  return Array.isArray(data.features) ? data.features : [];
+}
+
+async function photonReverseLabel(lat, lon) {
+  const url = `${PHOTON}/reverse?${new URLSearchParams({
+    lat: String(lat), lon: String(lon), limit: "1", lang: "de",
+  })}`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`Photon ${resp.status}`);
+  const data = await resp.json();
+  const f = data.features?.[0];
+  return f ? featureLabel(f.properties || {}) : null;
+}
+
+/**
+ * @param {{ map: L.Map, setStart: (lat: number, lon: number) => void, debounce: Function, el: (id: string) => HTMLElement }} opts
+ */
+export function initGeocode({ map, setStart, debounce, el }) {
+  const input = el("geocode");
+  const list = el("geocode-results");
+  if (!input || !list) return;
+
+  let hits = [];
+  let active = -1;
+  let historyMode = false;
+  let lastRecorded = null;
+
+  function hide() {
+    list.hidden = true;
+    list.innerHTML = "";
+    hits = [];
+    active = -1;
+    historyMode = false;
+  }
+
+  function showHistory() {
+    const hist = loadHistory();
+    if (!hist.length) return;
+    hits = hist.map(historyFeature);
+    active = 0;
+    historyMode = true;
+    render();
+  }
+
+  function render() {
+    list.innerHTML = "";
+    if (!hits.length) {
+      list.hidden = true;
+      return;
+    }
+    if (historyMode) list.appendChild(textEl("li", "Zuletzt verwendet", "geo-hist-head"));
+    hits.forEach((f, i) => {
+      const { name, sub } = featureLabel(f.properties || {});
+      const li = document.createElement("li");
+      li.dataset.i = String(i);
+      if (i === active) li.classList.add("active");
+      const textWrap = document.createElement("div");
+      textWrap.className = "geo-text";
+      textWrap.appendChild(document.createTextNode(name));
+      if (sub) textWrap.appendChild(textEl("span", sub, "geo-sub"));
+      li.appendChild(textWrap);
+      if (historyMode) {
+        const isFav = !!f.properties.fav;
+        const star = textEl("button", isFav ? "★" : "☆", "geo-star");
+        star.type = "button";
+        star.classList.toggle("fav", isFav);
+        star.setAttribute("aria-label", isFav ? "Favorit entfernen" : "Als Favorit markieren");
+        star.addEventListener("mousedown", (e) => {
+          e.preventDefault(); // keep focus
+          e.stopPropagation(); // nicht als Klick auf den Eintrag werten
+          const [lon, lat] = f.geometry.coordinates;
+          const next = !isFav;
+          setFavorite(lat, lon, next);
+          f.properties.fav = next;
+          render();
+        });
+        li.appendChild(star);
+      }
+      li.addEventListener("mousedown", (e) => {
+        e.preventDefault(); // keep focus; avoid blur-before-click
+        pick(i);
+      });
+      list.appendChild(li);
+    });
+    list.hidden = false;
+  }
+
+  function pickFeature(f) {
+    if (!f?.geometry?.coordinates) return;
+    const [lon, lat] = f.geometry.coordinates;
+    const { name, sub } = featureLabel(f.properties || {});
+    input.value = sub ? `${name}, ${sub}` : name;
+    hide();
+    setStart(lat, lon);
+    map.setView([lat, lon], Math.max(map.getZoom(), 11));
+  }
+
+  function pick(i) {
+    pickFeature(hits[i]);
+  }
+
+  // Aktuell eingegebenen Text übernehmen — Koordinate direkt, sonst den
+  // markierten Treffer der offenen Trefferliste. Für den Enter-Handler und
+  // als Fallback, falls "Vorhersage laden" gedrückt wird, während noch ein
+  // unbestätigter Text im Feld steht.
+  function commitPending() {
+    const q = input.value.trim();
+    if (!q) return false;
+    const coord = parseCoordInput(q);
+    if (coord) {
+      pickFeature(coordFeature(coord.lat, coord.lon));
+      return true;
+    }
+    if (!list.hidden && hits.length && active >= 0) {
+      pick(active);
+      return true;
+    }
+    return false;
+  }
+
+  // Für einen tatsächlich berechneten Punkt in die Historie eintragen —
+  // unabhängig davon, wie er gesetzt wurde (Rechtsklick, Ziehen, Suche,
+  // Koordinate). Versucht per Reverse-Geocoding einen Ortsnamen zu finden,
+  // sonst die Koordinate als Label.
+  async function recordHistory(lat, lon) {
+    // Ohne diese Sperre würde wiederholtes Setzen desselben Punkts (z. B.
+    // erneutes Laden) die Historie (und Photon) mit Wiederholungen fluten.
+    if (lastRecorded && Math.abs(lastRecorded.lat - lat) < 1e-4
+      && Math.abs(lastRecorded.lon - lon) < 1e-4) return;
+    lastRecorded = { lat, lon };
+    let name, sub;
+    try {
+      const label = await photonReverseLabel(lat, lon);
+      if (label) ({ name, sub } = label);
+    } catch { /* Reverse-Geocoding optional — Koordinate reicht als Fallback */ }
+    if (!name) ({ name, sub } = featureLabel(coordFeature(lat, lon).properties));
+    addToHistory({ lat, lon, name, sub });
+  }
+
+  const runSearch = debounce(async () => {
+    const q = input.value.trim();
+    if (q.length < 2) {
+      hide();
+      return;
+    }
+    historyMode = false;
+    const coord = parseCoordInput(q);
+    if (coord) {
+      hits = [coordFeature(coord.lat, coord.lon)];
+      active = 0;
+      render();
+      return;
+    }
+    try {
+      hits = await photonSearch(q);
+      active = hits.length ? 0 : -1;
+      render();
+    } catch {
+      hide();
+    }
+  }, 300);
+
+  input.addEventListener("input", () => {
+    if (!input.value.trim()) {
+      showHistory();
+      return;
+    }
+    runSearch();
+  });
+  input.addEventListener("focus", showHistory);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitPending();
+      return;
+    }
+    if (list.hidden || !hits.length) {
+      if (e.key === "Escape") hide();
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      active = (active + 1) % hits.length;
+      render();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      active = (active - 1 + hits.length) % hits.length;
+      render();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      hide();
+    }
+  });
+  input.addEventListener("blur", () => {
+    // Delay so mousedown on a result can fire first.
+    setTimeout(hide, 150);
+  });
+
+  return { recordHistory, commitPending };
+}

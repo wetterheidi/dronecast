@@ -24,9 +24,10 @@
       <span class="label" id="pointlabel">Operationsraum</span>
       <span id="pointpos" class="mono">Rechtsklick / Long-Press / ziehen</span>
     </div>
-    <div class="row">
-      <input id="coordinput" type="text" placeholder="48.1234, 11.5678 oder 32UPU6347420615" />
-      <button id="coordgo" type="button">Gehe zu</button>
+    <div class="geocode-wrap">
+      <input type="search" id="geocode" aria-label="Ort oder Koordinaten suchen"
+             placeholder="Ort oder Koordinaten (Dezimal/MGRS) …" autocomplete="off" />
+      <ul id="geocode-results" role="listbox" aria-label="Suchergebnisse" hidden></ul>
     </div>
 
     <button id="load" disabled>Vorhersage laden</button>

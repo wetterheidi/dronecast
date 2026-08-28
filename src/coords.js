@@ -1,7 +1,7 @@
 /**
  * Positions-Eingabe als Text: Dezimalgrad oder MGRS, als Alternative zum
- * Kartenklick. Angelehnt an DZMasters parseQueryAsCoordinates, ohne
- * Favoriten/Historie (hier nicht gebraucht).
+ * Kartenklick. Angelehnt an DZMasters parseQueryAsCoordinates. Favoriten/
+ * Historie stehen in geocode.js.
  */
 import * as mgrs from "mgrs";
 
