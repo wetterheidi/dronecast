@@ -34,6 +34,7 @@ import {
 import { refineCloudBase } from "meteokit/clouds";
 import { placeWindBarb, CHART_PX_PER_HOUR, CHART_BARB_SIZE } from "meteokit/windbarb";
 import { placeWxSymbol, wmoWeatherCodeToWx, wmoWeatherCategory } from "meteokit/wwsymbols";
+import { zoneTag, zHours, zMinutes, zDayKey, fmtDate as fmtZDate, fmtClock as fmtZClock } from "meteokit/timefmt";
 
 const KT_PER_MS = 1.94384;
 
@@ -99,7 +100,7 @@ export function renderMeteogram(host, model) {
     }));
   }
   // Tagestrenner + Datum, Stundenmarken (06/12/18) oben; Zeitzonen-Hinweis Eck oben links.
-  svg.append(txt(2, 10, "loc", MUTED, 9, "start"));
+  svg.append(txt(2, 10, zoneTag(), MUTED, 9, "start"));
   drawTimeAxis(svg, time, x, stackTop, stackBot);
 
   let yTop = TOPAXIS;
@@ -153,7 +154,7 @@ function setupHover(svg, m, ctx) {
     const base = refineCloudBase(V.temperature_2m[i], V.dew_point_2m[i], V.cloud_cover_low[i],
       m.lowestLayer ? m.lowestLayer[i] : null);
     const lines = [
-      new Date(time[i] * 1000).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" }),
+      fmtZClock(new Date(time[i] * 1000), { weekday: "short", hour: "2-digit", minute: "2-digit" }),
       `Temp ${F(V.temperature_2m[i], fmtTemp)} · Td ${F(V.dew_point_2m[i], fmtTemp)}`,
       `Feuchte ${pct(V.relative_humidity_2m[i])} · Nied. ${F(V.precipitation[i], (p) => `${p < 1 ? p.toFixed(2) : p.toFixed(1)} mm/h`)}`,
       `Wind ${F(V.wind_direction_10m[i], fmtDir)} ${F(spd, fmtWind)} Böen ${F(gust, fmtWind)}`,
@@ -385,13 +386,13 @@ function drawTimeAxis(svg, time, x, yTop, yBot) {
   let lastDay = null;
   for (let i = 0; i < time.length; i++) {
     const d = new Date(time[i] * 1000);
-    const h = d.getHours();
-    if (d.getMinutes() !== 0) continue;
-    const dayKey = d.toDateString();
+    const h = zHours(d);
+    if (zMinutes(d) !== 0) continue;
+    const dayKey = zDayKey(d);
     if (dayKey !== lastDay) {
       lastDay = dayKey;
       svg.append(mk("line", { x1: x(time[i]), y1: yTop, x2: x(time[i]), y2: yBot, stroke: "#c9c8c2", "stroke-width": 1, "stroke-dasharray": "2 3" }));
-      const label = d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+      const label = fmtZDate(d, { day: "2-digit", month: "2-digit" });
       svg.append(txt(x(time[i]) + 3, 12, label, INK, 11, "start", 600));
     } else if (h === 6 || h === 12 || h === 18) {
       svg.append(mk("line", { x1: x(time[i]), y1: yTop - 3, x2: x(time[i]), y2: yTop, stroke: MUTED, "stroke-width": 1 }));
@@ -454,8 +455,7 @@ function moonGlyph(g, cx, cy, r, illum, waxing) {
 }
 
 function hhmm(ms) {
-  const d = new Date(ms);
-  return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  return `${String(zHours(new Date(ms))).padStart(2, "0")}:${String(zMinutes(new Date(ms))).padStart(2, "0")}`;
 }
 
 function yTicks(g, lo, hi, y, x, color, fmt = (v) => String(Math.round(v))) {

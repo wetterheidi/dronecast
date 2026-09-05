@@ -32,6 +32,7 @@ import { settings, updateSetting } from "./settings.js";
 import {
   subscribe as subscribeTime, getMasterMs, isNow, resetToNow, setSliderGrid, HOUR_MS, QUARTER_MS,
 } from "./timeController.js";
+import { fmtDDMMYYHHMM, zoneTag } from "meteokit/timefmt";
 
 /* global L */
 
@@ -57,15 +58,6 @@ export function initMapLayers(map) {
   let playing = false;
   let playTimer = null;
   let playPos = 0;
-
-  function fmtLocalTimestamp(d) {
-    const dd = String(d.getDate()).padStart(2, "0");
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const yy = String(d.getFullYear()).slice(-2);
-    const hh = String(d.getHours()).padStart(2, "0");
-    const mi = String(d.getMinutes()).padStart(2, "0");
-    return `${dd}.${mm}.${yy} ${hh}:${mi}`;
-  }
 
   // Statuszeile unter Radar/Satellit. Normal = unauffälliger Hinweistext;
   // warn = rot hervorgehoben (v. a. "kein Bild für diesen Zeitpunkt" — das
@@ -129,8 +121,8 @@ export function initMapLayers(map) {
       radarLayer.addTo(map);
     }
     const isNowcast = (meta.radar.nowcast || []).some((f) => f.time === frame.time);
-    const frameTxt = fmtLocalTimestamp(new Date(frame.time * 1000));
-    setHint(el("ml-radar-time"), `Angezeigt: ${frameTxt} loc${isNowcast ? " ▶ Nowcast" : ""}`);
+    const frameTxt = fmtDDMMYYHHMM(new Date(frame.time * 1000));
+    setHint(el("ml-radar-time"), `Angezeigt: ${frameTxt} ${zoneTag()}${isNowcast ? " ▶ Nowcast" : ""}`);
   }
 
   // Jenseits dieser Toleranz gibt es kein passendes Radarbild (Radar reicht nur
@@ -155,7 +147,7 @@ export function initMapLayers(map) {
       const target = el("ml-radar-time");
       const first = allFrames[0], last = allFrames[allFrames.length - 1];
       const rangeTxt = first && last
-        ? ` (verfügbar: ${fmtLocalTimestamp(new Date(first.time * 1000))} – ${fmtLocalTimestamp(new Date(last.time * 1000))} loc)`
+        ? ` (verfügbar: ${fmtDDMMYYHHMM(new Date(first.time * 1000))} – ${fmtDDMMYYHHMM(new Date(last.time * 1000))} ${zoneTag()})`
         : "";
       const msg = `Kein Radarbild für diesen Zeitpunkt${rangeTxt}`;
       if (isNow()) setHint(target, msg, { warn: true });
@@ -267,7 +259,7 @@ export function initMapLayers(map) {
   function playStep() {
     if (!playing || !playTimeline) return;
     const t = playTimeline[playPos];
-    const parts = [`${fmtLocalTimestamp(new Date(t))} loc`];
+    const parts = [`${fmtDDMMYYHHMM(new Date(t))} ${zoneTag()}`];
 
     // Radar: nächsten Frame zum Loop-Zeitpunkt zeigen (falls im Bereich).
     if (playCtx.allFrames) {
@@ -394,7 +386,7 @@ export function initMapLayers(map) {
     if (ext && (targetMs > ext.endMs + ext.stepMs || targetMs < ext.startMs - ext.stepMs)) {
       if (satLayer) { map.removeLayer(satLayer); satLayer = null; }
       const target = el("ml-sat-time");
-      const rangeTxt = ` (verfügbar: ${fmtLocalTimestamp(new Date(ext.startMs))} – ${fmtLocalTimestamp(new Date(ext.endMs))} loc)`;
+      const rangeTxt = ` (verfügbar: ${fmtDDMMYYHHMM(new Date(ext.startMs))} – ${fmtDDMMYYHHMM(new Date(ext.endMs))} ${zoneTag()})`;
       const msg = `Kein Satellitenbild für diesen Zeitpunkt${rangeTxt}`;
       if (isNow()) setHint(target, msg, { warn: true });
       else setHintWithJumpNow(target, msg);
@@ -426,7 +418,7 @@ export function initMapLayers(map) {
     satLayer.addTo(map);
 
     if (resolvedMs != null) {
-      setHint(el("ml-sat-time"), `Angezeigt: ${fmtLocalTimestamp(new Date(resolvedMs))} loc`);
+      setHint(el("ml-sat-time"), `Angezeigt: ${fmtDDMMYYHHMM(new Date(resolvedMs))} ${zoneTag()}`);
     }
   }
 

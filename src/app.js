@@ -6,7 +6,9 @@ import { WindField } from "./windfield.js";
 import { fetchSurface, fetchModelRunInit, nearestIndex, nearestIndexOrNull } from "meteokit/weather";
 import {
   initTimeControls, setRange, getMasterMs, setMasterMs, subscribe as subscribeTime, HOUR_MS,
+  isNow,
 } from "./timeController.js";
+import { fmtClock, zoneTag } from "meteokit/timefmt";
 import { renderMeteogram } from "./meteogram.js";
 import { fetchColumn, buildField, sliceColumnAtTime } from "meteokit/column";
 import { cloudCeiling, cloudLayers, classifyFog } from "meteokit/clouds";
@@ -483,10 +485,10 @@ function updateModelRunHint() {
     hint.textContent = "Modelllauf: nicht verfügbar";
     return;
   }
-  const label = new Date(t * 1000).toLocaleString("de-DE", {
+  const label = fmtClock(new Date(t * 1000), {
     weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
   });
-  hint.textContent = `Modelllauf: ${label} Uhr`;
+  hint.textContent = `Modelllauf: ${label} Uhr ${zoneTag()}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -511,7 +513,7 @@ async function renderNow() {
   const i = nearestIndex(surface.time, tMs);
   const at = (name) => (surface.vars[name] ? surface.vars[name][i] : null);
   const time = surface.time.length
-    ? new Date(surface.time[i] * 1000).toLocaleString("de-DE", {
+    ? fmtClock(new Date(surface.time[i] * 1000), {
         weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
       })
     : "–";
@@ -528,7 +530,7 @@ async function renderNow() {
   if (gen !== renderNowGen) return; // durch neueren Aufruf überholt
 
   const rows = [];
-  rows.push(`<div class="now-time">Gültig (Modellstunde): ${time} loc</div>`);
+  rows.push(`<div class="now-time">Gültig (Modellstunde): ${time} ${zoneTag()}</div>`);
 
   // Modell-Orographie vs. echtes Gelände: großer Unterschied = lokales
   // Gelände vom Gitter nicht aufgelöst, Wind-auf-Höhe-Werte mit Vorsicht.
@@ -843,7 +845,7 @@ async function openWindspinne() {
 function renderWs() {
   if (!state.data?.col) return;
   const slice = sliceColumnAtTime(state.data.col, getMasterMs() / 1000);
-  const timeTxt = new Date(getMasterMs()).toLocaleString("de-DE", {
+  const timeTxt = fmtClock(new Date(getMasterMs()), {
     weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
   });
   el("windspinne").update({
@@ -854,7 +856,7 @@ function renderWs() {
     // künftiger Host für andere Aktivitäten (z. B. Fallschirmspringer) würde
     // hier eigene Grenzwerte übergeben statt WIND_FILL_STOPS.
     colorStops: WIND_FILL_STOPS,
-    subtitle: `${el("pointpos").textContent} · gültig ${timeTxt} loc`,
+    subtitle: `${el("pointpos").textContent} · gültig ${timeTxt} ${zoneTag()}`,
     exportNameParts: ["windspinne", settings.model, state.point?.lat, state.point?.lon, Math.round(getMasterMs() / 1000)],
   });
 }
@@ -1358,6 +1360,7 @@ function initSettings() {
   el("set-unitheight").value = settings.unitHeight;
   el("set-unitwind").value = settings.unitWind;
   el("set-unittemp").value = settings.unitTemp;
+  el("set-timezone").value = settings.timeDisplay;
 
   // Modellwechsel ändert die Datenbasis grundlegend (anderes Gitter/andere API).
   // Ist ein Punkt geladen, sofort automatisch neu abrufen statt auf den
@@ -1390,6 +1393,16 @@ function initSettings() {
   bind("set-unitheight", "unitHeight", () => { syncMaxHeightInput(); refreshViews(); });
   bind("set-unitwind", "unitWind", refreshViews);
   bind("set-unittemp", "unitTemp", refreshViews);
+  // Zeitzone betrifft nur die Anzeige (Werte/Raster unverändert) -- über
+  // `setMasterMs` mit unveränderter Zeit einmal alle Zeit-Subscriber
+  // anstoßen (Nowcasting-Layer, Zeitregler-Label, Produkt-Views), statt jede
+  // Anzeigestelle einzeln neu zu verdrahten. `follow: isNow()` erhält den
+  // „Jetzt"-Zustand, den `setMasterMs` sonst zurücksetzen würde.
+  bind("set-timezone", "timeDisplay", () => {
+    setMasterMs(getMasterMs(), { committed: true, follow: isNow() });
+    updateModelRunHint();
+    refreshViews();
+  });
 }
 
 // Anzeige (Einheiten) neu rendern, ohne Daten neu zu laden.

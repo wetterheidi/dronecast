@@ -61,7 +61,7 @@ import { nearestIndex } from "meteokit/weather";
 import { subscribe as subscribeTime, getMasterMs } from "./timeController.js";
 import {
   round5, firstFinite, classFor, hex, bilin, fillBlock,
-  buildGrid, debounce, throttle, sleep, qfeAtTarget,
+  buildGrid, debounce, throttle, sleep, qfeAtTarget, fmtOverlayValidAt,
 } from "./overlayshared.js";
 
 /* global L */
@@ -598,10 +598,7 @@ export function initDemOverlay(map) {
   // überschreibt er die Anzeige der anderen Layer mit „–".
   function updateTimeLabel() {
     if (!settings.demLayerOn || settings.demLayerQuantity !== "pressure" || !times?.length) return;
-    const d = new Date(times[timeIdx] * 1000);
-    el("mf-time-display").textContent = `Gültig: ${d.toLocaleString("de-DE", {
-      weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
-    })} loc`;
+    el("mf-time-display").textContent = fmtOverlayValidAt(new Date(times[timeIdx] * 1000));
   }
 
   // -- Legende / Status ---------------------------------------------------------

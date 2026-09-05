@@ -4,6 +4,7 @@ import {
   SAT_PRODUCTS, WIND_OVERLAY_DEFAULT_DENSITY,
 } from "./config.js";
 import { setUnits } from "meteokit/units";
+import { setTimeZone } from "meteokit/timefmt";
 import { DRONE_PROFILES } from "./droneProfiles.js";
 
 const STORAGE_KEY = "droneforecast.settings.v1";
@@ -13,6 +14,7 @@ const DEFAULTS = {
   unitHeight: "m",
   unitWind: "kmh",
   unitTemp: "c",
+  timeDisplay: "loc", // "loc" = Ortszeit des Browsers | "utc" = UTC/Zulu, s. meteokit/timefmt
   maxHeight: DEFAULT_MAX_HEIGHT, // m AGL
   forecastDays: DEFAULT_FORECAST_DAYS,
   droneProfile: DRONE_PROFILES[0].id,
@@ -103,6 +105,7 @@ export function updateSetting(key, value) {
 
 function applyUnits() {
   setUnits({ height: settings.unitHeight, wind: settings.unitWind, temp: settings.unitTemp });
+  setTimeZone(settings.timeDisplay);
 }
 
 /** Options-Listen fürs Befüllen der Selects im Panel. */

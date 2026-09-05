@@ -47,7 +47,7 @@ import { subscribe as subscribeTime, getMasterMs } from "./timeController.js";
 import { windToDisplay, windUnit } from "meteokit/units";
 import {
   clampNum, round5, classFor, hex, bilin, fillBlock,
-  buildGrid, debounce, throttle, sleep,
+  buildGrid, debounce, throttle, sleep, fmtOverlayValidAt,
 } from "./overlayshared.js";
 
 /* global L */
@@ -475,10 +475,7 @@ export function initGustOverlay(map) {
   // hat, sonst überschreibt er die Anzeige des Wind-Layers mit „–".
   function updateTimeLabel() {
     if (!settings.gustLayerOn || !times?.length) return;
-    const d = new Date(times[timeIdx] * 1000);
-    el("mf-time-display").textContent = `Gültig: ${d.toLocaleString("de-DE", {
-      weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
-    })} loc`;
+    el("mf-time-display").textContent = fmtOverlayValidAt(new Date(times[timeIdx] * 1000));
   }
 
   // -- Legende / Status ---------------------------------------------------------

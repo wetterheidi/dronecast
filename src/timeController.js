@@ -24,6 +24,8 @@
  * Die Masterzeit wird NICHT persistiert — jede Sitzung startet auf „Jetzt".
  */
 
+import { fmtClock, zoneTag } from "meteokit/timefmt";
+
 const el = (id) => document.getElementById(id);
 
 export const HOUR_MS = 60 * 60 * 1000;
@@ -177,9 +179,9 @@ function syncSliderValue() {
 function renderLabel() {
   const lab = el("master-time-label");
   if (lab) {
-    lab.textContent = new Date(masterMs).toLocaleString("de-DE", {
+    lab.textContent = fmtClock(new Date(masterMs), {
       weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
-    }) + " loc";
+    }) + ` ${zoneTag()}`;
   }
   // Das Reglerraster wechselt mit dem Nowcasting — sichtbar machen, sonst
   // ändert sich das Verhalten des Reglers unerklärt unter der Hand. Bewusst mit

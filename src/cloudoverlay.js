@@ -46,7 +46,7 @@ import { heightToDisplay, heightUnit } from "meteokit/units";
 import { bandCoverage, cloudCeiling } from "meteokit/clouds";
 import {
   clampNum, firstFinite, round5, classFor, hex, bilin, fillBlock, fillBlockAlpha,
-  buildGrid, debounce, throttle, sleep,
+  buildGrid, debounce, throttle, sleep, fmtOverlayValidAt,
 } from "./overlayshared.js";
 
 /* global L */
@@ -569,10 +569,7 @@ export function initCloudOverlay(map) {
   // Layer aktiv ist, sonst überschreibt er deren Anzeige mit „–".
   function updateTimeLabel() {
     if (!layerActive() || !times?.length) return;
-    const d = new Date(times[timeIdx] * 1000);
-    el("mf-time-display").textContent = `Gültig: ${d.toLocaleString("de-DE", {
-      weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
-    })} loc`;
+    el("mf-time-display").textContent = fmtOverlayValidAt(new Date(times[timeIdx] * 1000));
   }
 
   // -- Legende / Status --------------------------------------------------------------

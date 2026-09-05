@@ -5,6 +5,7 @@
  */
 
 import { fmtWind, fmtHeight, fmtTemp } from "meteokit/units";
+import { zoneTag, zHours, zDayKey, fmtDate as fmtZDate } from "meteokit/timefmt";
 
 const STATUS_LABEL = { green: "Go", yellow: "Bedingt", red: "No-Go", na: "Prüfen" };
 
@@ -47,9 +48,9 @@ function dateRow(groups) {
 function hourRow(time) {
   const tr = document.createElement("tr");
   tr.className = "gng-hourrow";
-  tr.append(th("Zeit (loc)", "gng-corner"));
+  tr.append(th(`Zeit (${zoneTag()})`, "gng-corner"));
   for (const t of time) {
-    const h = new Date(t * 1000).getHours();
+    const h = zHours(new Date(t * 1000));
     tr.append(th(String(h).padStart(2, "0"), "gng-hour"));
   }
   return tr;
@@ -141,12 +142,12 @@ function dayGroups(time) {
   const groups = [];
   for (const t of time) {
     const d = new Date(t * 1000);
-    const key = d.toDateString();
+    const key = zDayKey(d);
     const last = groups[groups.length - 1];
     if (last && last.key === key) {
       last.count++;
     } else {
-      const label = d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+      const label = fmtZDate(d, { day: "2-digit", month: "2-digit" });
       groups.push({ key, label, count: 1 });
     }
   }

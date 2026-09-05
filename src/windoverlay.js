@@ -74,7 +74,7 @@ import { windToDisplay, windUnit, heightToDisplay, heightUnit } from "meteokit/u
 import { windBarbMarkup } from "meteokit/windbarb";
 import {
   clampNum, firstFinite, round5, classFor, hex, bilin, fillBlock,
-  buildGrid, debounce, throttle, sleep,
+  buildGrid, debounce, throttle, sleep, fmtOverlayValidAt,
 } from "./overlayshared.js";
 
 /* global L */
@@ -727,10 +727,7 @@ export function initWindOverlay(map) {
 
   function updateTimeLabel() {
     if (!times?.length) { el("mf-time-display").textContent = "–"; return; }
-    const d = new Date(times[timeIdx] * 1000);
-    el("mf-time-display").textContent = `Gültig: ${d.toLocaleString("de-DE", {
-      weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
-    })} loc`;
+    el("mf-time-display").textContent = fmtOverlayValidAt(new Date(times[timeIdx] * 1000));
   }
 
   function renderDensityRadios() {

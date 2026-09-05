@@ -50,7 +50,7 @@ import { settings, updateSetting } from "./settings.js";
 import { nearestIndex } from "meteokit/weather";
 import { subscribe as subscribeTime, getMasterMs } from "./timeController.js";
 import { wxSymbolMarkup, WX_SYMBOL_VIEWBOX, wmoWeatherCodeToWx, wmoWeatherCategory } from "meteokit/wwsymbols";
-import { round5, buildGrid, debounce, throttle, sleep } from "./overlayshared.js";
+import { round5, buildGrid, debounce, throttle, sleep, fmtOverlayValidAt } from "./overlayshared.js";
 
 /* global L */
 
@@ -377,10 +377,7 @@ export function initWwOverlay(map) {
   // Gemeinsame Zeitanzeige (mf-time-display) mit Wind-/Böen-Layer.
   function updateTimeLabel() {
     if (!settings.wwLayerOn || !times?.length) return;
-    const d = new Date(times[timeIdx] * 1000);
-    el("mf-time-display").textContent = `Gültig: ${d.toLocaleString("de-DE", {
-      weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
-    })} loc`;
+    el("mf-time-display").textContent = fmtOverlayValidAt(new Date(times[timeIdx] * 1000));
   }
 
   // -- Status ---------------------------------------------------------------

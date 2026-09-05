@@ -13,8 +13,17 @@
  */
 
 import { WIND_OVERLAY_BASE_TARGET_PX, WIND_OVERLAY_MAX_POINTS } from "./config.js";
+import { fmtClock, zoneTag } from "meteokit/timefmt";
 
 export const KM_PER_DEG = 111.32; // Erdradius-Näherung für Breite; Länge: KM_PER_DEG·cos(Breite)
+
+// "Gültig: ..." unter den Flächenlayern (Wind/Böen/Wolken/WW/DEM) — identischer
+// Text in allen fünf, daher hier EINMAL statt fünffach kopiert.
+export function fmtOverlayValidAt(d) {
+  return `Gültig: ${fmtClock(d, {
+    weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+  })} ${zoneTag()}`;
+}
 
 // -- Zahlen-Helfer ------------------------------------------------------------
 export function clampNum(x, lo, hi) {
