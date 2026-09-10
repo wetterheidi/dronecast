@@ -1,6 +1,6 @@
 import {
   MODELS, PREVIEW_HEIGHTS, MIN_MAX_HEIGHT, MAX_MAX_HEIGHT, TERRAIN_MISMATCH_WARN_M,
-  AIRSPACE_TILE_URL,
+  AIRSPACE_TILE_URL, API_BASE, SURFACE_API_BASE,
 } from "./config.js";
 import { WindField } from "./windfield.js";
 import { fetchSurface, fetchModelRunInit, nearestIndex, nearestIndexOrNull } from "meteokit/weather";
@@ -166,15 +166,60 @@ function renderCursorReadout() {
   if (parts.length) cursorReadout.textContent = parts.join(" · ");
 }
 const throttledCursorReadout = throttle(renderCursorReadout, 100);
+
+// Koordinaten-/Höhenlabel unten links (wie in trajectories): Cursorposition
+// plus DEM90-Geländehöhe. Lat/Lon kommt direkt aus dem Leaflet-Event, die
+// Höhe ist ein Live-Abruf von /v1/elevation (Michaels Instanz, bei Fehler
+// Fallback auf die öffentliche Instanz — dieselbe Reihenfolge wie bei
+// demoverlay.js). Nach 3 Nachkommastellen gerundeter Position gecacht und
+// debounced, damit Mausbewegen die API nicht flutet; ein Sequenzzähler
+// verhindert, dass eine spät eintreffende Antwort eine neuere Position
+// überschreibt.
+const coordReadout = el("map-coord-readout");
+const coordElevationCache = new Map();
+let coordReadoutSeq = 0;
+const coordElevationKey = (lat, lon) => `${lat.toFixed(3)},${lon.toFixed(3)}`;
+function renderCoordReadout(lat, lon, elevM) {
+  const elevTxt = elevM != null ? `${Math.round(heightToDisplay(elevM))} ${heightUnit()}` : "…";
+  coordReadout.textContent = `${lat.toFixed(5)}°, ${lon.toFixed(5)}° · ${elevTxt}`;
+}
+const fetchCoordElevation = debounce(async (lat, lon) => {
+  const key = coordElevationKey(lat, lon);
+  if (coordElevationCache.has(key)) return;
+  const seq = ++coordReadoutSeq;
+  try {
+    const params = new URLSearchParams({ latitude: lat.toFixed(5), longitude: lon.toFixed(5) });
+    let data;
+    try {
+      data = await (await fetch(`${API_BASE}/v1/elevation?${params}`)).json();
+    } catch {
+      data = await (await fetch(`${SURFACE_API_BASE}/v1/elevation?${params}`)).json();
+    }
+    const elev = Array.isArray(data.elevation) ? data.elevation[0] : data.elevation;
+    coordElevationCache.set(key, Number.isFinite(elev) ? elev : null);
+  } catch {
+    // Höhe ist nur Komfort -- die Koordinaten bleiben auch ohne sie sichtbar.
+  }
+  if (seq === coordReadoutSeq) renderCoordReadout(lat, lon, coordElevationCache.get(key));
+}, 250);
+
 map.on("mousemove", (e) => {
   pendingLatLng = e.latlng;
   throttledCursorReadout();
+  const { lat, lng } = e.latlng;
+  coordReadout.hidden = false;
+  renderCoordReadout(lat, lng, coordElevationCache.get(coordElevationKey(lat, lng)));
+  fetchCoordElevation(lat, lng);
 });
 // pendingLatLng mit leeren, nicht nur die Pille verstecken: throttle() feuert
 // nachlaufend (führend + nachlaufend, s. overlayshared.js) — ein beim Verlassen
 // der Karte noch ausstehender Timer würde sonst kurz danach mit der letzten
 // (noch gültigen) Position erneut rendern und die Pille wieder einblenden.
-map.on("mouseout", () => { pendingLatLng = null; cursorReadout.hidden = true; });
+map.on("mouseout", () => {
+  pendingLatLng = null;
+  cursorReadout.hidden = true;
+  coordReadout.hidden = true;
+});
 
 // Masterzeit: die eine Zeitachse für Bedingungen, numerische Felder und
 // Nowcasting. Nach initMapLayers/initWindOverlay verdrahten — die haben sich

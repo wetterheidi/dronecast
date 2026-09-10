@@ -1,0 +1,447 @@
+<title>DroneForecast Handbuch</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --bg:#f5f8fc;
+    --surface:#ffffff;
+    --surface-alt:#eaf0f8;
+    --border:#d7e2ee;
+    --border-strong:#b9c9dc;
+    --text:#152233;
+    --text-muted:#5c6c7d;
+    --text-faint:#8695a6;
+    --accent:#1c5cab;
+    --accent-ink:#0f3d73;
+    --accent-soft:#e3edfa;
+    --accent-soft-strong:#cfe1f7;
+    --go:#2f9e57;
+    --go-soft:#e4f5ea;
+    --caution:#b9791a;
+    --caution-soft:#fbf0dd;
+    --stop:#c8402f;
+    --stop-soft:#fbe6e2;
+    --shadow: 0 1px 2px rgba(21,34,51,.04), 0 8px 24px -12px rgba(21,34,51,.12);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0e1620;
+      --surface:#141e2a;
+      --surface-alt:#1a2634;
+      --border:#28394b;
+      --border-strong:#34495e;
+      --text:#e7eef7;
+      --text-muted:#9fb0c2;
+      --text-faint:#71859a;
+      --accent:#5ba0ec;
+      --accent-ink:#cfe3fb;
+      --accent-soft:#1a2f47;
+      --accent-soft-strong:#20395470;
+      --go:#57c47d;
+      --go-soft:#123322;
+      --caution:#e7ab48;
+      --caution-soft:#382a11;
+      --stop:#e5695a;
+      --stop-soft:#3a1c17;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0e1620;
+    --surface:#141e2a;
+    --surface-alt:#1a2634;
+    --border:#28394b;
+    --border-strong:#34495e;
+    --text:#e7eef7;
+    --text-muted:#9fb0c2;
+    --text-faint:#71859a;
+    --accent:#5ba0ec;
+    --accent-ink:#cfe3fb;
+    --accent-soft:#1a2f47;
+    --accent-soft-strong:#20395470;
+    --go:#57c47d;
+    --go-soft:#123322;
+    --caution:#e7ab48;
+    --caution-soft:#382a11;
+    --stop:#e5695a;
+    --stop-soft:#3a1c17;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:"Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+    font-size:16px; line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3{
+    font-family:"Barlow Semi Condensed", ui-sans-serif, sans-serif;
+    font-weight:700; letter-spacing:.01em; text-wrap:balance;
+    color:var(--text); margin:0;
+  }
+  .mono{ font-family:"IBM Plex Mono", ui-monospace, monospace; }
+  a{ color:var(--accent); }
+  p{ margin:0 0 .8em; color:var(--text-muted); max-width:64ch; }
+  p:last-child{ margin-bottom:0; }
+
+  /* ---------- Kopfbereich ---------- */
+  .masthead{
+    display:flex; align-items:center; gap:16px;
+    padding:34px clamp(20px,5vw,56px) 26px;
+    border-bottom:1px solid var(--border);
+    background:linear-gradient(180deg, var(--accent-soft) 0%, var(--bg) 100%);
+  }
+  .mark{ flex:none; width:46px; height:46px; border-radius:12px; background:var(--accent); display:flex; align-items:center; justify-content:center; box-shadow:var(--shadow); }
+  .mark svg{ width:26px; height:26px; }
+  .masthead-text .eyebrow{
+    font-family:"IBM Plex Mono", monospace; font-size:.72rem; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--accent-ink); margin:0 0 2px;
+  }
+  .masthead-text h1{ font-size:clamp(1.5rem, 3vw, 1.9rem); }
+  .masthead-text .sub{ color:var(--text-muted); font-size:.95rem; margin-top:2px; max-width:56ch; }
+
+  /* ---------- Layout ---------- */
+  .shell{
+    display:grid;
+    grid-template-columns:230px minmax(0,760px);
+    gap:48px;
+    max-width:1080px;
+    margin:0 auto;
+    padding:36px clamp(20px,5vw,56px) 80px;
+    justify-content:center;
+  }
+  nav.toc{
+    position:sticky; top:28px; align-self:start;
+    display:flex; flex-direction:column; gap:2px;
+    max-height:calc(100vh - 56px); overflow:auto;
+    padding-right:6px;
+  }
+  nav.toc .toc-label{
+    font-family:"IBM Plex Mono",monospace; font-size:.68rem; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--text-faint); margin:0 0 8px 10px;
+  }
+  nav.toc a{
+    text-decoration:none; color:var(--text-muted); font-size:.87rem;
+    padding:6px 10px; border-radius:7px; border-left:2px solid transparent;
+    transition:background .12s, color .12s, border-color .12s;
+  }
+  nav.toc a:hover{ background:var(--surface-alt); color:var(--text); }
+  nav.toc a.active{ color:var(--accent-ink); border-left-color:var(--accent); background:var(--accent-soft); font-weight:600; }
+
+  main{ min-width:0; display:flex; flex-direction:column; gap:52px; }
+
+  /* ---------- Kurzstart ---------- */
+  .quickstart{
+    background:var(--surface); border:1px solid var(--border); border-radius:16px;
+    padding:26px 28px; box-shadow:var(--shadow);
+  }
+  .quickstart h2{ font-size:1.2rem; margin-bottom:4px; }
+  .quickstart p.lede{ margin-bottom:18px; }
+  .qs-steps{ list-style:none; margin:0; padding:0; display:grid; gap:12px; }
+  .qs-steps li{ display:grid; grid-template-columns:30px 1fr; gap:12px; align-items:baseline; }
+  .qs-steps .n{
+    font-family:"Barlow Semi Condensed"; font-weight:700; font-size:.95rem;
+    color:var(--accent-ink); background:var(--accent-soft); border-radius:8px;
+    width:28px; height:28px; display:flex; align-items:center; justify-content:center;
+  }
+  .qs-steps b{ color:var(--text); }
+
+  /* ---------- Abschnitte ---------- */
+  section{ scroll-margin-top:24px; display:flex; flex-direction:column; gap:14px; }
+  .sec-head{ display:flex; align-items:baseline; gap:12px; border-bottom:1px solid var(--border); padding-bottom:10px; }
+  .sec-num{
+    font-family:"IBM Plex Mono"; font-size:.85rem; color:var(--accent);
+    background:var(--accent-soft); border-radius:6px; padding:2px 7px; flex:none;
+  }
+  section h2{ font-size:1.4rem; }
+  section h3{ font-size:1.05rem; margin-top:6px; color:var(--text); }
+  section > p.intro{ margin-top:-4px; }
+
+  ul.feat, ol.feat{ margin:0; padding-left:1.15em; color:var(--text-muted); display:flex; flex-direction:column; gap:6px; }
+  ul.feat li::marker, ol.feat li::marker{ color:var(--accent); }
+  ul.feat b, ol.feat b{ color:var(--text); }
+
+  /* Steuerelement-Pille: bildet echte UI-Beschriftungen als kleine Kontrollen ab */
+  .ctl{
+    display:inline-flex; align-items:center; gap:4px;
+    font-family:"IBM Plex Mono"; font-size:.82em;
+    background:var(--surface-alt); border:1px solid var(--border-strong);
+    border-radius:6px; padding:1px 7px; color:var(--text); white-space:nowrap;
+  }
+
+  /* Karten für Produkte / Layer */
+  .grid-cards{ display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:14px; }
+  .card{
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:16px 17px; display:flex; flex-direction:column; gap:7px;
+  }
+  .card h3{ font-size:1rem; display:flex; align-items:center; gap:8px; }
+  .card .tag{
+    font-family:"IBM Plex Mono"; font-size:.66rem; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--accent-ink); background:var(--accent-soft); border-radius:5px; padding:2px 6px;
+  }
+  .card p{ font-size:.9rem; margin:0; }
+
+  /* Key/Value Zeilen, wie das App-eigene Statuspanel */
+  .kv{ display:flex; flex-direction:column; border:1px solid var(--border); border-radius:12px; overflow:hidden; background:var(--surface); }
+  .kv-row{ display:grid; grid-template-columns:min(38%,220px) 1fr; gap:10px; padding:10px 15px; border-top:1px solid var(--border); }
+  .kv-row:first-child{ border-top:none; }
+  .kv-row .k{ color:var(--text-muted); font-size:.88rem; }
+  .kv-row .v{ color:var(--text); font-size:.9rem; }
+  .kv-row .v .mono{ color:var(--text); }
+
+  /* Hinweisboxen */
+  .callout{ border-radius:12px; padding:14px 16px; font-size:.9rem; border:1px solid; display:flex; gap:10px; }
+  .callout .ic{ flex:none; font-size:1.05rem; line-height:1.3; }
+  .callout p{ margin:0; color:inherit; max-width:none; }
+  .callout.warn{ background:var(--caution-soft); border-color:color-mix(in srgb, var(--caution) 35%, var(--border)); color:var(--caution); }
+  .callout.warn p{ color:var(--text); }
+  .callout.info{ background:var(--accent-soft); border-color:var(--accent-soft-strong); color:var(--accent-ink); }
+  .callout.info p{ color:var(--text); }
+
+  /* Ampel-Legende */
+  .legend{ display:flex; flex-wrap:wrap; gap:10px 20px; }
+  .legend .item{ display:flex; align-items:center; gap:8px; font-size:.88rem; color:var(--text-muted); }
+  .legend .dot{ width:13px; height:13px; border-radius:4px; flex:none; }
+  .dot.go{ background:var(--go); } .dot.caution{ background:var(--caution); } .dot.stop{ background:var(--stop); } .dot.na{ background:var(--text-faint); }
+
+  table.limits{ width:100%; border-collapse:collapse; font-size:.87rem; }
+  table.limits th, table.limits td{ text-align:left; padding:7px 10px; border-top:1px solid var(--border); }
+  table.limits thead th{ border-top:none; color:var(--text-faint); font-weight:600; font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
+  table.limits td{ color:var(--text-muted); }
+  table.limits td:first-child{ color:var(--text); }
+  .table-wrap{ overflow-x:auto; border:1px solid var(--border); border-radius:12px; background:var(--surface); }
+  .table-wrap table{ margin:0; }
+  .table-wrap table.limits th, .table-wrap table.limits td{ border-top:1px solid var(--border); white-space:nowrap; }
+
+  footer.disclaimer{
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    padding:20px 24px; font-size:.86rem; color:var(--text-muted);
+  }
+  footer.disclaimer b{ color:var(--text); }
+
+  @media (max-width: 860px){
+    .shell{ grid-template-columns:1fr; }
+    nav.toc{ position:static; flex-direction:row; flex-wrap:wrap; max-height:none; padding:0; }
+    nav.toc a{ border-left:none; border-bottom:2px solid transparent; }
+    nav.toc a.active{ border-left-color:transparent; border-bottom-color:var(--accent); }
+    nav.toc .toc-label{ display:none; }
+  }
+</style>
+
+<header class="masthead">
+  <div class="mark" aria-hidden="true">
+    <svg viewBox="0 0 64 64" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round">
+      <circle cx="32" cy="32" r="6"/>
+      <path d="M20 20 h-6 M44 20 h6 M20 44 h-6 M44 44 h6"/>
+      <circle cx="14" cy="20" r="5"/><circle cx="50" cy="20" r="5"/>
+      <circle cx="14" cy="44" r="5"/><circle cx="50" cy="44" r="5"/>
+      <path d="M26 26 L38 38 M38 26 L26 38"/>
+    </svg>
+  </div>
+  <div class="masthead-text">
+    <p class="eyebrow">Bedienungsanleitung</p>
+    <h1>DroneForecast</h1>
+    <p class="sub">Flugwetter für Drohnenbediener — ein Operationspunkt, eine Zeitachse, alle Produkte darunter.</p>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="toc" id="toc">
+    <p class="toc-label">Inhalt</p>
+    <a href="#grundprinzip">Grundprinzip</a>
+    <a href="#punkt">1 · Operationspunkt</a>
+    <a href="#zeit">2 · Zeitachse</a>
+    <a href="#punktvorhersage">3 · Punktvorhersage</a>
+    <a href="#produkte">4 · Vorhersageprodukte</a>
+    <a href="#nowcasting">5 · Nowcasting</a>
+    <a href="#kartenlayer">6 · Numerische Vorhersagen</a>
+    <a href="#einstellungen">7 · Einstellungen</a>
+    <a href="#kartenwerkzeuge">8 · Kartenwerkzeuge</a>
+    <a href="#profile">9 · Drohnenprofile &amp; Go/No-Go</a>
+    <a href="#hinweise">Wichtige Hinweise</a>
+  </nav>
+
+  <main>
+
+    <div class="quickstart" id="grundprinzip">
+      <h2>Kurzstart</h2>
+      <p class="lede">Vier Schritte bis zur ersten Bewertung.</p>
+      <ol class="qs-steps">
+        <li><span class="n">1</span><span><b>Punkt setzen</b> — Rechtsklick auf die Karte (Desktop) oder kurz gedrückt halten (Touch), alternativ über die Suche oben.</span></li>
+        <li><span class="n">2</span><span><b><span class="ctl">Vorhersage laden</span></b> anklicken.</span></li>
+        <li><span class="n">3</span><span><b>Zeitpunkt wählen</b> auf der Zeitachse — oder mit <span class="ctl">Jetzt</span> auf den aktuellen Zeitpunkt zurückspringen.</span></li>
+        <li><span class="n">4</span><span><b>Produkt öffnen</b>, z. B. <span class="ctl">Tabelle (Go/No-Go)</span> für die stundenweise Ampel-Bewertung gegen ein Drohnenprofil.</span></li>
+      </ol>
+    </div>
+
+    <section>
+      <div class="sec-head"><h2>Grundprinzip: eine Masterzeit</h2></div>
+      <p class="intro">DroneForecast arbeitet mit genau <b>einem Operationspunkt</b> und <b>einer gemeinsamen Zeitachse</b> (der „Masterzeit"). Jede Stellung des Zeitreglers gilt gleichzeitig für die Punktvorhersage, alle numerischen Kartenlayer und — sofern aktiv — Radar/Satellit. Das verhindert, dass auf der Karte unbemerkt Daten unterschiedlicher Zeitpunkte gemischt werden. Einzige Ausnahmen: GRAMET zeigt ohnehin den gesamten Zeitraum auf einmal (nur die Cursorlinie folgt der Masterzeit), und Radar/Satellit rasten bei aktivem Nowcasting zusätzlich auf 15-Minuten-Schritte, alle übrigen Produkte auf volle Stunden.</p>
+    </section>
+
+    <section id="punkt">
+      <div class="sec-head"><span class="sec-num">1</span><h2>Operationspunkt setzen</h2></div>
+      <p class="intro">Der Operationspunkt ist die Stelle, für die die Punktvorhersage und alle Produkte gerechnet werden. Er lässt sich auf drei Wegen setzen oder verschieben:</p>
+      <ul class="feat">
+        <li><b>Rechtsklick</b> auf die Karte (Desktop). Ein Linksklick verschiebt den Punkt bewusst nicht — damit die Zeichenwerkzeuge (Abschnitt 8) den Marker nicht versehentlich verschieben.</li>
+        <li><b>Long-Press</b> (~0,5 s gedrückt halten, ohne zu wischen) auf Touch-Geräten als Ersatz für den Rechtsklick.</li>
+        <li><b>Marker ziehen</b> — der gesetzte Punkt ist selbst greifbar; beim Loslassen wird automatisch neu geladen.</li>
+        <li><b>Suchfeld</b> <span class="ctl">Ort oder Koordinaten (Dezimal/MGRS) …</span> oben im Bedienfeld: Ortsname, Dezimalkoordinaten oder MGRS-Angabe. Zuletzt verwendete Orte erscheinen beim Fokussieren des Felds als Verlauf; per <span class="mono">☆</span>-Symbol lässt sich ein Eintrag dauerhaft als Favorit markieren (<span class="mono">★</span>).</li>
+      </ul>
+      <p>Die aktuelle Position steht als <span class="ctl">Operationsraum</span>-Zeile im Kopf des Bedienfelds. Nach dem Setzen wird <span class="ctl">Vorhersage laden</span> aktiv; beim Setzen über Karte oder Marker wird automatisch sofort geladen.</p>
+    </section>
+
+    <section id="zeit">
+      <div class="sec-head"><span class="sec-num">2</span><h2>Zeitachse (Masterzeit)</h2></div>
+      <p class="intro">Der Regler unter <span class="ctl">Zeitpunkt</span> bestimmt, für welche Stunde Punktvorhersage, numerische Layer und Nowcasting angezeigt werden.</p>
+      <div class="kv">
+        <div class="kv-row"><span class="k"><span class="ctl">− 1 h</span> / <span class="ctl">+ 1 h</span></span><span class="v">Auf die vorherige/nächste volle Stunde springen.</span></div>
+        <div class="kv-row"><span class="k">Schieberegler</span><span class="v">Frei innerhalb des geladenen Zeitraums (00 Uhr UTC des aktuellen Tages bis zum Ende des eingestellten Zeithorizonts); rastet auf volle Stunden, bei aktivem Radar/Satellit zusätzlich auf 15-Minuten-Schritte.</span></div>
+        <div class="kv-row"><span class="k"><span class="ctl">Jetzt</span></span><span class="v">Setzt Zeitpunkt und alle abhängigen Anzeigen sofort auf den aktuellen Moment zurück.</span></div>
+      </div>
+    </section>
+
+    <section id="punktvorhersage">
+      <div class="sec-head"><span class="sec-num">3</span><h2>Punktvorhersage</h2></div>
+      <p class="intro">Klappt automatisch auf, sobald Daten geladen sind. Zeigt die Modellstunde am Operationspunkt zum aktuellen Masterzeit-Stand:</p>
+      <ul class="feat">
+        <li><b>Orographie</b> — Modellhöhe vs. reales DEM90-Gelände. Weicht beides stark voneinander ab, ist das lokale Gelände vom Modellgitter nicht aufgelöst; die Zeile färbt sich dann warnend, inklusive Hinweis, den Wind-auf-Höhe-Wert entsprechend vorsichtig zu interpretieren.</li>
+        <li><b>QFE (DEM)</b> — Modell-Bodendruck barometrisch auf die reale DEM90-Höhe umgerechnet. Heuristisch (konstante Lapse-Rate, ignoriert reale Schichtung), entsprechend unsicherer bei großer Geländeabweichung.</li>
+        <li><b>Wind auf Höhe</b> — Modelllevel-Wind auf mehreren Vorschauhöhen AGL bis zur eingestellten Vorhersagehöhe, der Kernvorteil gegenüber reinen Oberflächenprognosen.</li>
+        <li><b>Oberfläche</b> — Wind &amp; Böen 10 m, Temperatur, Taupunkt, Bewölkung, Niederschlag, Sicht (falls das Modell sie liefert), CAPE, Nullgradgrenze, Wettercode.</li>
+      </ul>
+    </section>
+
+    <section id="produkte">
+      <div class="sec-head"><span class="sec-num">4</span><h2>Vorhersageprodukte</h2></div>
+      <p class="intro">Sechs Auswertungen desselben Punkts, unter <span class="ctl">Punktvorhersage</span> als Buttons erreichbar. Es ist immer nur ein Produkt gleichzeitig geöffnet.</p>
+      <div class="grid-cards">
+        <div class="card"><h3>Meteogramm <span class="tag">Zeitverlauf</span></h3><p>Klassisches Wetter-Meteogramm am Punkt: Wind, Temperatur, Bewölkung, Niederschlag und Wettersymbole über den gesamten Vorhersagezeitraum, inkl. Mondauf-/-untergang und Mondphase.</p></div>
+        <div class="card"><h3>Cross-Section <span class="tag">Höhe × Zeit</span></h3><p>Vertikalschnitt durch die Atmosphäre am Punkt. Umschaltbar zwischen <span class="ctl">Gesamthöhe</span> und <span class="ctl">bis Flughöhe</span> (eingestellte Vorhersagehöhe).</p></div>
+        <div class="card"><h3>GRAMET <span class="tag">Höhe × Zeit</span></h3><p>Luftfahrt-Meteogramm: Windfiedern, Wolkenschichten, Vereisungs- und Turbulenzgefahr, Cb/TCU-Konvektion und Nullgradgrenze über die Zeit. Die Cursorlinie folgt automatisch der Masterzeit.</p></div>
+        <div class="card"><h3>Windspinne <span class="tag">ein Zeitpunkt</span></h3><p>Polardarstellung von Windrichtung und -geschwindigkeit über der Höhe, für die aktuelle Masterzeit. Zeigt Windscherung/-drehung mit der Höhe auf einen Blick. Export als PNG über <span class="ctl">⭳ PNG</span>.</p></div>
+        <div class="card"><h3>Briefing <span class="tag">Tagesübersicht</span></h3><p>Textzusammenfassung pro Vorhersagetag (Auswahl oben im Overlay). Über <span class="ctl">PDF / Drucken</span> im Druckdialog als PDF sichern oder ausdrucken.</p></div>
+        <div class="card"><h3>Tabelle (Go/No-Go) <span class="tag">Ampel</span></h3><p>Stundenweise Bewertung gegen die Grenzwerte eines Drohnenprofils. Details siehe Abschnitt 9.</p></div>
+      </div>
+    </section>
+
+    <section id="nowcasting">
+      <div class="sec-head"><span class="sec-num">5</span><h2>Nowcasting: Satellit &amp; Radar</h2></div>
+      <p class="intro">Eigener aufklappbarer Bereich im Bedienfeld. Radar und Satellit folgen der Masterzeit und zeigen jeweils die nächstliegende verfügbare Aufnahme (Zeiten in Ortszeit).</p>
+      <ul class="feat">
+        <li><b>Satellitenbild anzeigen</b> — Produktauswahl per Radiobuttons, Deckkraft separat regelbar.</li>
+        <li><b>Niederschlagsradar anzeigen</b> — eigene Deckkraftregelung.</li>
+        <li><span class="ctl">▶ Abspielen</span> — loopt die letzten 2 Stunden der jeweils aktiven Layer (nur Radar, nur Satellit oder beide synchron), ohne die Masterzeit selbst zu verstellen.</li>
+      </ul>
+    </section>
+
+    <section id="kartenlayer">
+      <div class="sec-head"><span class="sec-num">6</span><h2>Numerische Vorhersagen (Kartenlayer)</h2></div>
+      <p class="intro">Flächige Modellparameter auf der Karte, alle unter <span class="ctl">Numerische Vorhersagen</span>. Sie folgen ebenfalls der Masterzeit (nächste verfügbare Modellstunde) und benötigen aus Performancegründen <b>Zoomstufe ≥ 9</b> — darunter erscheint ein Hinweis statt der Fläche.</p>
+      <div class="grid-cards">
+        <div class="card"><h3>Wind (Modelllevel)</h3><p>Windfläche und optional WMO-Windfiedern auf einer frei wählbaren Höhe AGL (natives Modelllevel), samt Farblegende und Gitterdichte-Auswahl.</p></div>
+        <div class="card"><h3>Böen (10 m)</h3><p>Als Fläche oder als Zahlenwerte im Gitter darstellbar.</p></div>
+        <div class="card"><h3>Wolken (Modelllevel)</h3><p>Zwei unabhängig zuschaltbare Größen: <b>Bedeckungsgrad</b> nach Höhenband (tief/mittel/hoch) und <b>Ceiling</b> (Wolkenuntergrenze), Fläche oder Zahlenwerte.</p></div>
+        <div class="card"><h3>Signifikantes Wetter</h3><p>WW-Symbole im Kartenraster (Gewitter, Schauer, Nebel &amp; Co.).</p></div>
+        <div class="card"><h3>Geländehöhe: Modell − DEM90 <span class="tag">Test</span></h3><p>Δh (Modellorographie minus reales DEM90-Gelände, statisch) oder ΔQFE (barometrisch umgerechneter Druckunterschied, folgt der Masterzeit) — zeigt, wo das Modellgitter lokales Gelände nicht auflöst.</p></div>
+      </div>
+      <div class="callout warn">
+        <span class="ic">⚠</span>
+        <p><b>Als heuristisch gekennzeichnet:</b> ΔQFE nimmt eine konstante Lapse-Rate an und ignoriert reale Schichtung (Inversion, Föhn) — bei großem Δh entsprechend unsicherer. Ebenso ist die Böen-/Regengrenze in den Drohnenprofilen (Abschnitt 9) aus der IP-Schutzart grob abgeleitet, keine Herstellerfreigabe für Flug bei Niederschlag.</p>
+      </div>
+    </section>
+
+    <section id="einstellungen">
+      <div class="sec-head"><span class="sec-num">7</span><h2>Einstellungen</h2></div>
+      <p class="intro">Wirken auf alle Produkte und Layer gleichermaßen, werden lokal im Browser gespeichert.</p>
+      <div class="kv">
+        <div class="kv-row"><span class="k">Modell</span><span class="v">ICON-D2 (~2,2 km), ICON-EU (~6,5 km) oder ICON (~13 km, global). Der <span class="ctl">ℹ</span>-Button daneben zeigt den geladenen Modelllauf.</span></div>
+        <div class="kv-row"><span class="k">Vorhersage bis (Höhe AGL)</span><span class="v">Obergrenze für Wind-auf-Höhe-Anzeigen und die Go/No-Go-Bewertung, 120–10 000 m.</span></div>
+        <div class="kv-row"><span class="k">Zeithorizont</span><span class="v">1 bis 5 Tage.</span></div>
+        <div class="kv-row"><span class="k">Einheiten</span><span class="v">Höhe (m/ft), Wind (km/h, m/s, kt), Temperatur (°C/°F) — unabhängig wählbar.</span></div>
+        <div class="kv-row"><span class="k">Zeitanzeige</span><span class="v">Ortszeit (loc) oder UTC.</span></div>
+      </div>
+      <div class="callout info">
+        <span class="ic">ℹ</span>
+        <p>ICON (global) liefert oberhalb von +36 h keine Modelllevel-Winde mehr und generell keine Sichtweite — die Punktvorhersage und Go/No-Go-Tabelle kennzeichnen das dann als Modell-Lücke statt es stillschweigend als „gut" zu werten.</p>
+      </div>
+    </section>
+
+    <section id="kartenwerkzeuge">
+      <div class="sec-head"><span class="sec-num">8</span><h2>Kartenwerkzeuge</h2></div>
+      <ul class="feat">
+        <li><b>Basiskarten &amp; Lufträume</b> — über das native Karten-Ebenensymbol oben rechts: OpenStreetMap oder Esri-Satellitenbild als Untergrund, Lufträume (openflightmaps) als zuschaltbare Referenzebene.</li>
+        <li><b>Zeichenwerkzeug</b> — Symbolleiste oben links auf der Karte: Marker, Linie und Kreis zeichnen, editieren, verschieben, löschen. Linien zeigen dauerhafte Peilungs-/Distanzlabels je Segment (Ein-/Auspeilung, Segment- und Gesamtstrecke), Kreise ihren Radius. Nützlich für Sichtlinien, Abstandsprüfung oder eine grobe Flugroute — <b>nicht</b> für die Wettervorhersage selbst (dafür bleibt Rechtsklick der einzige Weg, den Operationspunkt zu setzen).</li>
+      </ul>
+    </section>
+
+    <section id="profile">
+      <div class="sec-head"><span class="sec-num">9</span><h2>Drohnenprofile &amp; Go/No-Go</h2></div>
+      <p class="intro">Die Go/No-Go-Tabelle bewertet jede Stunde der Vorhersage gegen die Grenzwerte eines Drohnenprofils.</p>
+      <div class="legend">
+        <span class="item"><span class="dot go"></span>Grün — innerhalb der Grenzwerte</span>
+        <span class="item"><span class="dot caution"></span>Gelb — im Pufferbereich vor dem Grenzwert</span>
+        <span class="item"><span class="dot stop"></span>Rot — Grenzwert überschritten</span>
+        <span class="item"><span class="dot na"></span>— Daten fehlen (nie stillschweigend als „grün" gewertet)</span>
+      </div>
+      <h3>Geprüfte Größen</h3>
+      <div class="table-wrap">
+        <table class="limits">
+          <thead><tr><th>Größe</th><th>Herkunft</th></tr></thead>
+          <tbody>
+            <tr><td>Wind 10 m (Boden)</td><td>herstellerbasiert</td></tr>
+            <tr><td>Wind Höhenband (10 m – Flughöhe)</td><td>herstellerbasiert</td></tr>
+            <tr><td>Böen 10 m</td><td>herstellerbasiert</td></tr>
+            <tr><td>Niederschlag</td><td>aus IP-Schutzart abgeleitet, grob</td></tr>
+            <tr><td>Temperatur (Min/Max)</td><td>herstellerbasiert</td></tr>
+            <tr><td>Wolkenbasis</td><td>operationell (VLOS-Platzhalter, für alle Profile gleich)</td></tr>
+            <tr><td>Sicht</td><td>operationell (VLOS-Platzhalter, für alle Profile gleich)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Zusätzlich fließen Vereisungs- und Turbulenzgefahr sowie eine sichtbasierte Nebeldiagnose (dieselbe Quelle wie im GRAMET) in die Zeile „Sonstige Hazards" ein.</p>
+      <h3>Profile verwalten</h3>
+      <p class="intro">Im Overlay <span class="ctl">Tabelle (Go/No-Go)</span> per <span class="ctl">ℹ</span> neben der Profilauswahl erreichbar:</p>
+      <ul class="feat">
+        <li>Werksmodelle (DJI, Wingtra u. a.) sind schreibgeschützt, lassen sich aber <span class="ctl">Duplizieren &amp; bearbeiten</span>.</li>
+        <li>Eigene Profile: <span class="ctl">Bearbeiten</span>, <span class="ctl">Duplizieren</span> oder <span class="ctl">Löschen</span>. Bezeichnung, Kategorie, IP-Schutzart, Gelb-Puffer (%) und die Grenzwerte selbst sind editierbar; Richtung (Maximum/Minimum) und Einheit je Größe bleiben fix.</li>
+        <li><span class="ctl">Neu</span> legt ein leeres eigenes Profil an.</li>
+        <li><span class="ctl">Exportieren</span> / <span class="ctl">Importieren</span> tauscht die eigenen Profile als Datei aus — Werksmodelle werden nie exportiert, importierte Profile immer als „importiert" gekennzeichnet, unabhängig davon, was die Datei behauptet.</li>
+      </ul>
+      <div class="callout warn">
+        <span class="ic">⚠</span>
+        <p>Alle Grenzwerte sind recherchierte Richtwerte, keine rechtsverbindlichen Freigaben. Vor operationellem Einsatz gegen das aktuelle Handbuch des konkreten Geräts und die geltende Betriebsgenehmigung prüfen.</p>
+      </div>
+    </section>
+
+    <footer class="disclaimer" id="hinweise">
+      <p><b>Datenquellen:</b> DWD ICON · Modell-Level-Winde via open-meteo.mah.priv.at, Oberflächenfelder via open-meteo.com · bilinear/linear interpoliert.</p>
+      <p style="margin-top:8px;"><b>Keine amtliche Flugwetterberatung — die Verantwortung liegt beim Piloten.</b> Als heuristisch markierte Werte (ΔQFE, aus IP-Schutzart abgeleiteter Regengrenzwert u. Ä.) ersetzen keine Herstellerangabe und keine amtliche Wetterberatung.</p>
+    </footer>
+
+  </main>
+</div>
+
+<script>
+  (function(){
+    var links = Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
+    var map = {};
+    links.forEach(function(a){
+      var id = a.getAttribute('href').slice(1);
+      var target = document.getElementById(id);
+      if (target) map[id] = a;
+    });
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        var a = map[entry.target.id];
+        if (!a) return;
+        if (entry.isIntersecting) {
+          links.forEach(function(l){ l.classList.remove('active'); });
+          a.classList.add('active');
+        }
+      });
+    }, { rootMargin: '-15% 0px -70% 0px', threshold: 0 });
+    Object.keys(map).forEach(function(id){ io.observe(document.getElementById(id)); });
+  })();
+</script>
