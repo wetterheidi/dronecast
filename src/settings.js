@@ -32,6 +32,7 @@ const DEFAULTS = {
   radarLayerOn: false,
   radarLayerOpacity: 0.7,
   airspaceLayerOn: false, // Lufträume-Overlay, Ein/Aus über das native Kartenauswahlmenü (app.js)
+  faaAirspaceLayerOn: false, // Lufträume USA (FAA), separates Overlay — open flightmaps deckt Nordamerika nicht ab
   windLayerOn: false,
   windLayerBarbs: true,
   windLayerOpacity: 0.5,

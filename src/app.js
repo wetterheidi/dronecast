@@ -1,6 +1,6 @@
 import {
   MODELS, PREVIEW_HEIGHTS, MIN_MAX_HEIGHT, MAX_MAX_HEIGHT, TERRAIN_MISMATCH_WARN_M,
-  AIRSPACE_TILE_URL, API_BASE, SURFACE_API_BASE,
+  AIRSPACE_TILE_URL, FAA_CLASS_AIRSPACE_URL, FAA_SPECIAL_USE_AIRSPACE_URL, API_BASE, SURFACE_API_BASE,
 } from "./config.js";
 import { WindField } from "./windfield.js";
 import { fetchSurface, fetchModelRunInit, nearestIndex, nearestIndexOrNull } from "meteokit/weather";
@@ -92,13 +92,69 @@ const airspaceLayer = L.tileLayer(AIRSPACE_TILE_URL, {
   updateWhenIdle: true,
   keepBuffer: 2,
 });
-const overlayLayers = { "Lufträume": airspaceLayer };
+// Lufträume USA (FAA, offizielle ArcGIS-Feature-Services, kein Key) —
+// Zwischenlösung für Nordamerika, bis der openAIP-Zugang (weltweit inkl.
+// Kanada) steht. Vektor-Polygone statt Kachel-Bild, Farben sind eine
+// vereinfachte Annäherung an die Sectional-Chart-Konvention (kein Ersatz für
+// die echte FAA-Symbologie). minZoom verhindert das Laden/Rendern tausender
+// Polygone bei Kontinent-Ansicht.
+const FAA_CLASS_COLORS = { B: "#0057b8", C: "#c800c8", D: "#0057b8", E: "#c800c8" };
+function faaClassAirspaceStyle(feature) {
+  const cls = feature.properties.CLASS;
+  return {
+    color: FAA_CLASS_COLORS[cls] || "#888",
+    weight: cls === "B" ? 2.5 : cls === "C" ? 2 : 1.3,
+    opacity: 0.85,
+    fillOpacity: 0,
+    dashArray: cls === "D" || cls === "E" ? "6 4" : null,
+  };
+}
+const FAA_SUA_COLORS = { R: "#c81e1e", P: "#8b0000", MOA: "#b45f06", W: "#1155a3", A: "#b45f06" };
+function faaSpecialUseStyle(feature) {
+  const color = FAA_SUA_COLORS[feature.properties.TYPE_CODE] || "#c81e1e";
+  return { color, weight: 1.3, opacity: 0.8, fillOpacity: 0.06, fillColor: color, dashArray: "5 3" };
+}
+function faaLimitLabel(val, uom, code) {
+  if (code === "SFC") return "SFC";
+  if (uom === "FL") return `FL${val}`;
+  return `${val ?? "?"} ${uom || ""} ${code || ""}`.trim();
+}
+function faaAirspacePopup(layer) {
+  const p = layer.feature.properties;
+  const title = p.NAME || p.IDENT || "Luftraum";
+  const cls = p.CLASS || p.TYPE_CODE || "";
+  const lower = faaLimitLabel(p.LOWER_VAL, p.LOWER_UOM, p.LOWER_CODE);
+  const upper = faaLimitLabel(p.UPPER_VAL, p.UPPER_UOM, p.UPPER_CODE);
+  return `<b>${title}</b>${cls ? ` (${cls})` : ""}<br>${lower} – ${upper}`;
+}
+const faaClassAirspaceLayer = L.esri.featureLayer({
+  url: FAA_CLASS_AIRSPACE_URL,
+  where: "CLASS IN ('B','C','D','E')",
+  style: faaClassAirspaceStyle,
+  minZoom: 6,
+  precision: 5,
+  simplifyFactor: 0.5,
+  attribution: "FAA Aeronautical Information Services",
+}).bindPopup(faaAirspacePopup);
+const faaSpecialUseLayer = L.esri.featureLayer({
+  url: FAA_SPECIAL_USE_AIRSPACE_URL,
+  style: faaSpecialUseStyle,
+  minZoom: 6,
+  precision: 5,
+  simplifyFactor: 0.5,
+  attribution: "FAA Aeronautical Information Services",
+}).bindPopup(faaAirspacePopup);
+const faaAirspaceLayer = L.layerGroup([faaClassAirspaceLayer, faaSpecialUseLayer]);
+
+const overlayLayers = { "Lufträume": airspaceLayer, "Lufträume USA (FAA)": faaAirspaceLayer };
 if (settings.airspaceLayerOn) airspaceLayer.addTo(map);
+if (settings.faaAirspaceLayerOn) faaAirspaceLayer.addTo(map);
 
 L.control.layers(baseLayers, overlayLayers, { position: "topleft" }).addTo(map);
 map.on("baselayerchange", (e) => updateSetting("baseLayer", e.name));
 map.on("overlayadd overlayremove", (e) => {
   if (e.layer === airspaceLayer) updateSetting("airspaceLayerOn", e.type === "overlayadd");
+  if (e.layer === faaAirspaceLayer) updateSetting("faaAirspaceLayerOn", e.type === "overlayadd");
 });
 
 // Geoman-Zeichenwerkzeug (Marker/Linie/Kreis, Peilung/Radius-Labels).

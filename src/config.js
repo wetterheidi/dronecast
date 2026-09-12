@@ -99,6 +99,13 @@ export const MAPLAYERS_TIME_STEP_MIN = 15;
 // Statischer Tile-Layer, kein Key/Proxy nötig, keine Zeitdimension.
 export const AIRSPACE_TILE_URL = "https://nwy-tiles-api.prod.newaydata.com/tiles/{z}/{x}/{y}.png?path=latest/aero/latest";
 
+// Lufträume USA (FAA, offizielle ArcGIS-Feature-Services, kein API-Key nötig).
+// Zwischenlösung, bis der openAIP-Zugang (weltweit inkl. Kanada, aber Key
+// nötig) steht — open flightmaps deckt Nordamerika nicht ab. Kanada bleibt
+// hier weiterhin eine Lücke, da NAV CANADA keinen offenen Kartendienst bietet.
+export const FAA_CLASS_AIRSPACE_URL = "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/Class_Airspace/FeatureServer/0";
+export const FAA_SPECIAL_USE_AIRSPACE_URL = "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/Special_Use_Airspace/FeatureServer/0";
+
 // Wind-Overlay (flächige Darstellung, unterstes Modelllevel ~10 m AGL):
 // Mindest-Zoom, ab dem der Layer Daten holt (Drohnenflüge sind kleinräumig —
 // bei icon_d2 (0,02° ≈ 2,2 km Gitterweite) zeigt Zoom 9 einen ca. 300 km
