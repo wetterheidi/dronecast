@@ -14,6 +14,7 @@ import { fetchColumn, buildField, sliceColumnAtTime } from "meteokit/column";
 import { cloudCeiling, cloudLayers, classifyFog } from "meteokit/clouds";
 import { renderCrossSection } from "meteokit/crosssection";
 import { gridFromColumn, sampleAt, derive } from "meteokit/gramet";
+import { createAirspaceOverlay } from "meteokit/airspace";
 import { ipiAt, ipiCategoryFloor, tfiAt, tfiCategoryFloor } from "meteokit/gramet/hazards";
 import "meteokit/components/gramet-panel";
 import "./components/windspinne-panel/windspinne-panel.js";
@@ -146,16 +147,33 @@ const faaSpecialUseLayer = L.esri.featureLayer({
 }).bindPopup(faaAirspacePopup);
 const faaAirspaceLayer = L.layerGroup([faaClassAirspaceLayer, faaSpecialUseLayer]);
 
-const overlayLayers = { "Lufträume": airspaceLayer, "Lufträume USA (FAA)": faaAirspaceLayer };
+// Lufträume weltweit (openAIP über meteokit/airspace) — eigener Cache-Server
+// statt Live-API (deren bbox-Abfrage ist laut eigener Doku "mainly intended
+// for export use-cases", nicht für Viewport-Live-Abfragen; s.
+// meteokit/tools/airspace-cache/README.md für den Hintergrund).
+const worldAirspace = createAirspaceOverlay(L);
+
+const overlayLayers = {
+  "Lufträume": airspaceLayer,
+  "Lufträume USA (FAA)": faaAirspaceLayer,
+  "Lufträume weltweit (openAIP)": worldAirspace.group,
+};
 if (settings.airspaceLayerOn) airspaceLayer.addTo(map);
 if (settings.faaAirspaceLayerOn) faaAirspaceLayer.addTo(map);
+if (settings.worldAirspaceLayerOn) worldAirspace.group.addTo(map);
 
 L.control.layers(baseLayers, overlayLayers, { position: "topleft" }).addTo(map);
 map.on("baselayerchange", (e) => updateSetting("baseLayer", e.name));
 map.on("overlayadd overlayremove", (e) => {
   if (e.layer === airspaceLayer) updateSetting("airspaceLayerOn", e.type === "overlayadd");
   if (e.layer === faaAirspaceLayer) updateSetting("faaAirspaceLayerOn", e.type === "overlayadd");
+  if (e.layer === worldAirspace.group) {
+    updateSetting("worldAirspaceLayerOn", e.type === "overlayadd");
+    if (e.type === "overlayadd") worldAirspace.attach(map);
+    else worldAirspace.detach(map);
+  }
 });
+if (settings.worldAirspaceLayerOn) worldAirspace.attach(map);
 
 // Geoman-Zeichenwerkzeug (Marker/Linie/Kreis, Peilung/Radius-Labels).
 initGeoman(map);
