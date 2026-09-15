@@ -237,6 +237,34 @@ const BUILTIN_PROFILES = [
       ...OPERATIONAL_LIMITS,
     },
   },
+  {
+    id: "falke",
+    label: "Falke",
+    manufacturer: null,
+    category: "vtol-fixedwing",
+    ipRating: null,
+    marginPct: 0.2,
+    source: null,
+    // Windwerte nutzerseitig vorgegeben (Warnung/Alarm), keine Herstellerangabe.
+    // Vereisung/Turbulenz: "stark" löst bereits systemweit für JEDES Profil
+    // Alarm (rot) aus (feste Schwellen, s. gonogo.js icingRow/turbulenceRow) —
+    // kein separates Profilfeld nötig/vorhanden.
+    // Temperatur, Niederschlag und IP-Rating sind PLATZHALTER (an anderen
+    // Fixed-Wing/VTOL-Profilen orientiert), NICHT herstellerseitig bestätigt —
+    // vor operationellem Einsatz mit dem tatsächlichen Falke-Datenblatt abgleichen.
+    notes: "Windlimit nutzerseitig vorgegeben: Warnung ab 12 m/s, Alarm ab 16 m/s. " +
+      "Vereisung/Turbulenz alarmieren bei Stufe \"stark\" (systemweite Schwelle, gilt für alle Profile). " +
+      "Temperatur, Niederschlag und IP-Rating sind ungeprüfte Platzhalter — vor Einsatz gegen das Falke-Datenblatt verifizieren.",
+    limits: {
+      windSurface: { direction: "max", value: 16, unit: "m/s", marginPct: 0.25 }, // Gelb ab 16·0,75 = 12 m/s
+      windBandMax: { direction: "max", value: 16, unit: "m/s", marginPct: 0.25 },
+      gustSurface: { direction: "max", value: 16, unit: "m/s", marginPct: 0.25 },
+      precipitation: { direction: "max", value: 0.2, unit: "mm/h" }, // Platzhalter, keine IP-Zertifizierung bekannt
+      tempMin: { direction: "min", value: -10, unit: "°C" }, // Platzhalter
+      tempMax: { direction: "max", value: 40, unit: "°C", marginPct: 0.1 }, // Platzhalter
+      ...OPERATIONAL_LIMITS,
+    },
+  },
 ];
 
 export const DRONE_PROFILES = BUILTIN_PROFILES.map((p) => ({ origin: "factory", ...p }));
